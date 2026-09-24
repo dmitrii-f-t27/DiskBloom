@@ -220,7 +220,7 @@ enum ByteFormat {
 
     static func compact(_ bytes: Int64) -> String {
         let amount = Double(max(0, bytes))
-        let units = ["Б", "КБ", "МБ", "ГБ", "ТБ"]
+        let units = ["B", "KB", "MB", "GB", "TB"]
         var value = amount
         var index = 0
         while value >= 1000, index < units.count - 1 {
@@ -233,23 +233,16 @@ enum ByteFormat {
     }
 }
 
-enum RussianPlural {
+enum Plural {
     static func objects(_ count: Int) -> String {
-        form(count, one: "объект", few: "объекта", many: "объектов")
+        form(count, one: "item", many: "items")
     }
 
     static func files(_ count: Int) -> String {
-        form(count, one: "файл", few: "файла", many: "файлов")
+        form(count, one: "file", many: "files")
     }
 
-    private static func form(_ count: Int, one: String, few: String, many: String) -> String {
-        let absolute = abs(count)
-        let lastTwo = absolute % 100
-        if (11...14).contains(lastTwo) { return many }
-        switch absolute % 10 {
-        case 1: return one
-        case 2...4: return few
-        default: return many
-        }
+    private static func form(_ count: Int, one: String, many: String) -> String {
+        abs(count) == 1 ? one : many
     }
 }

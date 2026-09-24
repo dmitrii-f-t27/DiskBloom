@@ -9,9 +9,9 @@ enum DuplicateScanStage: Sendable {
 
     var title: String {
         switch self {
-        case .enumerating: "Поиск файлов"
-        case .hashing: "Полное хеширование"
-        case .verifying: "Побайтовая проверка"
+        case .enumerating: "Finding files"
+        case .hashing: "Full hashing"
+        case .verifying: "Byte-by-byte verification"
         }
     }
 }
@@ -146,11 +146,11 @@ enum DuplicateFinderError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidRoot(let path):
-            "Выбранная область недоступна или небезопасна для анализа: \(path)"
+            "The selected location is unavailable or unsafe to analyze: \(path)"
         case .fileChanged(let path):
-            "Файл изменился во время анализа: \(path)"
+            "File changed during analysis: \(path)"
         case .unreadable(let path):
-            "Не удалось прочитать файл: \(path)"
+            "Could not read file: \(path)"
         }
     }
 }
@@ -526,7 +526,7 @@ struct DuplicateFinderScanner: Sendable {
               Self.metadata(descriptor: rhsDescriptor) == rhs.metadata,
               Self.metadata(at: lhs.url) == lhs.metadata,
               Self.metadata(at: rhs.url) == rhs.metadata else {
-            throw DuplicateFinderError.fileChanged("\(lhs.url.path) или \(rhs.url.path)")
+            throw DuplicateFinderError.fileChanged("\(lhs.url.path) or \(rhs.url.path)")
         }
         return true
     }
