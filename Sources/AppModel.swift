@@ -26,33 +26,33 @@ enum WorkspaceSection: String, Sendable {
 enum SnapshotValidator {
     static func validate(_ node: DiskNode, candidateURL: URL? = nil) -> String? {
         guard !node.isVirtual, let originalURL = node.url else {
-            return "Сводную группу нельзя проверить как отдельный объект."
+            return "An aggregate group cannot be reviewed as a single item."
         }
         if let candidateURL,
            candidateURL.standardizedFileURL.path != originalURL.standardizedFileURL.path {
-            return "Путь объекта изменился после подтверждения. Выполните повторный анализ: \(originalURL.path)"
+            return "The item’s path changed after confirmation. Rescan: \(originalURL.path)"
         }
         let url = candidateURL ?? originalURL
         guard FileManager.default.fileExists(atPath: url.path) else {
-            return "Объект уже не существует: \(url.path)"
+            return "The item no longer exists: \(url.path)"
         }
         do {
             let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey])
             if values.isSymbolicLink == true {
-                return "Объект стал символической ссылкой после сканирования: \(url.path)"
+                return "The item became a symbolic link after scanning: \(url.path)"
             }
             guard let expected = node.resourceIdentifier,
                   let actual = FileIdentity.read(for: url) else {
-                return "Не удалось подтвердить идентичность объекта: \(url.path). Выполните повторный анализ."
+                return "Could not confirm the item’s identity: \(url.path). Rescan."
             }
             if actual != expected {
-                return "Объект изменился после сканирования: \(url.path). Выполните повторный анализ."
+                return "The item changed after scanning: \(url.path). Rescan."
             }
         } catch {
-            return "Не удалось повторно проверить \(url.path): \(error.localizedDescription)"
+            return "Could not re-verify \(url.path): \(error.localizedDescription)"
         }
         guard let expectedFingerprint = node.fingerprint else {
-            return "Для объекта нет полного снимка содержимого: \(url.path). Выполните повторный анализ."
+            return "No complete content snapshot exists for the item: \(url.path). Rescan."
         }
         do {
             var scanner = DiskScanner()
@@ -63,10 +63,10 @@ enum SnapshotValidator {
                   refreshed.size == node.size,
                   refreshed.fileCount == node.fileCount,
                   refreshed.directoryCount == node.directoryCount else {
-                return "Содержимое изменилось после анализа: \(url.path). Просмотрите обновлённые данные перед перемещением."
+                return "Contents changed after analysis: \(url.path). Review the updated data before moving."
             }
         } catch {
-            return "Не удалось повторно измерить \(url.path): \(error.localizedDescription)"
+            return "Could not re-measure \(url.path): \(error.localizedDescription)"
         }
         return nil
     }
@@ -93,43 +93,43 @@ enum DeletionPolicy {
         appURL: URL = Bundle.main.bundleURL
     ) -> String? {
         guard !node.isVirtual, let originalNodeURL = node.url else {
-            return "Сводную группу нельзя перемещать в Корзину. Откройте папку и выберите конкретный объект."
+            return "An aggregate group cannot be moved to the Trash. Open the folder and choose a specific item."
         }
         if let candidateURL,
            candidateURL.standardizedFileURL.path != originalNodeURL.standardizedFileURL.path {
-            return "Путь объекта изменился после подтверждения. Выполните повторный анализ и подтвердите новый путь."
+            return "The item’s path changed after confirmation. Rescan and confirm the new path."
         }
         let url = candidateURL ?? originalNodeURL
         let original = url.standardizedFileURL
         let resolved = original.resolvingSymlinksInPath()
         guard original.path == resolved.path else {
-            return "Символические ссылки и перенаправленные пути доступны только для просмотра."
+            return "Symbolic links and redirected paths are view-only."
         }
-        guard original.path != NSHomeDirectory() else {
-            return "Домашняя папка защищена. Выберите объект внутри неё."
+        guard original.path != UserHome.path else {
+            return "The home folder is protected. Choose an item inside it."
         }
         let scanRoot = scanRootURL.standardizedFileURL.resolvingSymlinksInPath()
         if scanRoot.path == "/" {
-            return "В режиме обзора всего системного диска очистка отключена. Выберите конкретную папку пользователя."
+            return "Cleanup is disabled while viewing the entire system disk. Choose a specific user folder."
         }
         if original.path == scanRoot.path {
-            return "Корень текущего анализа защищён. Выберите конкретный объект внутри него."
+            return "The root of the current analysis is protected. Choose a specific item inside it."
         }
         guard original.path.hasPrefix(scanRoot.path + "/") else {
-            return "Объект больше не находится внутри выбранной области анализа. Выполните повторное сканирование."
+            return "The item is no longer inside the selected analysis area. Rescan."
         }
         if let activeScanURL {
             let activePath = activeScanURL.standardizedFileURL.resolvingSymlinksInPath().path
             if original.path == activePath || activePath.hasPrefix(original.path + "/") {
-                return "Объект содержит текущую область анализа. Сначала вернитесь к родительской карте."
+                return "The item contains the current analysis area. Go back to the parent map first."
             }
         }
-        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true).standardizedFileURL.path
+        let home = UserHome.path
         let isInsideHome = original.path.hasPrefix(home + "/")
         let components = original.pathComponents
         let isInsideExternalVolume = components.count >= 4 && components[1] == "Volumes"
         guard isInsideHome || isInsideExternalVolume else {
-            return "Системные каталоги доступны только для анализа. Очистка разрешена внутри домашней папки или выбранного внешнего диска."
+            return "System directories are available for analysis only. Cleanup is allowed inside the home folder or a selected external disk."
         }
         if isInsideHome {
             let relativePath = String(original.path.dropFirst(home.count + 1))
@@ -141,38 +141,38 @@ enum DeletionPolicy {
                 relativePath == allowedPath || relativePath.hasPrefix(allowedPath + "/")
             }
             if (relativePath == "Library" || relativePath.hasPrefix("Library/")) && !isAllowedLibraryCache {
-                return "Папка Library содержит состояние приложений, профили и облачные данные. DiskBloom разрешает очистку только Caches и Xcode DerivedData."
+                return "The Library folder holds app state, profiles and cloud data. DiskBloom allows cleanup only for Caches and Xcode DerivedData."
             }
             let firstComponent = relativePath.split(separator: "/").first.map(String.init) ?? ""
             if firstComponent.hasPrefix(".") && firstComponent != ".cache" {
-                return "Скрытые каталоги настроек и учётных данных защищены. Для них используйте Finder только после проверки резервной копии."
+                return "Hidden settings and credential directories are protected. Use Finder for them only after checking your backup."
             }
             let protectedHomePaths = ["mlx/profiles", "My Drive"].map { home + "/" + $0 }
             if protectedHomePaths.contains(where: { protectedPath in
                 original.path == protectedPath || original.path.hasPrefix(protectedPath + "/")
             }) {
-                return "Профили и облачные данные защищены. DiskBloom не перемещает их в Корзину."
+                return "Profiles and cloud data are protected. DiskBloom does not move them to the Trash."
             }
         }
         if original.pathComponents.contains(where: { $0 == ".Trash" || $0 == ".Trashes" }) {
-            return "Облачные данные, профили, учётные данные и состояние приложений защищены. DiskBloom не перемещает их в Корзину."
+            return "Cloud data, profiles, credentials and app state are protected. DiskBloom does not move them to the Trash."
         }
         let volumeValues = try? original.resourceValues(forKeys: [.volumeIsLocalKey, .volumeIsReadOnlyKey])
         if volumeValues?.volumeIsLocal != true {
-            return "Очистка сетевых и неопределённых томов отключена."
+            return "Cleanup on network and unknown volumes is disabled."
         }
         if volumeValues?.volumeIsReadOnly == true {
-            return "Этот том доступен только для чтения."
+            return "This volume is read-only."
         }
         guard FileIdentity.deviceID(for: original) == FileIdentity.deviceID(for: scanRoot) else {
-            return "Объект находится на другом томе, чем выбранный корень анализа."
+            return "The item is on a different volume than the selected analysis root."
         }
         let appPath = appURL.standardizedFileURL.path
         if original.path == appPath || appPath.hasPrefix(original.path + "/") {
-            return "Работающее приложение и папка, в которой оно находится, защищены."
+            return "A running application and the folder that contains it are protected."
         }
         guard node.resourceIdentifier != nil else {
-            return "Не удалось надёжно идентифицировать объект. Он доступен только для просмотра."
+            return "The item could not be reliably identified. It is view-only."
         }
         return nil
     }
@@ -218,7 +218,7 @@ final class AppModel: ObservableObject {
     private var reviewGeneration = UUID()
 
     init() {
-        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        let home = UserHome.url
         currentURL = home
         analysisRootURL = home
         sources = Self.discoverSources(home: home)
@@ -231,7 +231,30 @@ final class AppModel: ObservableObject {
 
     func startInitialScan() {
         guard snapshot == nil, !isScanning else { return }
+        // The sandboxed build waits on the welcome screen until the person grants a folder.
+        guard FolderAccess.shared.hasAccess(to: currentURL) else { return }
         startScan(at: currentURL)
+    }
+
+    var needsInitialAccess: Bool { !FolderAccess.shared.hasAccess(to: currentURL) }
+
+    /// Opens a sidebar source, asking for access first in the sandboxed build.
+    func open(source url: URL) {
+        if FolderAccess.shared.hasAccess(to: url) {
+            startScan(at: url)
+            return
+        }
+        let name = url.path == UserHome.path ? "your home folder" : "“\(FileManager.default.displayName(atPath: url.path))”"
+        guard let granted = FolderAccess.shared.requestAccess(
+            to: url,
+            title: "Allow access to \(name)",
+            message: "DiskBloom reads only the folders you allow. Keep \(name) selected and click Grant Access to build the map."
+        ) else { return }
+        startScan(at: granted)
+    }
+
+    func grantHomeAccess() {
+        open(source: UserHome.url)
     }
 
     func selectWorkspaceSection(_ section: WorkspaceSection) {
@@ -245,20 +268,21 @@ final class AppModel: ObservableObject {
 
     func chooseFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Выберите папку или диск для анализа"
-        panel.prompt = "Анализировать"
+        panel.title = "Choose a folder or disk to analyze"
+        panel.prompt = "Analyze"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
         panel.directoryURL = currentURL
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        FolderAccess.shared.remember(url)
         startScan(at: url)
     }
 
     func startScan(at url: URL, resetNavigation: Bool = true, rememberCurrent: Bool = false) {
         guard !isMovingToTrash else {
-            notice = AppNotice(title: "Операция ещё выполняется", message: "Дождитесь завершения перемещения в Корзину.")
+            notice = AppNotice(title: "Operation still in progress", message: "Wait for the move to the Trash to finish.")
             return
         }
         scanTask?.cancel()
@@ -333,7 +357,7 @@ final class AppModel: ObservableObject {
             } catch {
                 if scanGeneration == generation {
                     isScanning = false
-                    notice = AppNotice(title: "Не удалось завершить анализ", message: error.localizedDescription)
+                    notice = AppNotice(title: "Analysis could not be completed", message: error.localizedDescription)
                 }
             }
         }
@@ -347,6 +371,10 @@ final class AppModel: ObservableObject {
     }
 
     func rescan() {
+        guard FolderAccess.shared.hasAccess(to: currentURL) else {
+            open(source: currentURL)
+            return
+        }
         startScan(at: currentURL, resetNavigation: false)
     }
 
@@ -366,8 +394,8 @@ final class AppModel: ObservableObject {
             if collection.count != previousCount {
                 invalidatePendingReview()
                 notice = AppNotice(
-                    title: "Убрано из очереди",
-                    message: "Текущая папка не может находиться внутри объекта из очереди очистки. Конфликтующие элементы убраны."
+                    title: "Removed from queue",
+                    message: "The current folder cannot be inside an item from the cleanup queue. Conflicting items were removed."
                 )
             }
             startScan(at: url, resetNavigation: false, rememberCurrent: true)
@@ -428,7 +456,7 @@ final class AppModel: ObservableObject {
             return
         }
         if let reason = rejectionReason(for: node) {
-            notice = AppNotice(title: "Только просмотр", message: reason)
+            notice = AppNotice(title: "View only", message: reason)
             return
         }
         guard let url = node.url else { return }
@@ -438,8 +466,8 @@ final class AppModel: ObservableObject {
             return path.hasPrefix(selectedPath + "/")
         }) {
             notice = AppNotice(
-                title: "Уже включено",
-                message: "Объект уже входит в выбранную папку «\(parent.name)»."
+                title: "Already included",
+                message: "The item is already part of the selected folder “\(parent.name)”."
             )
             return
         }
@@ -486,7 +514,7 @@ final class AppModel: ObservableObject {
                 showingTrashReview = true
             } else {
                 notice = AppNotice(
-                    title: "Нужен повторный анализ",
+                    title: "Rescan needed",
                     message: failures.joined(separator: "\n")
                 )
             }
@@ -522,7 +550,7 @@ final class AppModel: ObservableObject {
                             return
                         }
                         guard let expectedRelocationIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL) else {
-                            localFailure = "Не удалось зафиксировать идентичность перед перемещением: \(url.path)"
+                            localFailure = "Could not capture the identity before moving: \(url.path)"
                             return
                         }
                         do {
@@ -531,8 +559,8 @@ final class AppModel: ObservableObject {
                             guard let movedURL = resultingURL as URL?,
                                   FileIdentity.relocationIdentifier(for: movedURL) == expectedRelocationIdentity,
                                   (try? movedURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == node.isDirectory else {
-                                let resultPath = (resultingURL as URL?)?.path ?? "путь в Корзине не возвращён"
-                                localFailure = "Не удалось подтвердить идентичность объекта после перемещения: \(url.path). Результат: \(resultPath). Автоматический возврат неизвестного объекта не выполнялся."
+                                let resultPath = (resultingURL as URL?)?.path ?? "no Trash path was returned"
+                                localFailure = "Could not confirm the item’s identity after moving: \(url.path). Result: \(resultPath). No automatic restore of an unknown item was attempted."
                                 return
                             }
                             didMove = true
@@ -558,13 +586,13 @@ final class AppModel: ObservableObject {
             isMovingToTrash = false
             if outcome.failures.isEmpty {
                 notice = AppNotice(
-                    title: "Перемещено в Корзину",
-                    message: "Объектов: \(outcome.successfulPaths.count). Данные можно восстановить через Finder, пока Корзина не очищена."
+                    title: "Moved to Trash",
+                    message: "Items: \(outcome.successfulPaths.count). The data can be restored from Finder until the Trash is emptied."
                 )
             } else {
-                let successLine = outcome.successfulPaths.isEmpty ? "" : "Успешно: \(outcome.successfulPaths.count).\n\n"
+                let successLine = outcome.successfulPaths.isEmpty ? "" : "Succeeded: \(outcome.successfulPaths.count).\n\n"
                 notice = AppNotice(
-                    title: "Операция завершена с замечаниями",
+                    title: "Operation finished with issues",
                     message: successLine + outcome.failures.joined(separator: "\n")
                 )
             }
@@ -592,7 +620,7 @@ final class AppModel: ObservableObject {
         var result = [
             ScanSource(
                 id: "home",
-                name: "Домашняя папка",
+                name: "Home Folder",
                 subtitle: home.path,
                 url: home,
                 icon: "house.fill"
@@ -615,26 +643,26 @@ final class AppModel: ObservableObject {
             let subtitle: String
             let icon: String
             if values?.volumeIsLocal == false {
-                subtitle = "Сетевой том"
+                subtitle = "Network volume"
                 icon = "network"
             } else if values?.volumeIsInternal == true {
-                subtitle = "Внутренний диск"
+                subtitle = "Internal disk"
                 icon = "internaldrive.fill"
             } else if values?.volumeIsRemovable == true {
-                subtitle = "Съёмный том"
+                subtitle = "Removable volume"
                 icon = "externaldrive.badge.plus"
             } else if values?.volumeIsInternal == false {
-                subtitle = "Внешний диск"
+                subtitle = "External disk"
                 icon = "externaldrive.fill"
             } else {
-                subtitle = "Другой том"
+                subtitle = "Other volume"
                 icon = "externaldrive"
             }
-            let labeledSubtitle = values?.volumeIsReadOnly == true ? subtitle + " · только чтение" : subtitle
+            let labeledSubtitle = values?.volumeIsReadOnly == true ? subtitle + " · read-only" : subtitle
             result.append(
                 ScanSource(
                     id: volume.standardizedFileURL.path,
-                    name: name.isEmpty ? "Диск" : name,
+                    name: name.isEmpty ? "Disk" : name,
                     subtitle: labeledSubtitle,
                     url: volume,
                     icon: icon

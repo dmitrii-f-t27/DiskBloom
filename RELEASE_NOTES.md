@@ -1,30 +1,38 @@
-# DiskBloom 1.3.0
+# DiskBloom 1.4.0
 
-Первый публичный выпуск DiskBloom. Версия приложения: 1.3, build 4.
+DiskBloom now speaks English. App version: 1.4, build 5.
 
-## Скачать
+## Download
 
-- **DiskBloom-1.3.0-macOS-arm64.dmg** — откройте образ и перетащите DiskBloom в Applications.
-- **DiskBloom-1.3.0-macOS-arm64.zip** — альтернативный архив готового приложения.
-- **SHA256SUMS** — SHA-256 обоих файлов для проверки загрузки.
+- **DiskBloom-1.4.0-macOS-arm64.dmg** — open the image and drag DiskBloom to Applications.
+- **DiskBloom-1.4.0-macOS-arm64.zip** — the same app as a ZIP archive.
+- **SHA256SUMS** — SHA-256 of both files to verify your download.
 
-Требования: Mac с Apple Silicon (M1 и новее), macOS 14 Sonoma или новее. Интерфейс на русском. Готовая сборка не требует Xcode. Intel Mac не поддерживается этим выпуском.
+Requirements: a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later. The prebuilt app does not need Xcode. Intel Macs are not supported by this download.
 
-## Возможности
+## What's new
 
-- Интерактивная кольцевая карта занятого места и переход к крупным папкам.
-- Подготовка удаления приложений вместе с явно выбранными связанными данными.
-- Анализ возможных остатков приложений в пользовательской Library.
-- Поиск дубликатов: размер, полный SHA-256 и финальное побайтовое сравнение; точные пути и Reveal in Finder.
+- The whole interface, all messages and the documentation are now in English.
+- New bundle identifier `io.github.dmitrii-f-t27.DiskBloom`, shared with the upcoming Mac App Store edition.
+- Mac App Store preparation: App Sandbox support with folder grants that are remembered between launches, an Xcode project for universal (Apple silicon and Intel) builds, a privacy manifest and a privacy policy.
+- In the sandboxed edition, Possible Leftovers warns that running processes cannot be checked and asks for an explicit confirmation before moving anything.
+- The smoke and regression tests are now part of the repository (`Tests/run-smoke-tests.sh`).
 
-Поиск дубликатов работает только для чтения. Другие инструменты перемещают выбранные объекты в системную Корзину после подтверждения. Совпадающее содержимое файлов не означает равенства их метаданных; логический размер копий не гарантирует физического освобождения такого же места на APFS.
+The analysis and cleanup rules are unchanged: the duplicate finder is read-only, and the other tools move only reviewed and confirmed items to the system Trash.
 
-## Подпись и первый запуск
+## Features
 
-**Этот выпуск ad-hoc signed, без Developer ID и notarization Apple.** macOS может заблокировать первый запуск. Если вы доверяете выпуску, после попытки открытия проверьте доступное разрешение для DiskBloom в «Системные настройки → Конфиденциальность и безопасность». Не отключайте защиту для всей системы. [Официальная инструкция Apple](https://support.apple.com/102445).
+- An interactive ring map of used space with quick navigation to large folders.
+- App removal together with explicitly selected related data.
+- Analysis of possible app leftovers in the user Library.
+- Duplicate search: size, full SHA-256 and a final byte-by-byte comparison, with exact paths and Reveal in Finder.
 
-This release is for **Apple Silicon, macOS 14+**, with a Russian UI. It is **ad-hoc signed and not notarized**. Copy the application to Applications and review the macOS security prompt before launching.
+Identical file content does not mean identical metadata, and the logical size of copies does not guarantee that the same amount of space is freed on APFS.
 
-## Проверка перед публикацией
+## Signature and first launch
 
-Строгая Swift 6 сборка, проверка целостности подписи, новый тест поиска дубликатов и четыре существующих smoke/regression-набора прошли. Интерфейс поиска и Reveal in Finder проверены на специально созданной тестовой папке. ZIP и DMG дополнительно проверены после упаковки.
+**This release is ad-hoc signed, without a Developer ID and without Apple notarization.** macOS may block the first launch. If you trust this release, try to open the app once, then check the permission for DiskBloom in System Settings → Privacy & Security. Do not turn off protection for the whole system. [Apple's instructions](https://support.apple.com/102445).
+
+## Verification before release
+
+The strict Swift 6 build, the signature integrity check and all five smoke and regression suites passed on Apple silicon and, under Rosetta, on the Intel slice. The Mac App Store project was built as a universal Release binary with the sandbox entitlements. The ZIP and DMG were checked again after packaging.

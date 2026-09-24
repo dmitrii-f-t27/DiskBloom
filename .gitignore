@@ -11,3 +11,6 @@ VERIFICATION.md
 *.p12
 *.p8
 *.mobileprovision
+xcuserdata/
+*.xcarchive
+DerivedData/
