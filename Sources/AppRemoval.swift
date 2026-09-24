@@ -22,10 +22,10 @@ enum AppRemovalMatch: String, Sendable {
 
     var title: String {
         switch self {
-        case .application: "Приложение"
-        case .exactIdentifier: "Точное совпадение bundle ID"
-        case .exactName: "Возможное совпадение по имени"
-        case .declaredGroup: "Общий App Group"
+        case .application: "Application"
+        case .exactIdentifier: "Exact bundle ID match"
+        case .exactName: "Possible name match"
+        case .declaredGroup: "Shared App Group"
         }
     }
 
@@ -50,9 +50,9 @@ enum AppRemovalRisk: String, Sendable {
         case .application, .disposableState:
             nil
         case .persistentData:
-            "Может содержать локальные документы, проекты или пользовательские данные."
+            "May contain local documents, projects or user data."
         case .sharedData:
-            "Может использоваться другим приложением или учётной записью."
+            "May be used by another application or account."
         }
     }
 
@@ -84,16 +84,16 @@ enum AppRemovalRule: String, Sendable {
 
     var title: String {
         switch self {
-        case .application: "Пакет приложения"
+        case .application: "Application bundle"
         case .identifierApplicationSupport, .nameApplicationSupport: "Application Support"
-        case .identifierCache, .nameCache: "Кэш"
-        case .identifierPreference, .namePreference: "Настройки"
-        case .identifierSavedState, .nameSavedState: "Сохранённое состояние"
-        case .identifierHTTPStorage: "HTTP-хранилище"
-        case .identifierWebKit: "WebKit-данные"
-        case .identifierLog, .nameLog: "Журналы"
+        case .identifierCache, .nameCache: "Cache"
+        case .identifierPreference, .namePreference: "Preferences"
+        case .identifierSavedState, .nameSavedState: "Saved state"
+        case .identifierHTTPStorage: "HTTP storage"
+        case .identifierWebKit: "WebKit data"
+        case .identifierLog, .nameLog: "Logs"
         case .identifierCookie: "Cookies"
-        case .identifierContainer: "Песочница приложения"
+        case .identifierContainer: "Sandbox container"
         case .identifierApplicationScripts, .groupApplicationScripts: "Application Scripts"
         case .identifierLaunchAgent: "LaunchAgent"
         case .groupContainer: "Group Container"
@@ -245,11 +245,11 @@ private struct AppCandidateSpec: Sendable {
 }
 
 enum ApplicationCatalog {
-    static func discover(homeURL: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)) -> [InstalledApplication] {
+    static func discover(homeURL: URL = UserHome.url) -> [InstalledApplication] {
         let roots: [(URL, String, Int)] = [
-            (URL(fileURLWithPath: "/Applications", isDirectory: true), "Приложения", 1),
-            (homeURL.appendingPathComponent("Applications", isDirectory: true), "Приложения пользователя", 1),
-            (URL(fileURLWithPath: "/System/Applications", isDirectory: true), "Системные приложения", 1)
+            (URL(fileURLWithPath: "/Applications", isDirectory: true), "Applications", 1),
+            (homeURL.appendingPathComponent("Applications", isDirectory: true), "User Applications", 1),
+            (URL(fileURLWithPath: "/System/Applications", isDirectory: true), "System Applications", 1)
         ]
         var found: [InstalledApplication] = []
         var seen: Set<String> = []
@@ -262,7 +262,7 @@ enum ApplicationCatalog {
         }
     }
 
-    static func profile(for url: URL, sourceLabel: String = "Выбранное приложение") -> InstalledApplication {
+    static func profile(for url: URL, sourceLabel: String = "Selected application") -> InstalledApplication {
         let normalized = url.standardizedFileURL
         let bundle = Bundle(url: normalized)
         let displayName = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
@@ -326,7 +326,7 @@ enum AppRunningDetector {
             return false
         }
         guard matchingProcess != nil else { return nil }
-        return "Приложение, его встроенный помощник или другая копия с тем же bundle ID сейчас запущены. Завершите их и повторите проверку."
+        return "The application, its embedded helper or another copy with the same bundle ID is running. Quit them and check again."
     }
 }
 
@@ -413,7 +413,7 @@ enum ApplicationRemovalAnalyzer {
     static func buildPlan(
         for application: InstalledApplication,
         knownApplications: [InstalledApplication],
-        homeURL: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+        homeURL: URL = UserHome.url,
         progress: ScanCounter
     ) throws -> AppRemovalPlan {
         let applicationIssue = AppRemovalPolicy.applicationEligibilityReason(for: application)
@@ -446,7 +446,7 @@ enum ApplicationRemovalAnalyzer {
                 snapshot: appSnapshot,
                 rule: .application,
                 key: safeIdentifier ?? application.name,
-                explanation: "Сам пакет .app. Он всегда включён в план.",
+                explanation: "The .app bundle itself. It is always part of the plan.",
                 required: true,
                 defaultSelected: true,
                 additionalIssue: applicationIssue
@@ -470,15 +470,15 @@ enum ApplicationRemovalAnalyzer {
             ]
             for rule in identifierRules {
                 let sharedNote = duplicateIdentifier
-                    ? " Этот bundle ID также найден у другого установленного приложения, поэтому объект считается потенциально общим."
+                    ? " This bundle ID was also found in another installed application, so the item is treated as potentially shared."
                     : (signatureBackedIdentifier
                         ? ""
-                        : " Bundle ID не подтверждён подписью с Apple trust anchor и Team ID, поэтому выбор по умолчанию отключён.")
+                        : " The bundle ID is not backed by a signature with an Apple trust anchor and Team ID, so default selection is off.")
                 specs.append(
                     AppCandidateSpec(
                         rule: rule,
                         key: safeIdentifier,
-                        explanation: "Путь построен из точного bundle ID «\(safeIdentifier)»." + sharedNote,
+                        explanation: "Path built from the exact bundle ID “\(safeIdentifier)”." + sharedNote,
                         defaultSelected: duplicateIdentifier || !signatureBackedIdentifier ? false : rule.normallySelected
                     )
                 )
@@ -497,7 +497,7 @@ enum ApplicationRemovalAnalyzer {
                     AppCandidateSpec(
                         rule: rule,
                         key: safeName,
-                        explanation: "Совпало только точное имя «\(safeName)»; проверьте путь вручную.",
+                        explanation: "Only the exact name “\(safeName)” matched; check the path manually.",
                         defaultSelected: false
                     )
                 )
@@ -512,7 +512,7 @@ enum ApplicationRemovalAnalyzer {
                     AppCandidateSpec(
                         rule: rule,
                         key: group,
-                        explanation: "App Group «\(group)» заявлен в подписи с Apple trust anchor и Team ID, но может быть общим.",
+                        explanation: "App Group “\(group)” is declared in a signature with an Apple trust anchor and Team ID, but may be shared.",
                         defaultSelected: false
                     )
                 )
@@ -532,9 +532,9 @@ enum ApplicationRemovalAnalyzer {
             let snapshot = try scan(candidateURL, progress: progress)
             let identifierTrustIssue: String?
             if spec.rule.match == .exactIdentifier, duplicateIdentifier {
-                identifierTrustIssue = "Этот bundle ID используется другим установленным приложением. Выбор по умолчанию отключён."
+                identifierTrustIssue = "This bundle ID is used by another installed application. Default selection is off."
             } else if spec.rule.match == .exactIdentifier, !signatureBackedIdentifier {
-                identifierTrustIssue = "Bundle ID не подтверждён подписью с Apple trust anchor и Team ID. Проверьте путь вручную."
+                identifierTrustIssue = "The bundle ID is not backed by a signature with an Apple trust anchor and Team ID. Check the path manually."
             } else {
                 identifierTrustIssue = nil
             }
@@ -598,11 +598,11 @@ enum ApplicationRemovalAnalyzer {
         let node = snapshot.root
         let snapshotIssue: String?
         if node.resourceIdentifier == nil || node.fingerprint == nil {
-            snapshotIssue = "Не удалось получить полный снимок объекта."
+            snapshotIssue = "Could not capture a complete snapshot of the item."
         } else if node.unreadableCount > 0 {
-            snapshotIssue = "Внутри есть недоступные объекты: \(node.unreadableCount)."
+            snapshotIssue = "It contains inaccessible items: \(node.unreadableCount)."
         } else if snapshot.skippedMountPoints > 0 {
-            snapshotIssue = "Внутри обнаружен другой том; полный снимок невозможен."
+            snapshotIssue = "Another volume was found inside; a complete snapshot is impossible."
         } else {
             snapshotIssue = nil
         }
@@ -626,23 +626,23 @@ enum AppRemovalPolicy {
         let url = application.url.standardizedFileURL
         let path = url.path
         guard url.pathExtension.lowercased() == "app" else {
-            return "Выбранный объект не является пакетом .app."
+            return "The selected item is not an .app bundle."
         }
         if AppRemovalPathSafety.pathHasSymlinkedComponent(url) {
-            return "Путь приложения содержит символическую ссылку. Такой объект доступен только для просмотра."
+            return "The application path contains a symbolic link. Such an item is view-only."
         }
         let protectedRoots = ["/System", "/usr", "/bin", "/sbin", "/private", "/Library"]
         if protectedRoots.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
-            return "Системные и общесистемные приложения защищены. Используйте штатный способ удаления производителя."
+            return "System and system-wide applications are protected. Use the vendor’s official uninstall method."
         }
         if application.bundleIdentifier?.hasPrefix("com.apple.") == true {
-            return "Приложения Apple с bundle ID com.apple.* защищены в этом режиме."
+            return "Apple applications with a com.apple.* bundle ID are protected in this mode."
         }
         let selfPath = Bundle.main.bundleURL.standardizedFileURL.path
         if path == selfPath || selfPath.hasPrefix(path + "/") {
-            return "DiskBloom не может переместить в Корзину сам себя или содержащий его пакет."
+            return "DiskBloom cannot move itself or its containing bundle to the Trash."
         }
-        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true).standardizedFileURL.path
+        let home = UserHome.path
         let blockedUserRoots = [
             home + "/Library",
             home + "/.Trash",
@@ -653,10 +653,10 @@ enum AppRemovalPolicy {
             home + "/iCloud Drive"
         ]
         if blockedUserRoots.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
-            return "Приложения внутри Library, Корзины или облачной папки защищены."
+            return "Applications inside Library, the Trash or a cloud folder are protected."
         }
         if (path as NSString).pathComponents.contains(where: { $0 == ".Trash" || $0 == ".Trashes" }) {
-            return "Объект уже находится в Корзине."
+            return "The item is already in the Trash."
         }
         guard let values = try? url.resourceValues(forKeys: [
             .isDirectoryKey,
@@ -669,11 +669,11 @@ enum AppRemovalPolicy {
               values.isDirectory == true,
               values.isPackage == true,
               values.isSymbolicLink != true else {
-            return "Не удалось подтвердить тип пакета приложения."
+            return "Could not confirm the application bundle type."
         }
-        if values.volumeIsLocal != true { return "Сетевые и неопределённые тома не поддерживаются." }
-        if values.volumeIsReadOnly == true { return "Том доступен только для чтения." }
-        if values.isUbiquitousItem == true { return "Облачные приложения доступны только для просмотра." }
+        if values.volumeIsLocal != true { return "Network and unknown volumes are not supported." }
+        if values.volumeIsReadOnly == true { return "The volume is read-only." }
+        if values.isUbiquitousItem == true { return "Cloud applications are view-only." }
         return nil
     }
 
@@ -685,19 +685,19 @@ enum AppRemovalPolicy {
         let expectedURL = plan.application.url.standardizedFileURL
         let currentURL = (candidateURL ?? expectedURL).standardizedFileURL
         guard currentURL.path == expectedURL.path else {
-            return "Координированный путь приложения изменился: \(expectedURL.path)"
+            return "The coordinated application path changed: \(expectedURL.path)"
         }
         guard let applicationItem = plan.items.first(where: \.isRequired) else {
-            return "В плане отсутствует обязательный снимок приложения."
+            return "The plan is missing the required application snapshot."
         }
         if let reason = SnapshotValidator.validate(applicationItem.node, candidateURL: currentURL) {
-            return "Пакет приложения изменился после анализа: \(reason)"
+            return "The application bundle changed after analysis: \(reason)"
         }
         guard CodeSignatureReader.validatedMetadata(at: currentURL) == expectedSignature else {
-            return "Подпись, Team ID или signing identifier приложения изменились после анализа: \(currentURL.path)"
+            return "The application’s signature, Team ID or signing identifier changed after analysis: \(currentURL.path)"
         }
         if let reason = SnapshotValidator.validate(applicationItem.node, candidateURL: currentURL) {
-            return "Пакет приложения изменился во время проверки подписи: \(reason)"
+            return "The application bundle changed during signature verification: \(reason)"
         }
         return nil
     }
@@ -708,7 +708,7 @@ enum AppRemovalPolicy {
         if let identifier = plan.application.bundleIdentifier, !identifier.isEmpty {
             let registeredApplications = NSWorkspace.shared.urlsForApplications(withBundleIdentifier: identifier)
             if installedApplications.contains(where: { $0.bundleIdentifier == identifier }) {
-                return "Установлена новая или другая копия с bundle ID \(identifier). Нужен новый анализ."
+                return "A new or different copy with bundle ID \(identifier) is installed. A new analysis is needed."
             }
             if registeredApplications.contains(where: { url in
                 let path = url.standardizedFileURL.path
@@ -716,18 +716,18 @@ enum AppRemovalPolicy {
                 let isInTrash = components.contains(".Trash") || components.contains(".Trashes")
                 return !isInTrash && FileManager.default.fileExists(atPath: path)
             }) {
-                return "LaunchServices зарегистрировал другую существующую копию с bundle ID \(identifier). Нужен новый анализ."
+                return "LaunchServices registered another existing copy with bundle ID \(identifier). A new analysis is needed."
             }
         } else if installedApplications.contains(where: {
             $0.name.localizedCaseInsensitiveCompare(plan.application.name) == .orderedSame
         }) {
-            return "Установлено приложение с тем же именем «\(plan.application.name)». Нужен новый анализ."
+            return "An application with the same name “\(plan.application.name)” is installed. A new analysis is needed."
         }
         if FileManager.default.fileExists(atPath: originalPath) {
-            return "По исходному пути снова существует приложение: \(originalPath). Нужен новый анализ."
+            return "An application exists again at the original path: \(originalPath). A new analysis is needed."
         }
         if AppRunningDetector.reason(for: plan.application) != nil {
-            return "Обнаружен запущенный процесс с прежним bundle ID. Очистка старого плана заблокирована."
+            return "A running process with the previous bundle ID was found. Cleanup of the old plan is blocked."
         }
         return nil
     }
@@ -735,7 +735,7 @@ enum AppRemovalPolicy {
     static func validate(
         _ item: AppRemovalItem,
         application: InstalledApplication,
-        homeURL: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+        homeURL: URL = UserHome.url,
         candidateURL: URL? = nil,
         requireApplicationPresence: Bool = true
     ) -> String? {
@@ -747,17 +747,17 @@ enum AppRemovalPolicy {
         switch item.match {
         case .exactIdentifier, .declaredGroup:
             guard AppRemovalPathSafety.safeIdentifier(item.key) == item.key else {
-                return "Небезопасный идентификатор пути: \(original.path)"
+                return "Unsafe path identifier: \(original.path)"
             }
         case .exactName:
             guard AppRemovalPathSafety.safeDisplayName(item.key) == item.key else {
-                return "Небезопасное имя для пути: \(original.path)"
+                return "Unsafe name for a path: \(original.path)"
             }
         case .application:
             break
         }
         guard candidate.path == original.path else {
-            return "Координированный путь изменился: \(original.path)"
+            return "The coordinated path changed: \(original.path)"
         }
         guard let expected = item.rule.expectedURL(
             applicationURL: application.url,
@@ -765,31 +765,31 @@ enum AppRemovalPolicy {
             key: item.key
         )?.standardizedFileURL,
               expected.path == original.path else {
-            return "Путь не соответствует разрешённому правилу: \(original.path)"
+            return "The path does not match an allowed rule: \(original.path)"
         }
         if AppRemovalPathSafety.pathHasSymlinkedComponent(original) {
-            return "Путь содержит символическую ссылку: \(original.path)"
+            return "The path contains a symbolic link: \(original.path)"
         }
         guard let values = try? original.resourceValues(forKeys: [
             .volumeIsLocalKey,
             .volumeIsReadOnlyKey,
             .isUbiquitousItemKey
         ]) else {
-            return "Не удалось проверить том: \(original.path)"
+            return "Could not check the volume: \(original.path)"
         }
-        if values.volumeIsLocal != true { return "Объект находится не на локальном томе: \(original.path)" }
-        if values.volumeIsReadOnly == true { return "Объект находится на томе только для чтения: \(original.path)" }
-        if values.isUbiquitousItem == true { return "Облачный объект защищён: \(original.path)" }
+        if values.volumeIsLocal != true { return "The item is not on a local volume: \(original.path)" }
+        if values.volumeIsReadOnly == true { return "The item is on a read-only volume: \(original.path)" }
+        if values.isUbiquitousItem == true { return "Cloud item is protected: \(original.path)" }
 
         if item.rule == .application {
             let currentProfile = ApplicationCatalog.profile(for: original)
             if currentProfile.bundleIdentifier != application.bundleIdentifier {
-                return "Bundle ID приложения изменился после анализа: \(original.path)"
+                return "The application’s bundle ID changed after analysis: \(original.path)"
             }
         } else {
             let library = homeURL.appendingPathComponent("Library", isDirectory: true).standardizedFileURL.path
             guard original.path.hasPrefix(library + "/") else {
-                return "Связанный объект находится вне пользовательской Library: \(original.path)"
+                return "The related item is outside the user Library: \(original.path)"
             }
         }
         return SnapshotValidator.validate(item.node, candidateURL: candidate)
@@ -799,7 +799,7 @@ enum AppRemovalPolicy {
         let paths = items.map { $0.url.standardizedFileURL.path }.sorted()
         for (index, path) in paths.enumerated() {
             for other in paths.dropFirst(index + 1) where other.hasPrefix(path + "/") {
-                return "Выбранные пути пересекаются: \(path) и \(other)"
+                return "Selected paths overlap: \(path) and \(other)"
             }
         }
         return nil
@@ -899,7 +899,7 @@ enum AppRemovalCoordinator {
                     return
                 }
                 guard let expectedRelocationIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL) else {
-                    localFailure = "Не удалось зафиксировать идентичность перед перемещением: \(url.path)"
+                    localFailure = "Could not capture the identity before moving: \(url.path)"
                     return
                 }
                 if item.isRequired,
@@ -919,8 +919,8 @@ enum AppRemovalCoordinator {
                     guard let movedURL = resultingURL as URL?,
                           FileIdentity.relocationIdentifier(for: movedURL) == expectedRelocationIdentity,
                           (try? movedURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == item.node.isDirectory else {
-                        let resultPath = (resultingURL as URL?)?.path ?? "путь в Корзине не возвращён"
-                        localFailure = "Не удалось подтвердить объект после перемещения: \(url.path). Результат: \(resultPath). Автоматический возврат неизвестного объекта не выполнялся."
+                        let resultPath = (resultingURL as URL?)?.path ?? "no Trash path was returned"
+                        localFailure = "Could not confirm the item after moving: \(url.path). Result: \(resultPath). No automatic restore of an unknown item was attempted."
                         moveResultIsUncertain = true
                         return
                     }
@@ -930,7 +930,7 @@ enum AppRemovalCoordinator {
                     moveResultIsUncertain = !sourceStillExists
                     let uncertainty = sourceStillExists
                         ? ""
-                        : " Исходный путь исчез, поэтому результат перемещения не подтверждён и автоматический повтор заблокирован."
+                        : " The original path disappeared, so the move result is unconfirmed and automatic retry is blocked."
                     localFailure = "\(url.path): \(error.localizedDescription)\(uncertainty)"
                 }
             }
@@ -1016,6 +1016,22 @@ final class AppUninstallerModel: ObservableObject {
         refreshApplications()
     }
 
+    /// The sandboxed build sees ~/Library only after the person grants the home folder.
+    var needsHomeAccess: Bool { !FolderAccess.shared.hasHomeAccess }
+
+    func grantHomeAccess() {
+        guard FolderAccess.shared.ensureHomeAccess(
+            message: "DiskBloom checks each app's caches, preferences and other data in your Library. Select your home folder and click Grant Access."
+        ) else {
+            notice = AppNotice(
+                title: "Home folder access needed",
+                message: "Related data can be found only with access to your home folder. Choose your home folder itself in the panel."
+            )
+            return
+        }
+        refreshApplications()
+    }
+
     func refreshApplications() {
         guard !isMovingToTrash else { return }
         catalogTask?.cancel()
@@ -1036,9 +1052,13 @@ final class AppUninstallerModel: ObservableObject {
 
     func chooseApplication() {
         guard !isMovingToTrash else { return }
+        guard !needsHomeAccess else {
+            grantHomeAccess()
+            return
+        }
         let panel = NSOpenPanel()
-        panel.title = "Выберите приложение для удаления"
-        panel.prompt = "Проверить"
+        panel.title = "Choose an application to uninstall"
+        panel.prompt = "Review"
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -1055,6 +1075,11 @@ final class AppUninstallerModel: ObservableObject {
 
     func inspect(_ application: InstalledApplication, force: Bool = false) {
         guard !isMovingToTrash else { return }
+        guard !needsHomeAccess else {
+            // Without the Library the plan would silently miss related data.
+            grantHomeAccess()
+            return
+        }
         if !force, selectedApplication?.id == application.id, plan != nil { return }
         inspectionTask?.cancel()
         invalidateReview()
@@ -1104,7 +1129,7 @@ final class AppUninstallerModel: ObservableObject {
             } catch {
                 if inspectionGeneration == generation {
                     isInspecting = false
-                    notice = AppNotice(title: "Не удалось проверить приложение", message: error.localizedDescription)
+                    notice = AppNotice(title: "Could not check the application", message: error.localizedDescription)
                 }
             }
         }
@@ -1148,28 +1173,42 @@ final class AppUninstallerModel: ObservableObject {
         invalidateReview()
         if let uncertainPaths = lastOutcome?.uncertainPaths, !uncertainPaths.isEmpty {
             notice = AppNotice(
-                title: "Повтор заблокирован",
-                message: "Не удалось подтвердить результат предыдущего перемещения:\n\(uncertainPaths.joined(separator: "\n"))\n\nСначала перепроверьте исходные пути. Если объект уже в Корзине, восстановите его или выберите приложение заново после ручной проверки."
+                title: "Retry blocked",
+                message: "Could not confirm the result of the previous move:\n\(uncertainPaths.joined(separator: "\n"))\n\nRe-check the original paths first. If the item is already in the Trash, restore it or choose the application again after a manual check."
             )
             return
         }
         if !applicationWasMoved,
            let reason = plan.applicationEligibilityIssue ?? runningReason() {
-            notice = AppNotice(title: "Удаление заблокировано", message: reason)
+            notice = AppNotice(title: "Uninstall blocked", message: reason)
             return
+        }
+        if !applicationWasMoved, FolderAccess.shared.isRestricted {
+            let container = plan.application.url.deletingLastPathComponent().standardizedFileURL
+            guard FolderAccess.shared.ensureAccess(
+                to: container,
+                title: "Allow DiskBloom to move \(plan.application.name)",
+                message: "To move \(plan.application.name) to the Trash, DiskBloom needs permission to change the folder that contains it. Keep “\(container.lastPathComponent)” selected and click Grant Access."
+            ) else {
+                notice = AppNotice(
+                    title: "Uninstall blocked",
+                    message: "DiskBloom has no permission to change \(container.path). Grant access to this folder to move the application to the Trash."
+                )
+                return
+            }
         }
         let candidates = selectedItems
         guard !candidates.isEmpty else {
-            notice = AppNotice(title: "Нечего перемещать", message: "Выберите хотя бы один оставшийся связанный объект.")
+            notice = AppNotice(title: "Nothing to move", message: "Select at least one remaining related item.")
             return
         }
         if !applicationWasMoved,
            !(candidates.first(where: \.isRequired)?.isSelectable == true) {
-            notice = AppNotice(title: "Удаление заблокировано", message: "Пакет приложения не прошёл полную проверку.")
+            notice = AppNotice(title: "Uninstall blocked", message: "The application bundle did not pass the full check.")
             return
         }
         if let overlap = AppRemovalPolicy.overlappingSelectionReason(candidates) {
-            notice = AppNotice(title: "Пути пересекаются", message: overlap)
+            notice = AppNotice(title: "Paths overlap", message: overlap)
             return
         }
         let generation = UUID()
@@ -1199,11 +1238,11 @@ final class AppUninstallerModel: ObservableObject {
             guard reviewGeneration == generation, !Task.isCancelled else { return }
             isReviewing = false
             if !appAlreadyMoved, let running = runningReason() {
-                notice = AppNotice(title: "Приложение запущено", message: running)
+                notice = AppNotice(title: "Application is running", message: running)
             } else if failures.isEmpty {
                 showingReview = true
             } else {
-                notice = AppNotice(title: "Нужен повторный анализ", message: failures.joined(separator: "\n"))
+                notice = AppNotice(title: "Rescan needed", message: failures.joined(separator: "\n"))
             }
         }
     }
@@ -1212,7 +1251,7 @@ final class AppUninstallerModel: ObservableObject {
         guard let plan, !isMovingToTrash, !hasUncertainOutcome else { return }
         showingReview = false
         if !applicationWasMoved, let running = runningReason() {
-            notice = AppNotice(title: "Приложение запущено", message: running)
+            notice = AppNotice(title: "Application is running", message: running)
             return
         }
         let candidates = selectedItems
@@ -1240,8 +1279,8 @@ final class AppUninstallerModel: ObservableObject {
             if outcome.failure == nil {
                 let moved = outcome.movedPaths.joined(separator: "\n")
                 notice = AppNotice(
-                    title: "Выбранные объекты перемещены в Корзину",
-                    message: "Перемещено: \(outcome.movedPaths.count). Место освободится только после очистки Корзины.\n\n\(moved)"
+                    title: "Selected items moved to Trash",
+                    message: "Moved: \(outcome.movedPaths.count). Space is freed only after the Trash is emptied.\n\n\(moved)"
                 )
                 selectedApplication = nil
                 self.plan = nil
@@ -1266,8 +1305,8 @@ final class AppUninstallerModel: ObservableObject {
         let uncertainItems = plan.items.filter { uncertainSet.contains($0.url.path) }
         guard uncertainItems.count == uncertainSet.count else {
             notice = AppNotice(
-                title: "Результат всё ещё не подтверждён",
-                message: "План больше не содержит все спорные пути. Выберите приложение заново или проверьте Корзину вручную."
+                title: "Result still unconfirmed",
+                message: "The plan no longer contains all disputed paths. Choose the application again or check the Trash manually."
             )
             return
         }
@@ -1293,15 +1332,15 @@ final class AppUninstallerModel: ObservableObject {
                 lastApplicationName = nil
                 showingOutcomeReport = false
                 notice = AppNotice(
-                    title: "Исходный объект подтверждён",
-                    message: "Спорный объект всё ещё находится по исходному пути и совпадает со снимком. Автоматический повтор снова доступен."
+                    title: "Original item confirmed",
+                    message: "The disputed item is still at its original path and matches the snapshot. Automatic retry is available again."
                 )
             } else {
                 lastOutcome = AppRemovalOutcome(
                     movedPaths: outcome.movedPaths,
                     uncertainPaths: outcome.uncertainPaths,
                     failure: failures.joined(separator: "\n")
-                        + "\n\nАвтоматический повтор остаётся заблокирован. Проверьте Корзину или восстановите объект вручную.",
+                        + "\n\nAutomatic retry remains blocked. Check the Trash or restore the item manually.",
                     unattemptedPaths: outcome.unattemptedPaths
                 )
                 showingOutcomeReport = true

@@ -56,16 +56,16 @@ struct OrphanedAppDataView: View {
                     appModel.selectWorkspaceSection(.appUninstaller)
                 }
             } label: {
-                Label("К приложениям", systemImage: "chevron.left")
+                Label("Applications", systemImage: "chevron.left")
             }
             .buttonStyle(SecondaryButtonStyle(compact: true))
             .disabled(model.isNavigationLocked || model.isScanning)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Возможные остатки приложений")
+                Text("Possible Application Leftovers")
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.primaryText)
-                Text("Точные папки bundle ID в пользовательской Library")
+                Text("Exact bundle ID folders in the user Library")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.secondaryText)
             }
@@ -76,7 +76,7 @@ struct OrphanedAppDataView: View {
                 Button {
                     model.showingOutcomeReport = true
                 } label: {
-                    Label("Отчёт", systemImage: "doc.text.magnifyingglass")
+                    Label("Report", systemImage: "doc.text.magnifyingglass")
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(model.isScanning || model.isMovingToTrash)
@@ -84,12 +84,12 @@ struct OrphanedAppDataView: View {
 
             if model.isScanning {
                 Button(action: model.cancelAnalysis) {
-                    Label("Остановить", systemImage: "stop.fill")
+                    Label("Stop", systemImage: "stop.fill")
                 }
                 .buttonStyle(SecondaryButtonStyle())
             } else {
                 Button(action: model.startAnalysis) {
-                    Label(model.analysis == nil ? "Начать анализ" : "Повторить анализ", systemImage: "sparkle.magnifyingglass")
+                    Label(model.analysis == nil ? "Start Analysis" : "Rescan", systemImage: "sparkle.magnifyingglass")
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(model.isNavigationLocked || model.hasUncertainOutcome)
@@ -110,6 +110,13 @@ struct OrphanedAppDataView: View {
             } else {
                 results(analysis)
             }
+        } else if !FolderAccess.shared.hasHomeAccess {
+            HomeAccessRequiredView(
+                icon: "sparkle.magnifyingglass",
+                title: "Allow access to your Library",
+                message: "The App Store version of DiskBloom runs in the App Sandbox. To look for folders left behind by removed apps, it needs access to your home folder. Nothing is selected or moved automatically.",
+                action: model.startAnalysis
+            )
         } else {
             OrphanWelcomeView(startAnalysis: model.startAnalysis)
         }
@@ -119,21 +126,32 @@ struct OrphanedAppDataView: View {
         VStack(spacing: 0) {
             OrphanWarningStrip(
                 icon: "exclamationmark.shield.fill",
-                title: "Это кандидаты, а не доказанные остатки",
-                message: "DiskBloom не нашёл текущего владельца среди установленных, встроенных, запущенных и зарегистрированных компонентов. Перед очисткой проверьте каждый точный путь. Произвольные документы вне Library здесь не показываются.",
+                title: "These are candidates, not proven leftovers",
+                message: "DiskBloom found no current owner among installed, embedded, running and registered components. Check every exact path before cleaning. Arbitrary documents outside Library are not shown here.",
                 tone: .warning
             )
             .padding(.horizontal, 18)
             .padding(.top, 14)
 
+            if !analysis.processCheckAvailable {
+                OrphanWarningStrip(
+                    icon: "eye.slash.fill",
+                    title: "Running processes could not be checked",
+                    message: "The App Sandbox hides the process list, so DiskBloom cannot see background tools that are not registered apps. Quit apps and tools that might use these folders before moving anything.",
+                    tone: .warning
+                )
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+            }
+
             HStack(spacing: 14) {
                 Label("\(analysis.groups.count.formatted()) bundle ID", systemImage: "shippingbox")
-                Label("\(analysis.examinedPathCount.formatted()) путей проверено", systemImage: "magnifyingglass")
+                Label("\(analysis.examinedPathCount.formatted()) paths checked", systemImage: "magnifyingglass")
                 if analysis.protectedGroupCount > 0 {
-                    Label("\(analysis.protectedGroupCount.formatted()) защищено", systemImage: "lock.shield")
+                    Label("\(analysis.protectedGroupCount.formatted()) protected", systemImage: "lock.shield")
                 }
                 if analysis.skippedUnsafePathCount > 0 {
-                    Label("\(analysis.skippedUnsafePathCount.formatted()) небезопасных пропущено", systemImage: "exclamationmark.triangle")
+                    Label("\(analysis.skippedUnsafePathCount.formatted()) unsafe skipped", systemImage: "exclamationmark.triangle")
                 }
                 Spacer()
                 Text(analysis.scannedAt.formatted(date: .abbreviated, time: .shortened))
@@ -158,16 +176,19 @@ struct OrphanedAppDataView: View {
     private var selectionBar: some View {
         HStack(spacing: 15) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.selectedItems.isEmpty ? "Ничего не выбрано" : "Выбрано: \(model.selectedItems.count.formatted())")
+                Text(model.selectedItems.isEmpty ? "Nothing selected" : "Selected: \(model.selectedItems.count.formatted())")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Color.primaryText)
-                Text(model.selectedItems.isEmpty ? "Каждая папка изначально выключена" : ByteFormat.string(model.selectedSize))
+                Text(model.selectedItems.isEmpty ? "Every folder starts unselected" : ByteFormat.string(model.selectedSize))
                     .font(.system(size: 10))
                     .foregroundStyle(Color.secondaryText)
             }
 
             if model.needsExtraAcknowledgement, !model.selectedItems.isEmpty {
-                Label("есть возможные пользовательские данные", systemImage: "exclamationmark.triangle.fill")
+                Label(
+                    model.processCheckUnavailable ? "confirmation required" : "possible user data included",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
                     .font(.system(size: 9.5, weight: .semibold))
                     .foregroundStyle(Color.orange)
             }
@@ -177,13 +198,13 @@ struct OrphanedAppDataView: View {
             if model.isReviewing {
                 ProgressView()
                     .controlSize(.small)
-                Text("Повторная проверка…")
+                Text("Re-checking…")
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(Color.secondaryText)
             }
 
             Button(action: model.requestReview) {
-                Label("Проверить перед удалением", systemImage: "checkmark.shield")
+                Label("Review Before Removal", systemImage: "checkmark.shield")
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(model.selectedItems.isEmpty || model.isReviewing || model.isMovingToTrash || model.hasUncertainOutcome)
@@ -211,24 +232,24 @@ private struct OrphanWelcomeView: View {
                     .font(.system(size: 54, weight: .light))
                     .foregroundStyle(Color.accentMint)
             }
-            Text("Найдём папки без текущего владельца")
+            Text("Find folders with no current owner")
                 .font(.system(size: 25, weight: .bold, design: .rounded))
                 .foregroundStyle(Color.primaryText)
-            Text("Анализ ограничен точными app-managed папками в вашей Library. DiskBloom сравнит их bundle ID с установленными, встроенными, работающими и зарегистрированными приложениями. Ничего не будет выбрано или удалено автоматически.")
+            Text("Analysis is limited to exact app-managed folders in your Library. DiskBloom compares their bundle IDs with installed, embedded, running and registered applications. Nothing is selected or removed automatically.")
                 .font(.system(size: 12))
                 .foregroundStyle(Color.secondaryText)
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
                 .frame(maxWidth: 610)
             HStack(spacing: 10) {
-                Label("точные пути", systemImage: "point.3.connected.trianglepath.dotted")
-                Label("выбор вручную", systemImage: "checklist")
-                Label("только в Корзину", systemImage: "trash")
+                Label("exact paths", systemImage: "point.3.connected.trianglepath.dotted")
+                Label("manual selection", systemImage: "checklist")
+                Label("Trash only", systemImage: "trash")
             }
             .font(.system(size: 10.5, weight: .semibold))
             .foregroundStyle(Color.accentMint)
             Button(action: startAnalysis) {
-                Label("Начать анализ", systemImage: "sparkle.magnifyingglass")
+                Label("Start Analysis", systemImage: "sparkle.magnifyingglass")
             }
             .buttonStyle(PrimaryButtonStyle())
             Spacer()
@@ -246,10 +267,10 @@ private struct OrphanAnalysisProgressView: View {
             Spacer()
             ProgressView()
                 .controlSize(.large)
-            Text("Анализируем пользовательскую Library")
+            Text("Analyzing the user Library")
                 .font(.system(size: 20, weight: .bold, design: .rounded))
                 .foregroundStyle(Color.primaryText)
-            Text("Проверено объектов: \(model.progress.itemCount.formatted())")
+            Text("Items checked: \(model.progress.itemCount.formatted())")
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(Color.accentMint)
             Text(model.progress.currentPath)
@@ -259,7 +280,7 @@ private struct OrphanAnalysisProgressView: View {
                 .truncationMode(.middle)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 650)
-            Text("Удаление во время анализа невозможно")
+            Text("Removal is not possible during analysis")
                 .font(.system(size: 10))
                 .foregroundStyle(Color.secondaryText)
             Spacer()
@@ -278,10 +299,10 @@ private struct OrphanEmptyView: View {
             Image(systemName: "checkmark.shield.fill")
                 .font(.system(size: 54, weight: .light))
                 .foregroundStyle(Color.accentMint)
-            Text("Кандидаты не найдены")
+            Text("No candidates found")
                 .font(.system(size: 24, weight: .bold, design: .rounded))
                 .foregroundStyle(Color.primaryText)
-            Text("Проверено \(analysis.examinedPathCount.formatted()) точных путей. Папки с найденным владельцем, небезопасные пути и объекты вне пользовательской Library не включены в результат. Это не доказывает отсутствие других остатков.")
+            Text("\(analysis.examinedPathCount.formatted()) exact paths were checked. Folders with a found owner, unsafe paths and items outside the user Library are not included. This does not prove that no other leftovers exist.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(Color.secondaryText)
                 .multilineTextAlignment(.center)
@@ -325,7 +346,7 @@ private struct OrphanGroupCard: View {
                     Text(group.confidence.title)
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(confidenceColor)
-                    Text("\(group.items.count.formatted()) папок · \(ByteFormat.string(group.totalSize))")
+                    Text("\(group.items.count.formatted()) folders · \(ByteFormat.string(group.totalSize))")
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(Color.secondaryText)
                 }
@@ -369,12 +390,12 @@ private struct OrphanPathRow: View {
             }
             .buttonStyle(.plain)
             .disabled(!item.isSelectable || wasMoved || model.isReviewing || model.isMovingToTrash || model.hasUncertainOutcome)
-            .accessibilityLabel("Выбрать \(item.rule.title): \(item.url.path)")
+            .accessibilityLabel("Select \(item.rule.title): \(item.url.path)")
             .accessibilityValue(
-                wasMoved ? "подтверждено в Корзине"
-                    : !item.isSelectable ? "недоступно"
-                    : isSelected ? "выбрано"
-                    : "не выбрано"
+                wasMoved ? "confirmed in Trash"
+                    : !item.isSelectable ? "unavailable"
+                    : isSelected ? "selected"
+                    : "not selected"
             )
 
             VStack(alignment: .leading, spacing: 5) {
@@ -389,7 +410,7 @@ private struct OrphanPathRow: View {
                         .padding(.vertical, 2)
                         .background((item.risk.needsExtraAcknowledgement ? Color.orange : Color.accentMint).opacity(0.11), in: Capsule())
                     if wasMoved {
-                        Text("В КОРЗИНЕ")
+                        Text("IN TRASH")
                             .font(.system(size: 8.5, weight: .bold))
                             .foregroundStyle(Color.accentMint)
                     }
@@ -416,8 +437,8 @@ private struct OrphanPathRow: View {
                 Image(systemName: "folder")
             }
             .buttonStyle(IconButtonStyle())
-            .help("Показать в Finder")
-            .accessibilityLabel("Показать \(item.rule.title) в Finder: \(item.url.path)")
+            .help("Reveal in Finder")
+            .accessibilityLabel("Reveal \(item.rule.title) in Finder: \(item.url.path)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -432,6 +453,12 @@ private struct OrphanDataReviewSheet: View {
 
     private var requiresAcknowledgement: Bool { model.needsExtraAcknowledgement }
 
+    private var acknowledgementText: String {
+        let base = "I have reviewed the exact paths and understand that the selected folders may contain documents, projects, settings, sessions, cookies or other user data."
+        guard model.processCheckUnavailable else { return base }
+        return base + " Running processes could not be checked, and I have quit apps and tools that might use these folders."
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -439,15 +466,15 @@ private struct OrphanDataReviewSheet: View {
                     .font(.system(size: 24))
                     .foregroundStyle(Color.accentMint)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Проверка точных путей")
+                    Text("Exact path review")
                         .font(.system(size: 19, weight: .bold, design: .rounded))
                         .foregroundStyle(Color.primaryText)
-                    Text("Выбрано \(model.selectedItems.count.formatted()) · \(ByteFormat.string(model.selectedSize))")
+                    Text("Selected \(model.selectedItems.count.formatted()) · \(ByteFormat.string(model.selectedSize))")
                         .font(.system(size: 10.5))
                         .foregroundStyle(Color.secondaryText)
                 }
                 Spacer()
-                Button("Отмена") { dismiss() }
+                Button("Cancel") { dismiss() }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(model.isMovingToTrash)
             }
@@ -459,8 +486,8 @@ private struct OrphanDataReviewSheet: View {
                 VStack(alignment: .leading, spacing: 14) {
                     OrphanWarningStrip(
                         icon: "trash.fill",
-                        title: "Папки будут перемещены в Корзину",
-                        message: "DiskBloom ещё раз проверит владельцев, точный путь и снимок содержимого непосредственно перед каждым перемещением. Автоматическое окончательное удаление не выполняется.",
+                        title: "Folders will be moved to the Trash",
+                        message: "DiskBloom re-checks owners, the exact path and the content snapshot immediately before each move. No automatic permanent deletion is performed.",
                         tone: .neutral
                     )
 
@@ -503,7 +530,7 @@ private struct OrphanDataReviewSheet: View {
                                 Image(systemName: acknowledgedRisk ? "checkmark.square.fill" : "square")
                                     .font(.system(size: 17, weight: .semibold))
                                     .foregroundStyle(acknowledgedRisk ? Color.orange : Color.secondaryText)
-                                Text("Я проверил точные пути и понимаю, что выбранные папки могут содержать документы, проекты, настройки, сеансы, cookies или другие пользовательские данные.")
+                                Text(acknowledgementText)
                                     .font(.system(size: 10.5, weight: .semibold))
                                     .foregroundStyle(Color.primaryText)
                                     .multilineTextAlignment(.leading)
@@ -523,12 +550,12 @@ private struct OrphanDataReviewSheet: View {
             Rectangle().fill(Color.separator.opacity(0.55)).frame(height: 1)
 
             HStack {
-                Label("Операцию можно отменить из Корзины до её очистки", systemImage: "arrow.uturn.backward.circle")
+                Label("The operation can be undone from the Trash until it is emptied", systemImage: "arrow.uturn.backward.circle")
                     .font(.system(size: 9.5))
                     .foregroundStyle(Color.secondaryText)
                 Spacer()
                 Button(action: model.moveReviewedItemsToTrash) {
-                    Label("Переместить выбранное в Корзину", systemImage: "trash.fill")
+                    Label("Move Selected to Trash", systemImage: "trash.fill")
                 }
                 .buttonStyle(DangerButtonStyle())
                 .disabled(model.selectedItems.isEmpty || model.isMovingToTrash || (requiresAcknowledgement && !acknowledgedRisk))
@@ -560,17 +587,17 @@ private struct OrphanDataOutcomeView: View {
                     .font(.system(size: 26))
                     .foregroundStyle(isCleanSuccess ? Color.accentMint : Color.orange)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(isCleanSuccess ? "Перемещение подтверждено" : "Отчёт о перемещении")
+                    Text(isCleanSuccess ? "Move confirmed" : "Move report")
                         .font(.system(size: 19, weight: .bold, design: .rounded))
                         .foregroundStyle(Color.primaryText)
-                    Text("Ни один объект не удалялся безвозвратно")
+                    Text("No item was deleted permanently")
                         .font(.system(size: 10.5))
                         .foregroundStyle(Color.secondaryText)
                 }
                 Spacer()
                 if model.isReviewing {
                     ProgressView().controlSize(.small)
-                    Text("Проверяем…")
+                    Text("Checking…")
                         .font(.system(size: 10))
                         .foregroundStyle(Color.secondaryText)
                 }
@@ -583,7 +610,7 @@ private struct OrphanDataOutcomeView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     if !outcome.movedPaths.isEmpty {
                         OrphanReportSection(
-                            title: "Подтверждено в Корзине",
+                            title: "Confirmed in Trash",
                             icon: "checkmark.circle.fill",
                             color: .accentMint,
                             paths: outcome.movedPaths
@@ -591,15 +618,15 @@ private struct OrphanDataOutcomeView: View {
                     }
                     if !outcome.uncertainPaths.isEmpty {
                         OrphanReportSection(
-                            title: "Результат не подтверждён",
+                            title: "Result unconfirmed",
                             icon: "questionmark.diamond.fill",
                             color: .orange,
                             paths: outcome.uncertainPaths
                         )
                         OrphanWarningStrip(
                             icon: "hand.raised.fill",
-                            title: "Автоматический повтор заблокирован",
-                            message: "Исходный путь исчез, но объект в Корзине не удалось однозначно подтвердить. Проверьте Корзину вручную или запустите повторную проверку состояния.",
+                            title: "Automatic retry blocked",
+                            message: "The original path disappeared, but the item in the Trash could not be confirmed unambiguously. Check the Trash manually or run the state check again.",
                             tone: .danger
                         )
                         Button { acknowledgedManualResolution.toggle() } label: {
@@ -607,7 +634,7 @@ private struct OrphanDataOutcomeView: View {
                                 Image(systemName: acknowledgedManualResolution ? "checkmark.square.fill" : "square")
                                     .font(.system(size: 17, weight: .semibold))
                                     .foregroundStyle(acknowledgedManualResolution ? Color.orange : Color.secondaryText)
-                                Text("Я проверю Корзину и исходный путь вручную. Я понимаю, что DiskBloom не подтвердил результат и не будет автоматически повторять перемещение.")
+                                Text("I will check the Trash and the original path manually. I understand that DiskBloom did not confirm the result and will not repeat the move automatically.")
                                     .font(.system(size: 10.5, weight: .semibold))
                                     .foregroundStyle(Color.primaryText)
                                     .multilineTextAlignment(.leading)
@@ -622,7 +649,7 @@ private struct OrphanDataOutcomeView: View {
                     }
                     if !outcome.unattemptedPaths.isEmpty {
                         OrphanReportSection(
-                            title: "Не предпринимались",
+                            title: "Not attempted",
                             icon: "pause.circle.fill",
                             color: .secondaryText,
                             paths: outcome.unattemptedPaths
@@ -631,7 +658,7 @@ private struct OrphanDataOutcomeView: View {
                     if let failure = outcome.failure {
                         OrphanWarningStrip(
                             icon: "exclamationmark.triangle.fill",
-                            title: "Операция остановлена",
+                            title: "Operation stopped",
                             message: failure,
                             tone: .danger
                         )
@@ -645,13 +672,13 @@ private struct OrphanDataOutcomeView: View {
             HStack(spacing: 10) {
                 if model.hasUncertainOutcome {
                     Button(action: model.recheckUncertainOutcome) {
-                        Label("Проверить спорный результат", systemImage: "arrow.clockwise.circle")
+                        Label("Check Disputed Result", systemImage: "arrow.clockwise.circle")
                     }
                     .buttonStyle(PrimaryButtonStyle())
                     .disabled(model.isReviewing || model.isMovingToTrash)
                     Spacer()
                     Button(action: model.acknowledgeUncertainOutcomeAfterManualCheck) {
-                        Label("Закрыть без повтора", systemImage: "hand.raised.fill")
+                        Label("Close Without Retry", systemImage: "hand.raised.fill")
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(
@@ -661,7 +688,7 @@ private struct OrphanDataOutcomeView: View {
                     )
                 } else {
                     Button(action: model.clearLastOutcome) {
-                        Text("Готово")
+                        Text("Done")
                     }
                     .buttonStyle(SecondaryButtonStyle())
 
@@ -671,7 +698,7 @@ private struct OrphanDataOutcomeView: View {
                         model.clearLastOutcome()
                         model.startAnalysis()
                     } label: {
-                        Label("Обновить анализ", systemImage: "arrow.clockwise")
+                        Label("Refresh Analysis", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(PrimaryButtonStyle())
                 }

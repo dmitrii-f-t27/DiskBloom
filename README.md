@@ -1,112 +1,140 @@
 # DiskBloom
 
-DiskBloom — локальный нативный анализатор занятого места, безопасный деинсталлятор приложений и read-only поиск дубликатов для macOS. Он строит интерактивную кольцевую карту, показывает крупные объекты, умеет подготовить проверенный план удаления `.app` вместе с явно выбранными связанными данными и находит файлы с одинаковым содержимым.
+DiskBloom is a local, native macOS app that shows where your disk space went, safely uninstalls apps together with their related data, and finds possible app leftovers and byte-for-byte duplicate files. It builds an interactive ring map, shows the largest items, prepares a verified removal plan for an `.app` together with explicitly selected related data, and finds files with identical content. Nothing is ever deleted permanently: after your review, items go to the Trash.
 
-## Скачать и установить
+## Download and install
 
-**[Скачать DiskBloom 1.3 для macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.3.0/DiskBloom-1.3.0-macOS-arm64.dmg)**
+**[Download DiskBloom 1.4 for macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.4.0/DiskBloom-1.4.0-macOS-arm64.dmg)**
 
-[ZIP-архив](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.3.0/DiskBloom-1.3.0-macOS-arm64.zip) · [Все релизы](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.3.0/SHA256SUMS)
+[ZIP archive](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.4.0/DiskBloom-1.4.0-macOS-arm64.zip) · [All releases](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.4.0/SHA256SUMS)
 
-Требования: **Mac с Apple Silicon (M1 и новее), macOS 14 Sonoma или новее**. Intel Mac текущей сборкой не поддерживается. Интерфейс — на русском языке.
+Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later.** The direct download does not support Intel Macs. The interface is in English.
 
-1. Скачайте DMG, откройте его и перетащите `DiskBloom.app` в `Applications` («Программы»). Для ZIP распакуйте архив и перенесите приложение в «Программы» вручную.
-2. Запустите DiskBloom из «Программ». Для готового приложения Xcode не нужен.
-3. Выберите инструмент и папку для анализа. Поиск дубликатов работает только для чтения; действия очистки в других инструментах требуют отдельного подтверждения.
+1. Download the DMG, open it and drag `DiskBloom.app` to Applications. If you use the ZIP, unpack it and move the app to Applications yourself.
+2. Open DiskBloom from Applications. The prebuilt app does not need Xcode.
+3. Choose a tool and a folder to analyze. The duplicate finder is read-only; cleanup actions in the other tools need a separate confirmation.
 
-**Статус подписи:** версия 1.3 (build 4) имеет локальную ad-hoc подпись, без Developer ID и notarization Apple. macOS может заблокировать первый запуск. Если вы доверяете этому выпуску, после попытки запуска используйте доступное системное разрешение для конкретного приложения в «Системные настройки → Конфиденциальность и безопасность». Не отключайте Gatekeeper для всей системы. [Инструкция Apple](https://support.apple.com/102445).
+**Signature status:** version 1.4 (build 5) from GitHub has a local ad-hoc signature, without a Developer ID and without Apple notarization. macOS may block the first launch. If you trust this release, try to open the app once, then use the per-app permission in System Settings → Privacy & Security. Do not turn off Gatekeeper for the whole system. [Apple's instructions](https://support.apple.com/102445).
 
-The downloadable build is for **Apple Silicon / macOS 14+**, with a Russian-language interface. It is **ad-hoc signed and not notarized by Apple**. Download a DMG or ZIP from Releases, copy the app to Applications, and review the macOS security prompt before opening it.
+## Features
 
-## Возможности
+- background scanning without `sudo` and without sending any path to the network;
+- used space is measured by allocated size;
+- an interactive sunburst map up to six levels deep;
+- folder navigation, an inspector, the full path and Reveal in Finder;
+- the long tail of small items is merged into a safe virtual "Other" group;
+- a cleanup queue with exact paths and the total size;
+- re-measurement, a content fingerprint, path and file identity checks before any move;
+- only `FileManager.trashItem` is used — there is no direct permanent deletion;
+- system folders and the root of the home folder are view-only.
 
-- фоновое сканирование без `sudo` и без передачи путей в сеть;
-- оценка занятого места по allocated size;
-- интерактивная sunburst-карта глубиной до шести уровней;
-- навигация по папкам, инспектор, полный путь и Reveal in Finder;
-- объединение длинного хвоста мелких объектов в безопасную виртуальную группу «Прочее»;
-- очередь очистки с точными путями и итоговым размером;
-- повторное измерение, fingerprint содержимого, проверка пути и файлового идентификатора;
-- только `FileManager.trashItem` — прямого безвозвратного удаления нет;
-- системные каталоги и корень домашней папки доступны только для просмотра.
+## App Uninstaller
 
-## Удаление приложений
+The App Uninstaller lists the applications in `/Applications`, `~/Applications` and `/System/Applications`, supports search and lets you pick any local `.app`.
 
-Отдельный инструмент «Удаление приложений» показывает программы из `/Applications`, `~/Applications` и `/System/Applications`, поддерживает поиск и выбор произвольного локального `.app`.
+For the selected application DiskBloom:
 
-Для выбранного приложения DiskBloom:
+- measures the bundle and records its path, `lstat` identity and a recursive fingerprint;
+- treats the bundle ID as untrusted input and builds only pre-approved exact paths in `~/Library`;
+- through Security.framework requires a signature with an Apple trust anchor, a non-empty Team ID, strict validity and a signing identifier that matches the bundle ID; only then can low-risk exact bundle-ID paths be selected by default;
+- reads the declared `com.apple.security.application-groups`, but always leaves Group Containers off as potentially shared;
+- selects by default only exact caches, preferences, saved state, HTTP/WebKit data, cookies and logs;
+- leaves `Application Support`, sandbox Containers, Application Scripts, LaunchAgents, name matches and any shared or unconfirmed data off;
+- turns every related path off by default when the bundle ID is duplicated or the signing identifier is unconfirmed;
+- blocks system applications, `com.apple.*`, DiskBloom itself, network, read-only and cloud paths, symlinked paths, a running app or helper and any running copy with the same bundle ID;
+- re-checks the whole selection before review and every item inside `NSFileCoordinator`; for a trusted plan it re-verifies the bundle snapshot, the Apple-anchored signature, Team ID, signing identifier and App Groups;
+- moves the `.app` first; if that fails, related data is left untouched, and a later failure stops the remaining queue and keeps a report;
+- if the system Trash does not return a result with a confirmable identity, marks the path as unconfirmed and blocks automatic retry until the original path is checked separately;
+- after a partial failure keeps the plan, marks the rows that were already moved, shows the full report and lets you start a new analysis explicitly;
+- before continuing an old plan after the `.app` was moved, checks the standard application folders, LaunchServices registration, the original path and running processes; if another copy appears, a new analysis is required.
 
-- измеряет пакет и фиксирует его путь, `lstat` identity и рекурсивный fingerprint;
-- принимает bundle ID как недоверенный ввод и строит только заранее разрешённые точные пути в `~/Library`;
-- через Security.framework требует подпись с Apple trust anchor, непустой Team ID, строгую проверку целостности и совпадение signing identifier с bundle ID; только после этого низкорисковые точные пути по bundle ID могут быть включены по умолчанию;
-- читает объявленные `com.apple.security.application-groups`, но Group Containers всегда оставляет выключенными как потенциально общие;
-- включает по умолчанию только точные кэши, настройки, saved state, HTTP/WebKit-данные, cookies и логи;
-- оставляет выключенными `Application Support`, sandbox Containers, Application Scripts, LaunchAgents, совпадения по имени и любые общие/неподтверждённые данные;
-- отключает все связанные пути по умолчанию при дубликате bundle ID или неподтверждённом signing identifier;
-- блокирует системные приложения, `com.apple.*`, DiskBloom, сетевые/read-only/облачные пути, symlink-пути, запущенное приложение/helper и любую запущенную копию с тем же bundle ID;
-- повторно проверяет весь выбранный набор перед review и каждый объект внутри `NSFileCoordinator`; для доверенного плана заново сверяет снимок пакета, Apple-anchored подпись, Team ID, signing identifier и App Groups;
-- сначала перемещает `.app`; при ошибке не затрагивает связанные данные, а при поздней ошибке останавливает оставшуюся очередь и сохраняет отчёт;
-- если системная Корзина не возвращает результат с подтверждаемой identity, помечает путь как неподтверждённый и блокирует автоматический повтор до отдельной проверки исходного пути;
-- после частичной ошибки сохраняет план, отмечает уже перемещённые строки, показывает полный отчёт и позволяет явно запустить анализ заново.
-- перед продолжением старого плана после перемещения `.app` проверяет стандартный каталог приложений, регистрацию LaunchServices, исходный путь и запущенные процессы; при появлении другой копии требует новый анализ.
+Potentially important or shared data needs a separate checkbox in the final review. A move of several paths is not an atomic transaction. The app does not ask for `sudo` or Full Disk Access, does not quit processes and does not unload LaunchAgents automatically.
 
-Потенциально важные или общие данные требуют отдельной галочки в финальном окне. Несколько перемещений не являются атомарной транзакцией. Приложение не запрашивает `sudo`, Full Disk Access, не завершает процессы и не выгружает LaunchAgents автоматически.
+## Possible leftovers of removed apps
 
-## Возможные остатки удалённых приложений
+Possible Leftovers analyzes only direct folders named with an exact bundle ID in pre-approved locations of the current user: `Application Support`, `Caches`, `Saved Application State`, `HTTPStorages`, `WebKit`, `Logs`, `Containers` and `Application Scripts` inside `~/Library`.
 
-Отдельный инструмент «Возможные остатки» анализирует только непосредственные папки с точным bundle ID в заранее разрешённых областях текущего пользователя: `Application Support`, `Caches`, `Saved Application State`, `HTTPStorages`, `WebKit`, `Logs`, `Containers` и `Application Scripts` внутри `~/Library`.
+- every candidate starts unselected;
+- the wording is deliberately probabilistic: not finding an `.app` does not prove that nobody needs the folder;
+- bundle IDs are compared case-insensitively with installed applications, nested `.app`/`.appex`/`.xpc`/Login Items, current processes, LaunchServices and launchd configurations; sibling IDs from the same reverse-domain namespace are conservatively treated as taken;
+- `Documents`, Desktop, Downloads, cloud folders, Group Containers, name matches and shared vendor folders are never offered;
+- folders with inaccessible content, symlinks, another owner, immutable flags, a volume boundary or a nested executable component are view-only;
+- before review and immediately before every move, the current owner of the bundle ID, the exact allowlisted path, identity and recursive fingerprint are checked again;
+- `Application Support`, Containers, Application Scripts and web/session state need a separate confirmation of possible user data;
+- the result of `FileManager.trashItem` is confirmed through relocation identity; a partial or unconfirmed outcome is kept in the report, and a risky automatic retry is blocked until a read-only recheck or an explicit manual acknowledgement without repeating the action.
 
-- все кандидаты изначально выключены;
-- формулировка намеренно вероятностная: отсутствие найденного `.app` не доказывает, что папка больше никому не нужна;
-- bundle ID сравниваются без учёта регистра с установленными приложениями, вложенными `.app`/`.appex`/`.xpc`/Login Items, текущими процессами, LaunchServices и launchd-конфигурациями; sibling ID из того же reverse-domain namespace консервативно считаются занятыми;
-- `Documents`, Desktop, Downloads, облачные папки, Group Containers, совпадения по имени и общие vendor-папки не предлагаются;
-- папки с недоступным содержимым, symlink, другим владельцем, immutable-флагами, границей тома или вложенным исполняемым компонентом доступны только для просмотра;
-- перед review и непосредственно перед каждым перемещением заново проверяются текущий владелец bundle ID, точный allowlisted path, identity и рекурсивный fingerprint;
-- `Application Support`, Containers, Application Scripts и web/session state требуют отдельного подтверждения возможных пользовательских данных;
-- результат `FileManager.trashItem` подтверждается relocation identity; частичный или неподтверждённый исход сохраняется в отчёте, а опасный автоматический повтор блокируется до read-only recheck либо явного ручного подтверждения без повторного действия.
+This mode does not read document contents to guess an owner and does not claim to find every possible leftover on the Mac.
 
-Этот режим не читает содержимое документов для догадок о владельце и не утверждает, что нашёл все возможные остатки на Mac.
+## Duplicate files
 
-## Дубликаты файлов
+Duplicate Files runs a read-only analysis only after you explicitly choose a folder or a local disk.
 
-Отдельный инструмент «Дубликаты файлов» выполняет read-only анализ только после явного выбора папки или локального диска.
+- files are first grouped by exact logical size, so files with unique sizes are never read in full;
+- candidates are streamed and get a full SHA-256;
+- a matching hash is not considered enough: every final group is confirmed by a byte-by-byte comparison;
+- empty files, hidden items, symbolic links, hard links, application bundles, other volumes and iCloud files that are not downloaded are skipped;
+- exact paths, modification date, logical and allocated size are shown, together with Reveal in Finder;
+- the tool selects, moves and deletes nothing.
 
-- сначала файлы группируются по точному логическому размеру, поэтому уникальные размеры не читаются полностью;
-- кандидаты читаются потоково и получают полный SHA-256;
-- совпадение хеша не считается достаточным: каждая итоговая группа дополнительно подтверждается побайтовым сравнением;
-- нулевые файлы, скрытые объекты, символические ссылки, hard link, пакеты приложений, другие тома и незагруженные iCloud-файлы пропускаются;
-- показываются точные пути, дата изменения, логический и allocated size, а также действие Reveal in Finder;
-- инструмент ничего не выбирает, не перемещает и не удаляет.
+Identical means identical data fork content. Names, dates, Finder tags, extended attributes and resource forks may differ. "Logical size of extra copies" is an upper estimate, not a promise of physically freed space: APFS clones, sparse files, compression and snapshots can share blocks.
 
-Одинаковым считается содержимое data fork. Имена, даты, Finder-теги, расширенные атрибуты и resource fork могут отличаться. «Логический размер лишних копий» — верхняя оценка, а не обещание физически освобождённого места: APFS-клоны, sparse-файлы, сжатие и snapshots могут разделять блоки.
+## Mac App Store edition
 
-## Сборка и запуск
+The Mac App Store build is the same code compiled with the App Sandbox (see [AppStore/README.md](AppStore/README.md)):
 
-Требуются Xcode Command Line Tools и macOS 14 или новее.
+- it reads only the folders you grant in the system open panel, and remembers each grant as a security-scoped bookmark;
+- App Uninstaller and Possible Leftovers ask for access to your home folder before any analysis, and the uninstaller asks for permission to change the folder that contains an app before moving it;
+- the sandbox hides the list of running processes, so Possible Leftovers cannot see background tools that are not registered apps; in this build the results show a warning and every move needs an explicit confirmation;
+- it is a universal binary for Apple silicon and Intel, macOS 14 or later.
+
+The App Store edition is prepared but not yet published.
+
+## Build and run
+
+You need the Xcode Command Line Tools and macOS 14 or later.
 
 ```bash
-chmod +x build.sh
 ./build.sh
 open -n DiskBloom.app
 ```
 
-Готовая локальная сборка находится рядом с исходниками в `DiskBloom.app`.
-
-Для создания ZIP, DMG и `SHA256SUMS` из готовой сборки:
+To create the ZIP, DMG and `SHA256SUMS` from the built app:
 
 ```bash
 ./package-release.sh
 ```
 
-Пакеты создаются в `release/` и публикуются отдельными вложениями GitHub Release. Локальные журналы проверки, тестовые данные, сертификаты и собранные пакеты не входят в git-историю.
+The packages are created in `release/` and published as separate GitHub Release assets. Local verification logs, test data, certificates and built packages are not part of the git history.
 
-## Важные ограничения
+To try the sandboxed flow locally without an Apple Developer account:
 
-- APFS-клоны, sparse-файлы и разделяемые блоки означают, что размер является оценкой, а не обещанием точно освобождённого места.
-- Перемещение в Корзину само по себе не освобождает место; это происходит только после очистки Корзины.
-- Символические ссылки не обходятся.
-- Папки без разрешения учитываются как недоступные; приложение не запрашивает Full Disk Access автоматически.
-- Глубокие узлы сканируются полностью для подсчёта, но их дочерние элементы разворачиваются после входа в такую папку.
-- Никакой объект не перемещается в Корзину без добавления в очередь и отдельного подтверждения.
-- Apple trust anchor и Team ID не являются проверкой notarization/Gatekeeper и сами по себе не доказывают, что разработчик эксклюзивно владеет bundle ID. Строгая проверка подписи намеренно работает fail-closed: модифицированный пакет может потребовать ручного выбора связанных путей.
-- Универсально определить все произвольно названные остатки стороннего приложения невозможно. DiskBloom показывает только подтверждённые точные и явно помеченные возможные связи; приложения с privileged helper или system extension могут требовать официальный деинсталлятор производителя.
+```bash
+./build.sh --sandbox
+open -n .build/Sandbox/DiskBloom.app
+```
+
+The Mac App Store build is produced by `DiskBloom.xcodeproj`, which is generated from `project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen). App identity and version live in `Config/Version.xcconfig` and are shared by both builds.
+
+## Tests
+
+```bash
+./Tests/run-smoke-tests.sh
+ARCH=x86_64 ./Tests/run-smoke-tests.sh   # Intel slice, runs under Rosetta
+```
+
+Five suites cover the scanner, cleanup safety, app removal, possible leftovers and the duplicate finder. They build their own fixtures inside `.build/` and never call the real Trash: the leftovers coordinator test uses an injected mover.
+
+## Important limitations
+
+- APFS clones, sparse files and shared blocks mean that a size is an estimate, not a promise of exactly freed space.
+- Moving to the Trash does not free space by itself; that happens only when the Trash is emptied.
+- Symbolic links are not followed.
+- Folders without permission are counted as inaccessible; the app never requests Full Disk Access automatically.
+- Deep nodes are scanned completely for totals, but their children are expanded after you enter such a folder.
+- Nothing is moved to the Trash without being added to the queue and a separate confirmation.
+- An Apple trust anchor and a Team ID are not a notarization/Gatekeeper check and do not prove by themselves that a developer exclusively owns a bundle ID. The strict signature check deliberately fails closed: a modified bundle can require manual selection of related paths.
+- It is impossible to find every arbitrarily named leftover of a third-party app. DiskBloom shows only confirmed exact relations and clearly marked possible ones; apps with a privileged helper or a system extension may need the vendor's official uninstaller.
+
+## Privacy
+
+DiskBloom has no network code, no analytics and no telemetry. See [PRIVACY.md](PRIVACY.md).

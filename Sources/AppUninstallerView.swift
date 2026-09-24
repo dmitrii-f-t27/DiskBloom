@@ -24,7 +24,7 @@ struct AppUninstallerView: View {
         .sheet(isPresented: $model.showingOutcomeReport) {
             if let outcome = model.lastOutcome {
                 AppRemovalResultView(
-                    applicationName: model.lastApplicationName ?? "Приложение",
+                    applicationName: model.lastApplicationName ?? "Application",
                     outcome: outcome,
                     clearsOutcomeOnDone: false
                 )
@@ -45,9 +45,9 @@ struct AppUninstallerView: View {
         VStack(spacing: 0) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Удаление приложений")
+                    Text("App Uninstaller")
                         .font(.system(size: 17, weight: .bold, design: .rounded))
-                    Text("точные связи, без скрытого удаления")
+                    Text("exact relations, no hidden deletion")
                         .font(.system(size: 9.5))
                         .foregroundStyle(Color.secondaryText)
                 }
@@ -57,7 +57,7 @@ struct AppUninstallerView: View {
                 }
                 .buttonStyle(IconButtonStyle())
                 .disabled(model.isLoadingApplications || model.isMovingToTrash)
-                .help("Обновить список")
+                .help("Refresh list")
             }
             .padding(.horizontal, 16)
             .frame(height: 62)
@@ -68,7 +68,7 @@ struct AppUninstallerView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.secondaryText)
-                TextField("Поиск по имени или bundle ID", text: $model.searchText)
+                TextField("Search by name or bundle ID", text: $model.searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11.5))
                 if !model.searchText.isEmpty {
@@ -86,7 +86,7 @@ struct AppUninstallerView: View {
 
             if model.isLoadingApplications && model.applications.isEmpty {
                 Spacer()
-                ProgressView("Ищем приложения…")
+                ProgressView("Looking for applications…")
                     .controlSize(.small)
                     .font(.system(size: 11))
                     .foregroundStyle(Color.secondaryText)
@@ -96,7 +96,7 @@ struct AppUninstallerView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "square.grid.2x2")
                         .font(.system(size: 25))
-                    Text("Приложения не найдены")
+                    Text("No applications found")
                         .font(.system(size: 12, weight: .semibold))
                 }
                 .foregroundStyle(Color.secondaryText)
@@ -119,7 +119,7 @@ struct AppUninstallerView: View {
             Rectangle().fill(Color.separator.opacity(0.5)).frame(height: 1)
 
             Button(action: model.chooseApplication) {
-                Label("Выбрать другой .app", systemImage: "plus.app.fill")
+                Label("Choose Another .app", systemImage: "plus.app.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(SecondaryButtonStyle())
@@ -131,13 +131,20 @@ struct AppUninstallerView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if model.isInspecting {
+        if model.needsHomeAccess {
+            HomeAccessRequiredView(
+                icon: "app.badge.checkmark",
+                title: "Allow access to your Library",
+                message: "The App Store version of DiskBloom runs in the App Sandbox. To find each app's caches, preferences and other related data, it needs access to your home folder. Nothing is changed until you review and confirm a plan.",
+                action: model.grantHomeAccess
+            )
+        } else if model.isInspecting {
             AppInspectionProgressView()
         } else if let plan = model.plan {
             AppRemovalPlanView(plan: plan)
         } else if let outcome = model.lastOutcome {
             AppRemovalResultView(
-                applicationName: model.lastApplicationName ?? "Приложение",
+                applicationName: model.lastApplicationName ?? "Application",
                 outcome: outcome,
                 clearsOutcomeOnDone: true
             )
@@ -175,7 +182,7 @@ private struct ApplicationListRow: View {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(Color.secondaryText)
-                        .help("Защищено")
+                        .help("Protected")
                 } else if isSelected {
                     Circle().fill(Color.accentMint).frame(width: 6, height: 6)
                 }
@@ -199,23 +206,23 @@ private struct AppUninstallerWelcomeView: View {
                     .font(.system(size: 58, weight: .light))
                     .foregroundStyle(Color.accentMint)
             }
-            Text("Удаление без догадок")
+            Text("Uninstall without guesswork")
                 .font(.system(size: 25, weight: .bold, design: .rounded))
-            Text("Выберите приложение. DiskBloom проверит сам пакет и только заранее разрешённые точные пути в вашей Library. Именные и общие данные останутся выключенными, пока вы не выберете их сами.")
+            Text("Choose an application. DiskBloom checks the bundle itself and only pre-approved exact paths in your Library. Name-based and shared data stay off until you select them yourself.")
                 .font(.system(size: 12))
                 .foregroundStyle(Color.secondaryText)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 570)
                 .lineSpacing(3)
             HStack(spacing: 9) {
-                Label("локально", systemImage: "lock.shield.fill")
-                Label("в Корзину", systemImage: "trash")
-                Label("с повторной проверкой", systemImage: "checkmark.shield")
+                Label("local", systemImage: "lock.shield.fill")
+                Label("to Trash", systemImage: "trash")
+                Label("re-verified", systemImage: "checkmark.shield")
             }
             .font(.system(size: 10.5, weight: .semibold))
             .foregroundStyle(Color.accentMint)
             Button(action: model.chooseApplication) {
-                Label("Выбрать приложение", systemImage: "plus.app.fill")
+                Label("Choose Application", systemImage: "plus.app.fill")
             }
             .buttonStyle(PrimaryButtonStyle())
         }
@@ -239,9 +246,9 @@ private struct AppInspectionProgressView: View {
             ProgressView()
                 .controlSize(.large)
                 .tint(Color.accentMint)
-            Text("Проверяем приложение и точные связи")
+            Text("Checking the application and exact relations")
                 .font(.system(size: 20, weight: .bold, design: .rounded))
-            Text("Просмотрено \(model.progress.itemCount.formatted()) \(RussianPlural.objects(model.progress.itemCount))")
+            Text("\(model.progress.itemCount.formatted()) \(Plural.objects(model.progress.itemCount)) scanned")
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(Color.accentMint)
             Text(model.progress.currentPath)
@@ -298,7 +305,7 @@ private struct AppRemovalPlanView: View {
                             .background(Color.white.opacity(0.055), in: Capsule())
                     }
                 }
-                Text(plan.application.bundleIdentifier ?? "Bundle ID отсутствует — доступны только пакет и ручные совпадения")
+                Text(plan.application.bundleIdentifier ?? "No bundle ID — only the bundle and manual matches are available")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Color.secondaryText)
                     .textSelection(.enabled)
@@ -313,7 +320,7 @@ private struct AppRemovalPlanView: View {
             VStack(alignment: .trailing, spacing: 3) {
                 Text(ByteFormat.string(plan.items.first?.node.size ?? 0))
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                Text("размер пакета — оценка")
+                Text("bundle size — estimate")
                     .font(.system(size: 9))
                     .foregroundStyle(Color.secondaryText)
             }
@@ -328,7 +335,7 @@ private struct AppRemovalPlanView: View {
                     || !model.confirmedMovedItemIDs.isEmpty
                     || model.hasUncertainOutcome
             )
-            .help(model.applicationWasMoved ? "Пакет уже перемещён; сохранён план продолжения" : "Анализировать заново")
+            .help(model.applicationWasMoved ? "Bundle already moved; the continuation plan is kept" : "Analyze again")
         }
         .padding(.horizontal, 20)
         .frame(height: 82)
@@ -348,7 +355,7 @@ private struct AppRemovalPlanView: View {
         }
         if model.applicationWasMoved {
             WarningStrip(
-                text: "Пакет приложения уже перемещён в Корзину. Ниже остались только не обработанные связанные пути; их можно исключить или проверить повторно.",
+                text: "The application bundle has already been moved to the Trash. Only unprocessed related paths remain below; you can exclude or re-check them.",
                 icon: "trash.circle.fill",
                 color: .accentMint
             )
@@ -357,7 +364,7 @@ private struct AppRemovalPlanView: View {
         }
         if plan.application.bundleIdentifier != nil, !plan.bundleIdentifierIsSignatureBacked {
             WarningStrip(
-                text: "Bundle ID не подтверждён подписью с Apple trust anchor и Team ID. Все построенные по нему пути выключены по умолчанию.",
+                text: "The bundle ID is not backed by a signature with an Apple trust anchor and Team ID. All paths built from it are off by default.",
                 icon: "signature",
                 color: .orange
             )
@@ -366,7 +373,7 @@ private struct AppRemovalPlanView: View {
         }
         if plan.hasDuplicateBundleIdentifier {
             WarningStrip(
-                text: "Этот bundle ID есть у нескольких приложений. Все связанные пути выключены по умолчанию как потенциально общие.",
+                text: "Several applications share this bundle ID. All related paths are off by default as potentially shared.",
                 icon: "square.stack.3d.up.fill",
                 color: .orange
             )
@@ -375,7 +382,7 @@ private struct AppRemovalPlanView: View {
         }
         if plan.hasPrivilegedComponents {
             WarningStrip(
-                text: "В пакете обнаружены системное расширение, helper или Login Item. Для полного удаления может потребоваться официальный деинсталлятор разработчика.",
+                text: "A system extension, helper or Login Item was found in the bundle. A complete uninstall may require the developer’s official uninstaller.",
                 icon: "gearshape.2.fill",
                 color: .orange
             )
@@ -385,11 +392,11 @@ private struct AppRemovalPlanView: View {
         if let uncertainPaths = model.lastOutcome?.uncertainPaths, !uncertainPaths.isEmpty {
             VStack(alignment: .trailing, spacing: 7) {
                 WarningStrip(
-                    text: "Результат перемещения не удалось подтвердить; автоматический повтор заблокирован:\n\(uncertainPaths.joined(separator: "\n"))",
+                    text: "The move result could not be confirmed; automatic retry is blocked:\n\(uncertainPaths.joined(separator: "\n"))",
                     icon: "questionmark.folder.fill",
                     color: .danger
                 )
-                Button("Перепроверить исходные пути") {
+                Button("Re-check Original Paths") {
                     model.recheckUncertainPaths()
                 }
                 .buttonStyle(SecondaryButtonStyle())
@@ -401,11 +408,11 @@ private struct AppRemovalPlanView: View {
         if let failure = model.lastOutcome?.failure {
             VStack(alignment: .trailing, spacing: 7) {
                 WarningStrip(
-                    text: "Предыдущая попытка остановлена: \(failure)",
+                    text: "The previous attempt stopped: \(failure)",
                     icon: "exclamationmark.octagon.fill",
                     color: .danger
                 )
-                Button("Открыть полный отчёт") {
+                Button("Open Full Report") {
                     model.showingOutcomeReport = true
                 }
                 .buttonStyle(SecondaryButtonStyle())
@@ -418,16 +425,16 @@ private struct AppRemovalPlanView: View {
     private var itemHeader: some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text("НАЙДЕННЫЕ ОБЪЕКТЫ")
+                Text("FOUND ITEMS")
                     .font(.system(size: 10, weight: .bold))
                     .tracking(1.1)
                     .foregroundStyle(Color.secondaryText)
-                Text("Только точные разрешённые пути; поиск по подстроке не используется")
+                Text("Only exact allowed paths; no substring search is used")
                     .font(.system(size: 9.5))
                     .foregroundStyle(Color.secondaryText.opacity(0.82))
             }
             Spacer()
-            Text("\(plan.items.count) \(RussianPlural.objects(plan.items.count))")
+            Text("\(plan.items.count) \(Plural.objects(plan.items.count))")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Color.secondaryText)
         }
@@ -447,21 +454,21 @@ private struct AppRemovalPlanView: View {
                 }
                 .frame(width: 38, height: 38)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Выбрано: \(model.selectedItems.count)")
+                    Text("Selected: \(model.selectedItems.count)")
                         .font(.system(size: 12.5, weight: .semibold))
-                    Text("Объём выбранного — оценка: \(ByteFormat.string(model.selectedSize))")
+                    Text("Selected size — estimate: \(ByteFormat.string(model.selectedSize))")
                         .font(.system(size: 10.5))
                         .foregroundStyle(Color.secondaryText)
                 }
                 Spacer()
-                Text("Место не освободится до очистки Корзины")
+                Text("Space is not freed until the Trash is emptied")
                     .font(.system(size: 9.5))
                     .foregroundStyle(Color.secondaryText)
                 Button(action: model.requestRemovalReview) {
                     if model.isReviewing || model.isMovingToTrash {
                         ProgressView().controlSize(.small)
                     } else {
-                        Label("Проверить удаление", systemImage: "checkmark.shield.fill")
+                        Label("Review Uninstall", systemImage: "checkmark.shield.fill")
                     }
                 }
                 .buttonStyle(DangerButtonStyle())
@@ -521,10 +528,10 @@ private struct AppRemovalItemRow: View {
             .disabled(item.isRequired || !item.isSelectable || isConfirmedMoved)
             .help(
                 isConfirmedMoved
-                    ? "Уже перемещено в Корзину"
+                    ? "Already moved to Trash"
                     : item.isRequired
-                    ? (model.applicationWasMoved ? "Уже перемещено в Корзину" : "Пакет приложения обязателен")
-                    : (isSelected ? "Исключить" : "Включить")
+                    ? (model.applicationWasMoved ? "Already moved to Trash" : "The application bundle is required")
+                    : (isSelected ? "Exclude" : "Include")
             )
 
             VStack(alignment: .leading, spacing: 6) {
@@ -544,7 +551,7 @@ private struct AppRemovalItemRow: View {
                             .foregroundStyle(Color.orange)
                     }
                     if isConfirmedMoved {
-                        Text("УЖЕ В КОРЗИНЕ")
+                        Text("ALREADY IN TRASH")
                             .font(.system(size: 8, weight: .heavy))
                             .tracking(0.4)
                             .foregroundStyle(Color.accentMint)
@@ -570,7 +577,7 @@ private struct AppRemovalItemRow: View {
             }
             .buttonStyle(IconButtonStyle())
             .disabled(isConfirmedMoved)
-            .help("Показать в Finder")
+            .help("Reveal in Finder")
         }
         .padding(12)
         .background(
@@ -601,9 +608,9 @@ private struct AppRemovalReviewSheet: View {
                 }
                 .frame(width: 52, height: 52)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Финальная проверка удаления")
+                    Text("Final uninstall review")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
-                    Text("\(model.selectedItems.count) \(RussianPlural.objects(model.selectedItems.count)) · объём выбранного — оценка \(ByteFormat.string(model.selectedSize))")
+                    Text("\(model.selectedItems.count) \(Plural.objects(model.selectedItems.count)) · selected size — estimate \(ByteFormat.string(model.selectedSize))")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color.secondaryText)
                 }
@@ -649,13 +656,13 @@ private struct AppRemovalReviewSheet: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 if model.applicationWasMoved {
-                    Label("Пакет .app уже в Корзине; сейчас проверяются только оставшиеся выбранные пути.", systemImage: "checkmark.circle.fill")
+                    Label("The .app bundle is already in the Trash; only the remaining selected paths are being checked now.", systemImage: "checkmark.circle.fill")
                 } else {
-                    Label("Сначала перемещается .app; при ошибке связанные данные не затрагиваются.", systemImage: "1.circle.fill")
+                    Label("The .app is moved first; if that fails, related data is left untouched.", systemImage: "1.circle.fill")
                 }
-                Label("Операция из нескольких путей не атомарна: при поздней ошибке она остановится и покажет отчёт.", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
-                Label("Каждый путь, identity и fingerprint будут проверены ещё раз внутри файловой координации.", systemImage: "checkmark.shield")
-                Label("Объекты попадут в системную Корзину; место освободится только после её очистки.", systemImage: "arrow.uturn.backward.circle")
+                Label("A multi-path operation is not atomic: on a late failure it stops and shows a report.", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                Label("Every path, identity and fingerprint is checked once more inside file coordination.", systemImage: "checkmark.shield")
+                Label("Items go to the system Trash; space is freed only after it is emptied.", systemImage: "arrow.uturn.backward.circle")
             }
             .font(.system(size: 10.5))
             .foregroundStyle(Color.secondaryText)
@@ -664,7 +671,7 @@ private struct AppRemovalReviewSheet: View {
 
             if model.needsExtraAcknowledgement {
                 Toggle(isOn: $acknowledgedSensitiveData) {
-                    Text("Я проверил выбранные пути с потенциально важными или общими данными")
+                    Text("I have reviewed the selected paths with potentially important or shared data")
                         .font(.system(size: 10.5, weight: .semibold))
                 }
                 .toggleStyle(.checkbox)
@@ -675,10 +682,10 @@ private struct AppRemovalReviewSheet: View {
             Rectangle().fill(Color.separator).frame(height: 1)
 
             HStack {
-                Button("Отмена") { dismiss() }
+                Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Переместить выбранное в Корзину") {
+                Button("Move Selected to Trash") {
                     model.moveReviewedItemsToTrash()
                 }
                 .buttonStyle(DangerButtonStyle())
@@ -713,7 +720,7 @@ private struct AppRemovalResultView: View {
                         .foregroundStyle(outcome.failure == nil ? Color.accentMint : Color.orange)
                 }
                 .frame(width: 72, height: 72)
-                Text(outcome.failure == nil ? "Перемещение завершено" : "Операция остановлена")
+                Text(outcome.failure == nil ? "Move completed" : "Operation stopped")
                     .font(.system(size: 23, weight: .bold, design: .rounded))
                 Text(applicationName)
                     .font(.system(size: 12, weight: .semibold))
@@ -726,21 +733,21 @@ private struct AppRemovalResultView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     if !outcome.movedPaths.isEmpty {
                         ResultPathSection(
-                            title: "ПЕРЕМЕЩЕНО В КОРЗИНУ",
+                            title: "MOVED TO TRASH",
                             paths: outcome.movedPaths,
                             color: .accentMint
                         )
                     }
                     if !outcome.uncertainPaths.isEmpty {
                         ResultPathSection(
-                            title: "РЕЗУЛЬТАТ НЕ ПОДТВЕРЖДЁН — ПОВТОР ЗАБЛОКИРОВАН",
+                            title: "RESULT UNCONFIRMED — RETRY BLOCKED",
                             paths: outcome.uncertainPaths,
                             color: .danger
                         )
                     }
                     if let failure = outcome.failure {
                         VStack(alignment: .leading, spacing: 7) {
-                            Text("ОШИБКА")
+                            Text("ERROR")
                                 .font(.system(size: 9.5, weight: .bold))
                                 .tracking(1)
                                 .foregroundStyle(Color.danger)
@@ -753,12 +760,12 @@ private struct AppRemovalResultView: View {
                     }
                     if !outcome.unattemptedPaths.isEmpty {
                         ResultPathSection(
-                            title: "НЕ ОБРАБОТАНО",
+                            title: "NOT PROCESSED",
                             paths: outcome.unattemptedPaths,
                             color: .orange
                         )
                     }
-                    Label("Место освободится только после очистки системной Корзины.", systemImage: "trash")
+                    Label("Space is freed only after the system Trash is emptied.", systemImage: "trash")
                         .font(.system(size: 10.5, weight: .semibold))
                         .foregroundStyle(Color.secondaryText)
                 }
@@ -771,7 +778,7 @@ private struct AppRemovalResultView: View {
             Rectangle().fill(Color.separator.opacity(0.55)).frame(height: 1)
             HStack {
                 Spacer()
-                Button(clearsOutcomeOnDone ? "Готово" : "Закрыть") {
+                Button(clearsOutcomeOnDone ? "Done" : "Close") {
                     if clearsOutcomeOnDone {
                         model.clearLastOutcome()
                     } else {
@@ -842,5 +849,46 @@ private struct ApplicationIcon: View {
             .interpolation(.high)
             .scaledToFit()
             .frame(width: size, height: size)
+    }
+}
+
+
+/// Shown by the sandboxed build before the home folder has been granted.
+struct HomeAccessRequiredView: View {
+    let icon: String
+    let title: String
+    let message: String
+    let action: () -> Void
+
+    var body: some View {
+        VStack(spacing: 18) {
+            ZStack {
+                Circle().fill(Color.accentMint.opacity(0.08)).frame(width: 132, height: 132)
+                Image(systemName: icon)
+                    .font(.system(size: 56, weight: .light))
+                    .foregroundStyle(Color.accentMint)
+            }
+            Text(title)
+                .font(.system(size: 25, weight: .bold, design: .rounded))
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundStyle(Color.secondaryText)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 560)
+                .lineSpacing(3)
+            HStack(spacing: 9) {
+                Label("your choice", systemImage: "hand.tap.fill")
+                Label("remembered", systemImage: "bookmark.fill")
+                Label("local only", systemImage: "lock.shield.fill")
+            }
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(Color.accentMint)
+            Button(action: action) {
+                Label("Grant Access to Home Folder", systemImage: "house.fill")
+            }
+            .buttonStyle(PrimaryButtonStyle())
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(28)
     }
 }

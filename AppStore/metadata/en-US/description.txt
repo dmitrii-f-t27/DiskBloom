@@ -1,0 +1,29 @@
+DiskBloom shows where your disk space went and helps you free it safely.
+
+DISK MAP
+• An interactive ring map of any folder or disk, up to six levels deep
+• The largest folders and files at a glance, measured by the space they actually occupy
+• Drill into any folder, see its full path and reveal it in Finder
+• Queue items for cleanup and review the exact paths before anything moves
+
+APP UNINSTALLER
+• Removes an app together with its caches, preferences, saved state, logs and web data
+• Builds only pre-approved exact paths from the app's bundle ID, with no fuzzy matching by default
+• Checks the app's code signature before it pre-selects related data; shared and important data stay off until you choose them
+• Protects running apps, Apple system apps and system locations
+
+POSSIBLE LEFTOVERS
+• Finds folders in your Library that belong to apps that are no longer installed
+• Every candidate starts unselected and is checked again right before it moves
+
+DUPLICATE FILES
+• Finds files with identical content: size first, then a full SHA-256, then a byte-by-byte comparison
+• Read-only: shows exact paths and lets you reveal every copy in Finder
+
+SAFE BY DESIGN
+• Everything runs on your Mac: no network access, no account, no analytics and no telemetry
+• Nothing is deleted permanently: after your review, items go to the Trash, where you can restore them
+• DiskBloom reads only the folders you allow and remembers your choice
+• Paths, identity and contents are verified again immediately before every move
+
+Requires macOS 14 Sonoma or later.

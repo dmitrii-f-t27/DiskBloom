@@ -199,7 +199,7 @@ struct SunburstView: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Круговая карта занятого места")
+        .accessibilityLabel("Ring map of used space")
         .accessibilityRepresentation {
             VStack {
                 ForEach(root.children) { child in
@@ -221,7 +221,7 @@ struct SunburstView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
-            Text(model.canGoBack ? "Назад" : "размер папки")
+            Text(model.canGoBack ? "Back" : "folder size")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Color.secondaryText)
         }

@@ -22,15 +22,16 @@ final class DuplicateFinderModel: ObservableObject {
 
     func chooseFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Выберите папку или локальный диск для поиска дубликатов"
-        panel.prompt = "Найти дубликаты"
+        panel.title = "Choose a folder or local disk to search for duplicates"
+        panel.prompt = "Find Duplicates"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
         panel.resolvesAliases = true
-        panel.directoryURL = rootURL ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        panel.directoryURL = rootURL ?? UserHome.url
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        FolderAccess.shared.remember(url)
         startScan(at: url)
     }
 
@@ -85,7 +86,7 @@ final class DuplicateFinderModel: ObservableObject {
                     isScanning = false
                     scanTask = nil
                     notice = AppNotice(
-                        title: "Не удалось завершить поиск",
+                        title: "Search could not be completed",
                         message: error.localizedDescription
                     )
                 }

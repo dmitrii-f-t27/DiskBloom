@@ -459,7 +459,7 @@ private struct ChildAccumulator {
         guard discardedNodeCount > 0 else { return retained }
         let other = DiskNode(
             url: nil,
-            name: "Прочее (\(discardedNodeCount))",
+            name: "Other (\(discardedNodeCount))",
             size: discardedSize,
             fileCount: discardedFileCount,
             directoryCount: discardedDirectoryCount,

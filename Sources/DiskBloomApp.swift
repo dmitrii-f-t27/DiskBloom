@@ -14,19 +14,22 @@ struct DiskBloomApp: App {
                 .environmentObject(uninstaller)
                 .environmentObject(orphanedData)
                 .environmentObject(duplicateFinder)
+                #if DEBUG
+                .onAppear { ScreenshotAutomation.apply(model: model, duplicateFinder: duplicateFinder) }
+                #endif
         }
         .defaultSize(width: 1280, height: 800)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .newItem) {
-                Button("Выбрать папку…") { model.chooseFolder() }
+                Button("Choose Folder…") { model.chooseFolder() }
                     .keyboardShortcut("o", modifiers: [.command])
                     .disabled(model.workspaceSection != .diskMap)
-                Button("Повторить анализ") { model.rescan() }
+                Button("Rescan") { model.rescan() }
                     .keyboardShortcut("r", modifiers: [.command])
                     .disabled(model.isScanning || model.workspaceSection != .diskMap)
                 Divider()
-                Button("Карта диска") { model.selectWorkspaceSection(.diskMap) }
+                Button("Disk Map") { model.selectWorkspaceSection(.diskMap) }
                     .disabled(
                         uninstaller.isMovingToTrash
                             || uninstaller.isReviewing
@@ -34,7 +37,7 @@ struct DiskBloomApp: App {
                             || uninstaller.showingOutcomeReport
                             || orphanedData.isNavigationLocked
                     )
-                Button("Удаление приложений") { model.selectWorkspaceSection(.appUninstaller) }
+                Button("App Uninstaller") { model.selectWorkspaceSection(.appUninstaller) }
                     .disabled(
                         uninstaller.isMovingToTrash
                             || uninstaller.isReviewing
@@ -42,7 +45,7 @@ struct DiskBloomApp: App {
                             || uninstaller.showingOutcomeReport
                             || orphanedData.isNavigationLocked
                     )
-                Button("Возможные остатки") { model.selectWorkspaceSection(.orphanedAppData) }
+                Button("Possible Leftovers") { model.selectWorkspaceSection(.orphanedAppData) }
                     .disabled(
                         uninstaller.isMovingToTrash
                             || uninstaller.isReviewing
@@ -50,7 +53,7 @@ struct DiskBloomApp: App {
                             || uninstaller.showingOutcomeReport
                             || orphanedData.isNavigationLocked
                     )
-                Button("Дубликаты файлов") { model.selectWorkspaceSection(.duplicateFinder) }
+                Button("Duplicate Files") { model.selectWorkspaceSection(.duplicateFinder) }
                     .disabled(
                         uninstaller.isMovingToTrash
                             || uninstaller.isReviewing
@@ -62,3 +65,18 @@ struct DiskBloomApp: App {
         }
     }
 }
+
+
+#if DEBUG
+/// Debug-only hook for producing App Store screenshots without driving the system open panel.
+/// Compiled out of every release build (build.sh and the Xcode Release configuration).
+///   -DiskBloomAutomationDuplicateRoot <folder>   opens Duplicate Files and scans <folder>
+@MainActor
+enum ScreenshotAutomation {
+    static func apply(model: AppModel, duplicateFinder: DuplicateFinderModel) {
+        guard let path = UserDefaults.standard.string(forKey: "DiskBloomAutomationDuplicateRoot") else { return }
+        model.selectWorkspaceSection(.duplicateFinder)
+        duplicateFinder.startScan(at: URL(fileURLWithPath: path, isDirectory: true))
+    }
+}
+#endif

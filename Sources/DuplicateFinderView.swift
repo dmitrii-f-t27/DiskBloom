@@ -27,10 +27,10 @@ struct DuplicateFinderView: View {
     private var header: some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Дубликаты файлов")
+                Text("Duplicate Files")
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.primaryText)
-                Text("Полное сравнение содержимого в выбранной папке")
+                Text("Full content comparison inside the selected folder")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.secondaryText)
             }
@@ -39,18 +39,18 @@ struct DuplicateFinderView: View {
 
             if model.isScanning {
                 Button(action: model.cancelScan) {
-                    Label("Остановить", systemImage: "stop.fill")
+                    Label("Stop", systemImage: "stop.fill")
                 }
                 .buttonStyle(SecondaryButtonStyle())
             } else if model.result != nil {
                 Button(action: model.repeatScan) {
-                    Label("Повторить", systemImage: "arrow.clockwise")
+                    Label("Run Again", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(SecondaryButtonStyle())
             }
 
             Button(action: model.chooseFolder) {
-                Label("Выбрать папку…", systemImage: "folder")
+                Label("Choose Folder…", systemImage: "folder")
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(model.isScanning)
@@ -86,27 +86,27 @@ private struct DuplicateWelcomeView: View {
                     .font(.system(size: 52, weight: .light))
                     .foregroundStyle(Color.accentMint)
             }
-            Text("Найдём байт-в-байт одинаковые файлы")
+            Text("Find byte-for-byte identical files")
                 .font(.system(size: 25, weight: .bold, design: .rounded))
                 .foregroundStyle(Color.primaryText)
-            Text("Выберите конкретную папку или локальный диск. DiskBloom сначала сравнит размеры, затем полностью прочитает совпавшие кандидаты, вычислит SHA‑256 и подтвердит каждую группу побайтово. Имена и даты не влияют на результат.")
+            Text("Choose a specific folder or local disk. DiskBloom first compares sizes, then fully reads the matching candidates, computes SHA‑256 and confirms every group byte by byte. Names and dates do not affect the result.")
                 .font(.system(size: 12))
                 .foregroundStyle(Color.secondaryText)
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
                 .frame(maxWidth: 650)
             HStack(spacing: 12) {
-                Label("только чтение", systemImage: "eye")
-                Label("полное содержимое", systemImage: "checkmark.seal")
-                Label("точные пути", systemImage: "point.3.connected.trianglepath.dotted")
+                Label("read-only", systemImage: "eye")
+                Label("full content", systemImage: "checkmark.seal")
+                Label("exact paths", systemImage: "point.3.connected.trianglepath.dotted")
             }
             .font(.system(size: 10.5, weight: .semibold))
             .foregroundStyle(Color.accentMint)
             Button(action: chooseFolder) {
-                Label("Выбрать папку для анализа", systemImage: "folder.badge.magnifyingglass")
+                Label("Choose Folder to Analyze", systemImage: "folder.badge.magnifyingglass")
             }
             .buttonStyle(PrimaryButtonStyle())
-            Text("Символические ссылки, hard link, скрытые файлы, пакеты приложений, другие тома и незагруженные облачные файлы пропускаются.")
+            Text("Symbolic links, hard links, hidden files, application bundles, other volumes and cloud files that are not downloaded are skipped.")
                 .font(.system(size: 9.5))
                 .foregroundStyle(Color.secondaryText)
                 .multilineTextAlignment(.center)
@@ -158,12 +158,12 @@ private struct DuplicateScanProgressView: View {
                     .frame(maxWidth: 680)
             }
             HStack(spacing: 18) {
-                Label("\(progress.examinedFileCount.formatted()) проверено", systemImage: "doc")
+                Label("\(progress.examinedFileCount.formatted()) examined", systemImage: "doc")
                 if progress.candidateFileCount > 0 {
-                    Label("\(progress.processedCandidateCount.formatted()) из \(progress.candidateFileCount.formatted()) кандидатов", systemImage: "number")
+                    Label("\(progress.processedCandidateCount.formatted()) of \(progress.candidateFileCount.formatted()) candidates", systemImage: "number")
                 }
                 if progress.bytesRead > 0 {
-                    Label("прочитано \(ByteFormat.compact(progress.bytesRead))", systemImage: "externaldrive")
+                    Label("\(ByteFormat.compact(progress.bytesRead)) read", systemImage: "externaldrive")
                 }
             }
             .font(.system(size: 10.5, weight: .medium))
@@ -212,17 +212,17 @@ private struct DuplicateResultsView: View {
                 DuplicateSummaryChip(
                     icon: "square.stack.3d.up.fill",
                     value: result.groups.count.formatted(),
-                    label: "групп"
+                    label: "groups"
                 )
                 DuplicateSummaryChip(
                     icon: "doc.on.doc.fill",
                     value: result.duplicateFileCount.formatted(),
-                    label: "лишних копий"
+                    label: "extra copies"
                 )
                 DuplicateSummaryChip(
                     icon: "internaldrive",
                     value: ByteFormat.compact(result.logicalDuplicateBytes),
-                    label: "логический размер"
+                    label: "logical size"
                 )
                 Spacer()
                 Text(result.finishedAt.formatted(date: .abbreviated, time: .shortened))
@@ -233,7 +233,7 @@ private struct DuplicateResultsView: View {
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: "info.circle.fill")
                     .foregroundStyle(Color.accentMint)
-                Text("Совпадение подтверждено для содержимого data fork. Имена, даты, теги, расширенные атрибуты и resource fork могут различаться. «Логический размер» — верхняя оценка объёма копий, а не обещание физически освобождённого места на APFS.")
+                Text("Matches are confirmed for data fork content. Names, dates, tags, extended attributes and resource forks may differ. “Logical size” is an upper estimate of the copies’ volume, not a promise of physically freed space on APFS.")
                     .font(.system(size: 9.5))
                     .foregroundStyle(Color.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -243,10 +243,10 @@ private struct DuplicateResultsView: View {
             .background(Color.accentMint.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
 
             HStack(spacing: 13) {
-                Label("\(result.examinedFileCount.formatted()) файлов просмотрено", systemImage: "magnifyingglass")
-                Label("\(result.hashedFileCount.formatted()) хешировано", systemImage: "number.square")
+                Label("\(result.examinedFileCount.formatted()) files examined", systemImage: "magnifyingglass")
+                Label("\(result.hashedFileCount.formatted()) hashed", systemImage: "number.square")
                 if totalSkipped > 0 {
-                    Label("\(totalSkipped.formatted()) безопасно пропущено", systemImage: "arrowshape.turn.up.right")
+                    Label("\(totalSkipped.formatted()) safely skipped", systemImage: "arrowshape.turn.up.right")
                 }
                 Spacer()
                 Text(result.rootURL.path)
@@ -313,7 +313,7 @@ private struct DuplicateGroupCard: View {
                         .foregroundStyle(Color.accentMint)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(group.files.count.formatted()) \(RussianPlural.files(group.files.count)) совпадают байт-в-байт")
+                    Text("\(group.files.count.formatted()) \(Plural.files(group.files.count)) match byte for byte")
                         .font(.system(size: 12.5, weight: .bold))
                         .foregroundStyle(Color.primaryText)
                     Text("SHA‑256  \(shortDigest)")
@@ -325,7 +325,7 @@ private struct DuplicateGroupCard: View {
                     Text(ByteFormat.compact(group.logicalSize))
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(Color.primaryText)
-                    Text("копии: \(ByteFormat.compact(group.logicalDuplicateBytes)) логически")
+                    Text("copies: \(ByteFormat.compact(group.logicalDuplicateBytes)) logical")
                         .font(.system(size: 8.5))
                         .foregroundStyle(Color.secondaryText)
                 }
@@ -382,7 +382,7 @@ private struct DuplicateFileRow: View {
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
                 Text(file.modificationDate.formatted(date: .abbreviated, time: .shortened))
-                Text("на диске \(ByteFormat.string(file.allocatedSize))")
+                Text("\(ByteFormat.string(file.allocatedSize)) on disk")
             }
             .font(.system(size: 8.5))
             .foregroundStyle(Color.secondaryText)
@@ -392,8 +392,8 @@ private struct DuplicateFileRow: View {
                 Image(systemName: "finder")
             }
             .buttonStyle(IconButtonStyle())
-            .help("Показать точный файл в Finder")
-            .accessibilityLabel("Показать \(file.url.path) в Finder")
+            .help("Reveal this exact file in Finder")
+            .accessibilityLabel("Reveal \(file.url.path) in Finder")
         }
         .padding(.horizontal, 13)
         .frame(minHeight: 53)
@@ -409,15 +409,15 @@ private struct DuplicateEmptyResultView: View {
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 48, weight: .light))
                 .foregroundStyle(Color.accentMint)
-            Text("Подтверждённых дубликатов не найдено")
+            Text("No confirmed duplicates found")
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(Color.primaryText)
-            Text("В выбранной области нет двух доступных ненулевых файлов с полностью одинаковым содержимым. Пропущенные объекты не входят в этот вывод.")
+            Text("The selected location contains no two accessible non-empty files with fully identical content. Skipped items are not part of this conclusion.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(Color.secondaryText)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 560)
-            Text("Проверено \(result.examinedFileCount.formatted()) файлов за \(String(format: "%.1f", result.duration)) с")
+            Text("\(result.examinedFileCount.formatted()) files examined in \(String(format: "%.1f", result.duration)) s")
                 .font(.system(size: 9.5, weight: .medium))
                 .foregroundStyle(Color.secondaryText)
             Spacer()

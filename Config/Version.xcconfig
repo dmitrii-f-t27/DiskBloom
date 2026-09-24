@@ -1,0 +1,5 @@
+// Single source of truth for the app identity and version.
+// Used by DiskBloom.xcodeproj (Mac App Store build) and parsed by build.sh (direct download build).
+MARKETING_VERSION = 1.4
+CURRENT_PROJECT_VERSION = 5
+PRODUCT_BUNDLE_IDENTIFIER = io.github.dmitrii-f-t27.DiskBloom

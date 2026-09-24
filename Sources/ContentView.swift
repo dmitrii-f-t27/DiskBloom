@@ -69,7 +69,7 @@ private struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("DiskBloom")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
-                    Text("пространство под контролем")
+                    Text("space under control")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Color.secondaryText)
                 }
@@ -78,7 +78,7 @@ private struct SidebarView: View {
             .padding(.top, 20)
             .padding(.bottom, 22)
 
-            Text("ИНСТРУМЕНТЫ")
+            Text("TOOLS")
                 .font(.system(size: 10, weight: .bold))
                 .tracking(1.2)
                 .foregroundStyle(Color.secondaryText)
@@ -88,26 +88,26 @@ private struct SidebarView: View {
             VStack(spacing: 4) {
                 WorkspaceSectionRow(
                     section: .diskMap,
-                    title: "Карта диска",
-                    subtitle: "найти крупные папки",
+                    title: "Disk Map",
+                    subtitle: "find large folders",
                     icon: "chart.pie.fill"
                 )
                 WorkspaceSectionRow(
                     section: .appUninstaller,
-                    title: "Удаление приложений",
-                    subtitle: "app + связанные данные",
+                    title: "App Uninstaller",
+                    subtitle: "app + related data",
                     icon: "app.badge.checkmark"
                 )
                 WorkspaceSectionRow(
                     section: .orphanedAppData,
-                    title: "Возможные остатки",
-                    subtitle: "папки без найденного .app",
+                    title: "Possible Leftovers",
+                    subtitle: "folders with no matching .app",
                     icon: "folder.badge.questionmark"
                 )
                 WorkspaceSectionRow(
                     section: .duplicateFinder,
-                    title: "Дубликаты файлов",
-                    subtitle: "байт-в-байт совпадения",
+                    title: "Duplicate Files",
+                    subtitle: "byte-for-byte matches",
                     icon: "doc.on.doc.fill"
                 )
             }
@@ -115,7 +115,7 @@ private struct SidebarView: View {
             .padding(.bottom, 18)
 
             if model.workspaceSection == .diskMap {
-                Text("ИСТОЧНИКИ")
+                Text("SOURCES")
                     .font(.system(size: 10, weight: .bold))
                     .tracking(1.2)
                     .foregroundStyle(Color.secondaryText)
@@ -132,10 +132,10 @@ private struct SidebarView: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 7) {
-                    Label("Безопасный режим", systemImage: "checkmark.shield.fill")
+                    Label("Safe Mode", systemImage: "checkmark.shield.fill")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Color.accentMint)
-                    Text("Точные пути показываются до действия. Общие и потенциально важные данные выключены по умолчанию.")
+                    Text("Exact paths are shown before any action. Shared and potentially important data are off by default.")
                         .font(.system(size: 9.5))
                         .foregroundStyle(Color.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -152,10 +152,10 @@ private struct SidebarView: View {
                 .padding(.bottom, 12)
 
             VStack(alignment: .leading, spacing: 5) {
-                Label("Только на этом Mac", systemImage: "lock.shield.fill")
+                Label("Only on this Mac", systemImage: "lock.shield.fill")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Color.accentMint)
-                Text("Без телеметрии: анализ остаётся на выбранном источнике.")
+                Text("No telemetry: analysis stays on the selected source.")
                     .font(.system(size: 9.5))
                     .foregroundStyle(Color.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -226,7 +226,7 @@ private struct SourceRow: View {
     var body: some View {
         Button {
             model.selectWorkspaceSection(.diskMap)
-            model.startScan(at: source.url)
+            model.open(source: source.url)
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: source.icon)
@@ -264,10 +264,10 @@ private struct VolumeUsageCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
-                Text("Диск")
+                Text("Disk")
                     .font(.system(size: 11, weight: .semibold))
                 Spacer()
-                Text("\(Int(stats.usedFraction * 100))% занято")
+                Text("\(Int(stats.usedFraction * 100))% used")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(Color.secondaryText)
             }
@@ -289,7 +289,7 @@ private struct VolumeUsageCard: View {
             HStack {
                 Text(ByteFormat.compact(stats.used))
                 Spacer()
-                Text("доступно \(ByteFormat.compact(stats.available))")
+                Text("\(ByteFormat.compact(stats.available)) available")
             }
             .font(.system(size: 9.5, weight: .medium))
             .foregroundStyle(Color.secondaryText)
@@ -313,7 +313,7 @@ private struct TopBar: View {
 
             if model.focusStack.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(model.isScanning ? "Анализируем" : "Обзор")
+                    Text(model.isScanning ? "Analyzing" : "Overview")
                         .font(.system(size: 14, weight: .semibold))
                     Text(model.currentURL.path)
                         .font(.system(size: 10))
@@ -342,28 +342,28 @@ private struct TopBar: View {
 
             if let snapshot = model.snapshot {
                 HStack(spacing: 12) {
-                    Label("\(snapshot.root.fileCount.formatted()) \(RussianPlural.files(snapshot.root.fileCount))", systemImage: "doc.on.doc")
+                    Label("\(snapshot.root.fileCount.formatted()) \(Plural.files(snapshot.root.fileCount))", systemImage: "doc.on.doc")
                     if snapshot.root.unreadableCount > 0 {
-                        Label("\(snapshot.root.unreadableCount) без доступа", systemImage: "exclamationmark.lock")
+                        Label("\(snapshot.root.unreadableCount) inaccessible", systemImage: "exclamationmark.lock")
                             .foregroundStyle(Color.orange)
                     }
                     if snapshot.skippedMountPoints > 0 {
-                        Label("\(snapshot.skippedMountPoints) других томов пропущено", systemImage: "externaldrive.badge.xmark")
+                        Label("\(snapshot.skippedMountPoints) other volumes skipped", systemImage: "externaldrive.badge.xmark")
                     }
-                    Text(String(format: "%.1f с", snapshot.duration))
+                    Text(String(format: "%.1f s", snapshot.duration))
                 }
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(Color.secondaryText)
             }
 
             Button(action: model.rescan) {
-                Label("Обновить", systemImage: "arrow.clockwise")
+                Label("Refresh", systemImage: "arrow.clockwise")
             }
             .buttonStyle(SecondaryButtonStyle())
             .disabled(model.isScanning)
 
             Button(action: model.chooseFolder) {
-                Label("Выбрать папку", systemImage: "folder.badge.plus")
+                Label("Choose Folder", systemImage: "folder.badge.plus")
             }
             .buttonStyle(PrimaryButtonStyle())
         }
@@ -384,7 +384,7 @@ private struct AnalysisView: View {
                         Text(root.name)
                             .font(.system(size: 23, weight: .bold, design: .rounded))
                             .lineLimit(1)
-                        Text("Оценка занятого места · нажмите сектор для деталей")
+                        Text("Estimated used space · click a sector for details")
                             .font(.system(size: 11))
                             .foregroundStyle(Color.secondaryText)
                     }
@@ -392,7 +392,7 @@ private struct AnalysisView: View {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(ByteFormat.string(root.size))
                             .font(.system(size: 18, weight: .bold, design: .rounded))
-                        Text("\(root.itemCount.formatted()) \(RussianPlural.objects(root.itemCount))")
+                        Text("\(root.itemCount.formatted()) \(Plural.objects(root.itemCount))")
                             .font(.system(size: 10.5))
                             .foregroundStyle(Color.secondaryText)
                     }
@@ -404,7 +404,7 @@ private struct AnalysisView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.lock.fill")
                             .foregroundStyle(Color.orange)
-                        Text("Карта неполная: \(root.unreadableCount) недоступных областей не вошли в оценку.")
+                        Text("The map is incomplete: \(root.unreadableCount) inaccessible areas are not included in the estimate.")
                             .font(.system(size: 11, weight: .semibold))
                         Spacer()
                     }
@@ -447,12 +447,12 @@ private struct InspectorPanel: View {
             }
 
             HStack {
-                Text("СОДЕРЖИМОЕ")
+                Text("CONTENTS")
                     .font(.system(size: 10, weight: .bold))
                     .tracking(1.1)
                     .foregroundStyle(Color.secondaryText)
                 Spacer()
-                Text("по размеру")
+                Text("by size")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.secondaryText)
             }
@@ -465,7 +465,7 @@ private struct InspectorPanel: View {
                 VStack(spacing: 10) {
                     Image(systemName: "tray")
                         .font(.system(size: 28))
-                    Text("В этой папке нет доступных объектов")
+                    Text("No accessible items in this folder")
                         .font(.system(size: 12, weight: .medium))
                 }
                 .foregroundStyle(Color.secondaryText)
@@ -515,7 +515,7 @@ private struct InspectedCard: View {
                     .lineLimit(2)
                     .textSelection(.enabled)
             } else {
-                Text("Сводная группа мелких объектов")
+                Text("Aggregate group of small items")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.secondaryText)
             }
@@ -525,7 +525,7 @@ private struct InspectedCard: View {
                     Button {
                         model.enter(node)
                     } label: {
-                        Label("Открыть", systemImage: "arrow.right.circle.fill")
+                        Label("Open", systemImage: "arrow.right.circle.fill")
                     }
                     .buttonStyle(SecondaryButtonStyle(compact: true))
                 }
@@ -536,15 +536,15 @@ private struct InspectedCard: View {
                         Image(systemName: "finder")
                     }
                     .buttonStyle(IconButtonStyle())
-                    .help("Показать в Finder")
-                    .accessibilityLabel("Показать в Finder")
+                    .help("Reveal in Finder")
+                    .accessibilityLabel("Reveal in Finder")
                 }
                 Spacer()
                 Button {
                     model.toggleCollection(node)
                 } label: {
                     Label(
-                        model.isCollected(node) ? "Выбрано" : "В очередь",
+                        model.isCollected(node) ? "Queued" : "Queue",
                         systemImage: model.isCollected(node) ? "checkmark.circle.fill" : "plus.circle"
                     )
                 }
@@ -552,8 +552,8 @@ private struct InspectedCard: View {
                 .disabled(!model.isCollected(node) && model.rejectionReason(for: node) != nil)
                 .help(
                     model.isCollected(node)
-                        ? "Убрать из очереди"
-                        : (model.rejectionReason(for: node) ?? "Добавить в очередь перемещения в Корзину")
+                        ? "Remove from Queue"
+                        : (model.rejectionReason(for: node) ?? "Add to the Trash queue")
                 )
             }
         }
@@ -586,7 +586,7 @@ private struct ChildRow: View {
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(Color.primaryText)
                         .lineLimit(1)
-                    Text(node.isVirtual ? "сводная группа" : "\(node.itemCount.formatted()) \(RussianPlural.objects(node.itemCount))")
+                    Text(node.isVirtual ? "aggregate group" : "\(node.itemCount.formatted()) \(Plural.objects(node.itemCount))")
                         .font(.system(size: 9))
                         .foregroundStyle(Color.secondaryText)
                 }
@@ -602,13 +602,13 @@ private struct ChildRow: View {
         .buttonStyle(.plain)
         .contextMenu {
             if node.isDirectory && !node.isVirtual {
-                Button("Открыть") { model.enter(node) }
+                Button("Open") { model.enter(node) }
             }
             if node.url != nil {
-                Button("Показать в Finder") { model.revealInFinder(node) }
+                Button("Reveal in Finder") { model.revealInFinder(node) }
             }
             Divider()
-            Button(model.isCollected(node) ? "Убрать из очереди" : "Добавить в очередь") {
+            Button(model.isCollected(node) ? "Remove from Queue" : "Add to Queue") {
                 model.toggleCollection(node)
             }
             .disabled(!model.isCollected(node) && model.rejectionReason(for: node) != nil)
@@ -631,9 +631,9 @@ private struct CollectionBar: View {
                 .frame(width: 36, height: 36)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(model.collection.isEmpty ? "Очередь очистки пуста" : "Выбрано: \(model.collection.count)")
+                    Text(model.collection.isEmpty ? "Cleanup queue is empty" : "Selected: \(model.collection.count)")
                         .font(.system(size: 12.5, weight: .semibold))
-                    Text(model.collection.isEmpty ? "Сначала выберите и проверьте объект" : ByteFormat.string(model.collectionSize))
+                    Text(model.collection.isEmpty ? "Select and review an item first" : ByteFormat.string(model.collectionSize))
                         .font(.system(size: 10.5))
                         .foregroundStyle(Color.secondaryText)
                 }
@@ -661,7 +661,7 @@ private struct CollectionBar: View {
 
                 Spacer()
 
-                Text("Только перемещение в Корзину")
+                Text("Only moves to the Trash")
                     .font(.system(size: 9.5))
                     .foregroundStyle(Color.secondaryText)
 
@@ -671,7 +671,7 @@ private struct CollectionBar: View {
                     if model.isMovingToTrash || model.isReviewingSelection {
                         ProgressView().controlSize(.small)
                     } else {
-                        Label("Проверить", systemImage: "trash")
+                        Label("Review", systemImage: "trash")
                     }
                 }
                 .buttonStyle(DangerButtonStyle())
@@ -707,9 +707,9 @@ private struct ScanningView: View {
             .frame(width: 180, height: 180)
 
             VStack(spacing: 7) {
-                Text("Строим карту пространства")
+                Text("Building the space map")
                     .font(.system(size: 22, weight: .bold, design: .rounded))
-                Text("Просмотрено \(model.progress.itemCount.formatted()) \(RussianPlural.objects(model.progress.itemCount))")
+                Text("\(model.progress.itemCount.formatted()) \(Plural.objects(model.progress.itemCount)) scanned")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.accentMint)
                 Text(model.progress.currentPath)
@@ -721,13 +721,13 @@ private struct ScanningView: View {
                     .multilineTextAlignment(.center)
             }
 
-            Text("Сканирование выполняется только для чтения. Недоступные системные папки будут отмечены, а не запрошены через sudo.")
+            Text("Scanning is read-only. Inaccessible system folders are marked, not requested via sudo.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(Color.secondaryText)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 520)
 
-            Button("Отменить") { model.cancelScan() }
+            Button("Cancel") { model.cancelScan() }
                 .buttonStyle(SecondaryButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -748,17 +748,35 @@ private struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 18) {
             AppMark().frame(width: 92, height: 92)
-            Text("Увидьте, куда ушло место")
+            Text("See where your space went")
                 .font(.system(size: 26, weight: .bold, design: .rounded))
-            Text("Выберите папку или диск — DiskBloom построит интерактивную карту без телеметрии.")
-                .font(.system(size: 12))
-                .foregroundStyle(Color.secondaryText)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 460)
-            Button(action: model.chooseFolder) {
-                Label("Выбрать папку", systemImage: "folder.badge.plus")
+            if model.needsInitialAccess {
+                Text("DiskBloom reads only the folders you allow. Grant access to your home folder, or choose any folder or disk, and DiskBloom will build an interactive map with no telemetry.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 480)
+                HStack(spacing: 10) {
+                    Button(action: model.grantHomeAccess) {
+                        Label("Grant Access to Home Folder", systemImage: "house.fill")
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    Button(action: model.chooseFolder) {
+                        Label("Choose Folder", systemImage: "folder.badge.plus")
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                }
+            } else {
+                Text("Choose a folder or disk and DiskBloom will build an interactive map with no telemetry.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 460)
+                Button(action: model.chooseFolder) {
+                    Label("Choose Folder", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(PrimaryButtonStyle())
             }
-            .buttonStyle(PrimaryButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -779,9 +797,9 @@ private struct TrashReviewSheet: View {
                 }
                 .frame(width: 52, height: 52)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Проверка перед перемещением")
+                    Text("Review before moving")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
-                    Text("\(model.collection.count) \(RussianPlural.objects(model.collection.count)) · оценка \(ByteFormat.string(model.collectionSize))")
+                    Text("\(model.collection.count) \(Plural.objects(model.collection.count)) · estimated \(ByteFormat.string(model.collectionSize))")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color.secondaryText)
                 }
@@ -804,7 +822,7 @@ private struct TrashReviewSheet: View {
                                 Text(ByteFormat.string(node.size))
                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                             }
-                            Text(node.url?.path ?? "Путь недоступен")
+                            Text(node.url?.path ?? "Path unavailable")
                                 .font(.system(size: 9.5, design: .monospaced))
                                 .foregroundStyle(Color.secondaryText)
                                 .textSelection(.enabled)
@@ -818,8 +836,8 @@ private struct TrashReviewSheet: View {
             .frame(maxHeight: 300)
 
             VStack(alignment: .leading, spacing: 6) {
-                Label("Объекты будут перемещены в системную Корзину, не удалены безвозвратно.", systemImage: "arrow.uturn.backward.circle")
-                Label("Перед действием путь и идентичность каждого объекта будут проверены повторно.", systemImage: "checkmark.shield")
+                Label("Items will be moved to the system Trash, not deleted permanently.", systemImage: "arrow.uturn.backward.circle")
+                Label("Before acting, the path and identity of every item are verified again.", systemImage: "checkmark.shield")
             }
             .font(.system(size: 10.5))
             .foregroundStyle(Color.secondaryText)
@@ -829,12 +847,12 @@ private struct TrashReviewSheet: View {
             Rectangle().fill(Color.separator).frame(height: 1)
 
             HStack {
-                Button("Отмена") {
+                Button("Cancel") {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Переместить в Корзину") {
+                Button("Move to Trash") {
                     model.moveReviewedItemsToTrash()
                 }
                 .buttonStyle(DangerButtonStyle())

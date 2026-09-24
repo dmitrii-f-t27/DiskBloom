@@ -5,7 +5,7 @@ set -euo pipefail
 RELEASE_ROOT="${0:A:h}"
 RELEASE_APP="$RELEASE_ROOT/DiskBloom.app"
 RELEASE_OUTPUT="$RELEASE_ROOT/release"
-RELEASE_VERSION="${1:-1.3.0}"
+RELEASE_VERSION="${1:-1.4.0}"
 RELEASE_NAME="DiskBloom-${RELEASE_VERSION}-macOS-arm64"
 
 if [[ ! "$RELEASE_VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
