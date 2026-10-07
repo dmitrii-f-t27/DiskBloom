@@ -54,6 +54,26 @@ struct TextRulesDifferentialSmoke {
             counts["names", default: 0] += 1
         }
 
+        // Order: Swift's < on strings against the spec's byte order on composed text.
+        var orders = 0
+        var swiftInconsistent = 0
+        for (index, a) in names.enumerated() where index % 3 == 0 {
+            for offset in [1, 2, 7, 31] {
+                let b = names[(index + offset) % names.count]
+                // Swift's own < is not an ordering when one string is a prefix of the other in a different
+                // Unicode normalisation ("e\u{301}" vs "\u{e9}/": neither <, > nor ==); the spec keeps the
+                // consistent order of composed bytes there, so such pairs are counted, not compared.
+                if !(a < b), !(b < a), a != b {
+                    swiftInconsistent += 1
+                    continue
+                }
+                try same("less \(debug(a)) | \(debug(b))", a < b, T27Text.less(a, b))
+                orders += 1
+            }
+        }
+        counts["orders"] = orders
+        counts["swiftInconsistentPairs"] = swiftInconsistent
+
         // Paths: real ones from this Mac, synthetic edge cases and Unicode normalisation variants.
         let root = fixture.appendingPathComponent("tree", isDirectory: true)
         try FileManager.default.createDirectory(at: root.appendingPathComponent("caf\u{e9}/sub"), withIntermediateDirectories: true)

@@ -45,6 +45,33 @@ static const uint8_t AS_TEXT[757] = { 100, 105, 115, 107, 95, 109, 97, 112, 100,
 #define AS_SHOW_FULL 2
 static const uint8_t AS_W_COMPLETIONS[17] = { 47, 99, 104, 97, 116, 47, 99, 111, 109, 112, 108, 101, 116, 105, 111, 110, 115 };
 static const uint8_t AS_W_MODELS[7] = { 47, 109, 111, 100, 101, 108, 115 };
+#define AS_MAX_TOOL_ROUNDS 8
+#define AS_MAP_SCANNING 0
+#define AS_MAP_SHOWS 1
+#define AS_MAP_EMPTY 2
+#define AS_LARGEST_NO_SUCH_PATH 0
+#define AS_LARGEST_FOCUSED 1
+#define AS_LARGEST_NOT_A_FOLDER 2
+#define AS_LARGEST_SCAN_FOLDER 3
+#define AS_LARGEST_START_CURRENT 4
+#define AS_LARGEST_USE_CURRENT 5
+#define AS_WAIT_STILL_RUNNING 0
+#define AS_WAIT_NOTHING 1
+#define AS_WAIT_READY 2
+#define AS_SELECT_NOT_MEASURED 0
+#define AS_SELECT_UNKNOWN_REFS 1
+#define AS_SELECT_ONLY_REFUSED 2
+#define AS_SELECT_DONE 3
+#define AS_SELECT_DONE_WITH_SKIPPED 4
+#define AS_QUEUE_NO_SUCH_PATH 0
+#define AS_QUEUE_NOT_IN_MAP 1
+#define AS_QUEUE_ALREADY 2
+#define AS_QUEUE_REFUSED 3
+#define AS_QUEUE_ADD 4
+#define AS_FIND_ASK_NAME 0
+#define AS_FIND_NONE 1
+#define AS_FIND_OPEN_ONE 2
+#define AS_FIND_LIST 3
 #define AS_CATALOG_SKIP 0
 #define AS_CATALOG_ADD 1
 #define AS_CATALOG_DESCEND 2
@@ -74,6 +101,18 @@ uint32_t as_history_cut(uint8_t roles[static 4096], uint32_t count, uint32_t kee
 bool as_is_open_tag(uint8_t t[static 1048576], uint32_t n, uint32_t at);
 bool as_is_close_tag(uint8_t t[static 1048576], uint32_t n, uint32_t at);
 uint32_t as_strip_thinking(uint8_t text[static 1048576], uint32_t len, uint8_t out[static 1048576]);
+bool as_can_send(bool text_empty, bool thinking);
+bool as_reply_is_final(uint32_t tool_calls);
+bool as_another_round(uint32_t rounds_done);
+bool as_is_whole(double value);
+uint32_t as_overview_map(bool scanning, bool has_focus);
+uint32_t as_largest_plan(bool has_path, bool path_exists, bool focused, bool is_folder, bool has_focus, bool scanning);
+uint32_t as_after_wait(bool still_running, bool has_result);
+bool as_should_start_measuring(bool has_analysis, bool scanning);
+uint32_t as_select_plan(bool measured, int64_t chosen, int64_t refused);
+uint32_t as_queue_plan(bool path_exists, bool in_map, bool already, bool refused);
+uint32_t as_find_plan(bool query_empty, int64_t matches);
+bool as_preset_sets_address(bool preset_address_empty);
 uint32_t as_catalog_entry(bool readable, bool directory, bool symlink, bool app_extension, int64_t depth_left, bool package);
 
 /* -------------------------------------------------------
@@ -363,6 +402,116 @@ uint32_t as_strip_thinking(uint8_t text[static 1048576], uint32_t len, uint8_t o
         }
     }
     return n;
+}
+
+bool as_can_send(bool text_empty, bool thinking) {
+    return ((text_empty == false) && (thinking == false));
+}
+
+bool as_reply_is_final(uint32_t tool_calls) {
+    return (tool_calls == 0);
+}
+
+bool as_another_round(uint32_t rounds_done) {
+    return (rounds_done < AS_MAX_TOOL_ROUNDS);
+}
+
+bool as_is_whole(double value) {
+    int64_t truncated = value;
+    double back = truncated;
+    return (back == value);
+}
+
+uint32_t as_overview_map(bool scanning, bool has_focus) {
+    if (scanning) {
+        return AS_MAP_SCANNING;
+    }
+    if (has_focus) {
+        return AS_MAP_SHOWS;
+    }
+    return AS_MAP_EMPTY;
+}
+
+uint32_t as_largest_plan(bool has_path, bool path_exists, bool focused, bool is_folder, bool has_focus, bool scanning) {
+    if (has_path) {
+        if ((path_exists == false)) {
+            return AS_LARGEST_NO_SUCH_PATH;
+        }
+        if (focused) {
+            return AS_LARGEST_FOCUSED;
+        }
+        if ((is_folder == false)) {
+            return AS_LARGEST_NOT_A_FOLDER;
+        }
+        return AS_LARGEST_SCAN_FOLDER;
+    }
+    if (((has_focus == false) && (scanning == false))) {
+        return AS_LARGEST_START_CURRENT;
+    }
+    return AS_LARGEST_USE_CURRENT;
+}
+
+uint32_t as_after_wait(bool still_running, bool has_result) {
+    if (still_running) {
+        return AS_WAIT_STILL_RUNNING;
+    }
+    if ((has_result == false)) {
+        return AS_WAIT_NOTHING;
+    }
+    return AS_WAIT_READY;
+}
+
+bool as_should_start_measuring(bool has_analysis, bool scanning) {
+    return ((has_analysis == false) && (scanning == false));
+}
+
+uint32_t as_select_plan(bool measured, int64_t chosen, int64_t refused) {
+    if ((measured == false)) {
+        return AS_SELECT_NOT_MEASURED;
+    }
+    if ((chosen == 0)) {
+        if ((refused == 0)) {
+            return AS_SELECT_UNKNOWN_REFS;
+        }
+        return AS_SELECT_ONLY_REFUSED;
+    }
+    if ((refused > 0)) {
+        return AS_SELECT_DONE_WITH_SKIPPED;
+    }
+    return AS_SELECT_DONE;
+}
+
+uint32_t as_queue_plan(bool path_exists, bool in_map, bool already, bool refused) {
+    if ((path_exists == false)) {
+        return AS_QUEUE_NO_SUCH_PATH;
+    }
+    if ((in_map == false)) {
+        return AS_QUEUE_NOT_IN_MAP;
+    }
+    if (already) {
+        return AS_QUEUE_ALREADY;
+    }
+    if (refused) {
+        return AS_QUEUE_REFUSED;
+    }
+    return AS_QUEUE_ADD;
+}
+
+uint32_t as_find_plan(bool query_empty, int64_t matches) {
+    if (query_empty) {
+        return AS_FIND_ASK_NAME;
+    }
+    if ((matches == 0)) {
+        return AS_FIND_NONE;
+    }
+    if ((matches == 1)) {
+        return AS_FIND_OPEN_ONE;
+    }
+    return AS_FIND_LIST;
+}
+
+bool as_preset_sets_address(bool preset_address_empty) {
+    return (preset_address_empty == false);
 }
 
 uint32_t as_catalog_entry(bool readable, bool directory, bool symlink, bool app_extension, int64_t depth_left, bool package) {
@@ -679,6 +828,52 @@ void test_as_history_thinking_catalog(void) {
     assert((as_catalog_entry(false, true, false, true, 1, false) == AS_CATALOG_SKIP));
 }
 
+void test_as_turns(void) {
+    assert((as_can_send(false, false) == true));
+    assert((as_can_send(true, false) == false));
+    assert((as_can_send(false, true) == false));
+    assert((as_reply_is_final(0) == true));
+    assert((as_reply_is_final(2) == false));
+    assert((as_another_round(7) == true));
+    assert((as_another_round(8) == false));
+    assert((as_is_whole(3.0) == true));
+    assert((as_is_whole(3.5) == false));
+    assert((as_is_whole(-2.0) == true));
+}
+
+void test_as_tool_plans(void) {
+    assert((as_overview_map(true, true) == AS_MAP_SCANNING));
+    assert((as_overview_map(false, true) == AS_MAP_SHOWS));
+    assert((as_overview_map(false, false) == AS_MAP_EMPTY));
+    assert((as_largest_plan(true, false, false, false, false, false) == AS_LARGEST_NO_SUCH_PATH));
+    assert((as_largest_plan(true, true, true, false, false, false) == AS_LARGEST_FOCUSED));
+    assert((as_largest_plan(true, true, false, false, false, false) == AS_LARGEST_NOT_A_FOLDER));
+    assert((as_largest_plan(true, true, false, true, false, false) == AS_LARGEST_SCAN_FOLDER));
+    assert((as_largest_plan(false, false, false, false, false, false) == AS_LARGEST_START_CURRENT));
+    assert((as_largest_plan(false, false, false, false, true, false) == AS_LARGEST_USE_CURRENT));
+    assert((as_largest_plan(false, false, false, false, false, true) == AS_LARGEST_USE_CURRENT));
+    assert((as_after_wait(true, true) == AS_WAIT_STILL_RUNNING));
+    assert((as_after_wait(false, false) == AS_WAIT_NOTHING));
+    assert((as_after_wait(false, true) == AS_WAIT_READY));
+    assert((as_should_start_measuring(false, false) == true));
+    assert((as_should_start_measuring(true, false) == false));
+    assert((as_select_plan(false, 1, 0) == AS_SELECT_NOT_MEASURED));
+    assert((as_select_plan(true, 0, 0) == AS_SELECT_UNKNOWN_REFS));
+    assert((as_select_plan(true, 0, 2) == AS_SELECT_ONLY_REFUSED));
+    assert((as_select_plan(true, 2, 0) == AS_SELECT_DONE));
+    assert((as_select_plan(true, 2, 1) == AS_SELECT_DONE_WITH_SKIPPED));
+    assert((as_queue_plan(false, true, false, false) == AS_QUEUE_NO_SUCH_PATH));
+    assert((as_queue_plan(true, false, false, false) == AS_QUEUE_NOT_IN_MAP));
+    assert((as_queue_plan(true, true, true, true) == AS_QUEUE_ALREADY));
+    assert((as_queue_plan(true, true, false, true) == AS_QUEUE_REFUSED));
+    assert((as_queue_plan(true, true, false, false) == AS_QUEUE_ADD));
+    assert((as_find_plan(true, 3) == AS_FIND_ASK_NAME));
+    assert((as_find_plan(false, 0) == AS_FIND_NONE));
+    assert((as_find_plan(false, 1) == AS_FIND_OPEN_ONE));
+    assert((as_find_plan(false, 2) == AS_FIND_LIST));
+    assert((as_preset_sets_address(false) == true));
+}
+
 
 /* -------------------------------------------------------
    Test runner (compile with -DT27_TEST_MAIN to execute)
@@ -690,7 +885,9 @@ int main(void) {
     test_as_words();
     test_as_paths_and_addresses();
     test_as_history_thinking_catalog();
-    printf("All %d tests passed.\n", 3);
+    test_as_turns();
+    test_as_tool_plans();
+    printf("All %d tests passed.\n", 5);
     return 0;
 }
 #endif /* T27_TEST_MAIN */

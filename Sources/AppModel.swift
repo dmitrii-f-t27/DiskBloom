@@ -235,7 +235,7 @@ final class AppModel: ObservableObject {
 
     /// Opens a sidebar source, asking for access first in the sandboxed build.
     func open(source url: URL) {
-        if FolderAccess.shared.hasAccess(to: url) {
+        if !md_needs_permission(FolderAccess.shared.hasAccess(to: url)) {
             startScan(at: url)
             return
         }
@@ -276,7 +276,7 @@ final class AppModel: ObservableObject {
     }
 
     func startScan(at url: URL, resetNavigation: Bool = true, rememberCurrent: Bool = false) {
-        guard !isMovingToTrash else {
+        guard md_can_start_scan(isMovingToTrash) else {
             notice = AppNotice(title: "Operation still in progress", message: "Wait for the move to the Trash to finish.")
             return
         }
@@ -369,7 +369,7 @@ final class AppModel: ObservableObject {
     }
 
     func rescan() {
-        guard FolderAccess.shared.hasAccess(to: currentURL) else {
+        guard !md_needs_permission(FolderAccess.shared.hasAccess(to: currentURL)) else {
             open(source: currentURL)
             return
         }
@@ -387,7 +387,7 @@ final class AppModel: ObservableObject {
                 guard let selectedPath = selected.url?.standardizedFileURL.path else { return false }
                 return T27Text.within(targetPath, selectedPath)
             }
-            if collection.count != previousCount {
+            if md_queue_trimmed(Int64(previousCount), Int64(collection.count)) {
                 invalidatePendingReview()
                 notice = AppNotice(
                     title: "Removed from queue",
@@ -440,7 +440,7 @@ final class AppModel: ObservableObject {
         guard T27Text.within(target, rootPath) else { return nil }
         var chain = [root]
         var current = root
-        while current.url?.standardizedFileURL.path != target {
+        while !(current.url.map { T27Text.same($0.standardizedFileURL.path, target) } ?? false) {
             guard let next = current.children.first(where: { child in
                 guard !child.isVirtual, let childPath = child.url?.standardizedFileURL.path else { return false }
                 return T27Text.within(target, childPath)
@@ -560,7 +560,7 @@ final class AppModel: ObservableObject {
             }.value
             guard reviewGeneration == generation, !Task.isCancelled else { return }
             isReviewingSelection = false
-            if failures.isEmpty {
+            if md_review_passes(Int64(failures.count)) {
                 showingTrashReview = true
             } else {
                 notice = AppNotice(
@@ -593,7 +593,7 @@ final class AppModel: ObservableObject {
                 return outcome.successfulPaths.contains(path)
             }
             isMovingToTrash = false
-            if outcome.failures.isEmpty {
+            if md_review_passes(Int64(outcome.failures.count)) {
                 notice = AppNotice(
                     title: "Moved to Trash",
                     message: "Items: \(outcome.successfulPaths.count). The data can be restored from Finder until the Trash is emptied."

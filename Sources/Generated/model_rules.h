@@ -103,6 +103,15 @@ bool md_uninstall_can_move(bool has_plan, bool moving, bool uncertain);
 uint32_t md_review_step(uint32_t index, bool app_moved, bool sandboxed);
 bool md_can_open_uninstall_review(bool has_plan, bool reviewing, bool moving);
 bool md_running_check_applies(bool app_moved, bool has_application);
+bool md_needs_permission(bool has_access);
+bool md_can_start_scan(bool moving);
+bool md_queue_trimmed(int64_t before, int64_t after);
+bool md_review_passes(int64_t failures);
+bool md_disputed_all_known(int64_t found, int64_t disputed);
+bool md_can_repeat_duplicate_scan(bool has_root, bool scanning);
+bool md_location_usable(bool symlinked, bool listed);
+bool md_worth_listing(int64_t size);
+bool md_renew_grant(bool stale, bool renewed);
 bool md_assistant_busy(bool map_moving, bool map_review_shown, bool uninstaller_moving, bool uninstaller_reviewing, bool uninstaller_review_shown, bool uninstaller_outcome_shown, bool leftovers_locked, bool caches_locked);
 uint32_t md_api_status(bool has_host, bool has_model, bool local, bool has_key);
 int64_t md_tool_limit(int64_t asked, bool has_asked, int64_t fallback, int64_t maximum);
@@ -350,6 +359,42 @@ bool md_running_check_applies(bool app_moved, bool has_application) {
     return ((app_moved == false) && has_application);
 }
 
+bool md_needs_permission(bool has_access) {
+    return (has_access == false);
+}
+
+bool md_can_start_scan(bool moving) {
+    return (moving == false);
+}
+
+bool md_queue_trimmed(int64_t before, int64_t after) {
+    return (after != before);
+}
+
+bool md_review_passes(int64_t failures) {
+    return (failures == 0);
+}
+
+bool md_disputed_all_known(int64_t found, int64_t disputed) {
+    return (found == disputed);
+}
+
+bool md_can_repeat_duplicate_scan(bool has_root, bool scanning) {
+    return (has_root && (scanning == false));
+}
+
+bool md_location_usable(bool symlinked, bool listed) {
+    return ((symlinked == false) && listed);
+}
+
+bool md_worth_listing(int64_t size) {
+    return (size > 0);
+}
+
+bool md_renew_grant(bool stale, bool renewed) {
+    return (stale && renewed);
+}
+
 bool md_assistant_busy(bool map_moving, bool map_review_shown, bool uninstaller_moving, bool uninstaller_reviewing, bool uninstaller_review_shown, bool uninstaller_outcome_shown, bool leftovers_locked, bool caches_locked) {
     return (((((((map_moving || map_review_shown) || uninstaller_moving) || uninstaller_reviewing) || uninstaller_review_shown) || uninstaller_outcome_shown) || leftovers_locked) || caches_locked);
 }
@@ -495,6 +540,25 @@ void test_md_review_steps_and_assistant(void) {
     assert((md_tool_limit(0, false, 8, 15) == 8));
 }
 
+void test_md_small_decisions(void) {
+    assert((md_needs_permission(false) == true));
+    assert((md_can_start_scan(true) == false));
+    assert((md_queue_trimmed(3, 2) == true));
+    assert((md_queue_trimmed(2, 2) == false));
+    assert((md_review_passes(0) == true));
+    assert((md_review_passes(1) == false));
+    assert((md_disputed_all_known(2, 2) == true));
+    assert((md_disputed_all_known(1, 2) == false));
+    assert((md_can_repeat_duplicate_scan(true, false) == true));
+    assert((md_can_repeat_duplicate_scan(false, false) == false));
+    assert((md_location_usable(false, true) == true));
+    assert((md_location_usable(true, true) == false));
+    assert((md_worth_listing(1) == true));
+    assert((md_worth_listing(0) == false));
+    assert((md_renew_grant(true, true) == true));
+    assert((md_renew_grant(true, false) == false));
+}
+
 
 /* -------------------------------------------------------
    Test runner (compile with -DT27_TEST_MAIN to execute)
@@ -507,7 +571,8 @@ int main(void) {
     test_md_queue_and_labels();
     test_md_screens();
     test_md_review_steps_and_assistant();
-    printf("All %d tests passed.\n", 4);
+    test_md_small_decisions();
+    printf("All %d tests passed.\n", 5);
     return 0;
 }
 #endif /* T27_TEST_MAIN */

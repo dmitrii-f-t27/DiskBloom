@@ -10,7 +10,7 @@ enum UserHome {
     static let url: URL = {
         if let entry = getpwuid(getuid()), let directory = entry.pointee.pw_dir {
             let path = String(cString: directory)
-            if path.hasPrefix("/") {
+            if T27Text.withBytes(path, { as_path_form($0, $1) }) == UInt32(AS_PATH_ABSOLUTE) {
                 return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
             }
         }
@@ -118,11 +118,12 @@ final class FolderAccess {
             ), url.startAccessingSecurityScopedResource() else { continue }
             let normalized = url.standardizedFileURL
             grantedPaths.insert(normalized.path)
-            if isStale, let renewed = try? normalized.bookmarkData(
+            let renewed = isStale ? try? normalized.bookmarkData(
                 options: [.withSecurityScope],
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
-            ) {
+            ) : nil
+            if md_renew_grant(isStale, renewed != nil), let renewed {
                 refreshed[normalized.path] = renewed
             } else {
                 refreshed[normalized.path] = bookmark

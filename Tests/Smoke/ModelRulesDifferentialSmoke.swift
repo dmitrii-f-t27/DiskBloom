@@ -61,6 +61,48 @@ enum LegacyModelRules {
         return MD_API_READY
     }
     static func limit(_ asked: Int?, _ fallback: Int, _ maximum: Int) -> Int { min(maximum, max(1, asked ?? fallback)) }
+
+    // The assistant tools' branches as AssistantToolbox read before the as_* plans.
+    static func overview(_ scanning: Bool, _ focus: Bool) -> Int32 {
+        if scanning { return AS_MAP_SCANNING }
+        if focus { return AS_MAP_SHOWS }
+        return AS_MAP_EMPTY
+    }
+    static func largest(_ hasPath: Bool, _ exists: Bool, _ focused: Bool, _ folder: Bool, _ focus: Bool, _ scanning: Bool) -> Int32 {
+        if hasPath {
+            guard exists else { return AS_LARGEST_NO_SUCH_PATH }
+            if !focused {
+                guard folder else { return AS_LARGEST_NOT_A_FOLDER }
+                return AS_LARGEST_SCAN_FOLDER
+            }
+            return AS_LARGEST_FOCUSED
+        } else if !focus, !scanning {
+            return AS_LARGEST_START_CURRENT
+        }
+        return AS_LARGEST_USE_CURRENT
+    }
+    static func afterWait(_ scanning: Bool, _ result: Bool) -> Int32 {
+        if scanning { return AS_WAIT_STILL_RUNNING }
+        guard result else { return AS_WAIT_NOTHING }
+        return AS_WAIT_READY
+    }
+    static func select(_ measured: Bool, _ chosen: Int, _ refused: Int) -> Int32 {
+        guard measured else { return AS_SELECT_NOT_MEASURED }
+        guard chosen > 0 else { return refused == 0 ? AS_SELECT_UNKNOWN_REFS : AS_SELECT_ONLY_REFUSED }
+        return refused > 0 ? AS_SELECT_DONE_WITH_SKIPPED : AS_SELECT_DONE
+    }
+    static func queue(_ exists: Bool, _ inMap: Bool, _ already: Bool, _ refused: Bool) -> Int32 {
+        guard exists else { return AS_QUEUE_NO_SUCH_PATH }
+        guard inMap else { return AS_QUEUE_NOT_IN_MAP }
+        if already { return AS_QUEUE_ALREADY }
+        if refused { return AS_QUEUE_REFUSED }
+        return AS_QUEUE_ADD
+    }
+    static func find(_ empty: Bool, _ matches: Int) -> Int32 {
+        guard !empty else { return AS_FIND_ASK_NAME }
+        guard matches != 0 else { return AS_FIND_NONE }
+        return matches == 1 ? AS_FIND_OPEN_ONE : AS_FIND_LIST
+    }
 }
 
 @main
@@ -147,6 +189,66 @@ struct ModelRulesDifferentialSmoke {
             try check("limit \(String(describing: asked))", LegacyModelRules.limit(asked, 8, 15), Int(md_tool_limit(Int64(asked ?? 0), asked != nil, 8, 15)))
             try check("limit20 \(String(describing: asked))", LegacyModelRules.limit(asked, 10, 20), Int(md_tool_limit(Int64(asked ?? 0), asked != nil, 10, 20)))
         }
+        // Small decisions, transcribed from the replaced conditions.
+        for a in bools {
+            try check("needs permission \(a)", !a, md_needs_permission(a))
+            try check("can start scan \(a)", !a, md_can_start_scan(a))
+            try check("should measure", false, as_should_start_measuring(true, a))
+            try check("should measure none \(a)", !a, as_should_start_measuring(false, a))
+            try check("preset address \(a)", !a, as_preset_sets_address(a))
+            for b in bools {
+                try check("repeat duplicates \(a)\(b)", a && !b, md_can_repeat_duplicate_scan(a, b))
+                try check("location \(a)\(b)", !a && b, md_location_usable(a, b))
+                try check("renew \(a)\(b)", a && b, md_renew_grant(a, b))
+                try check("overview \(a)\(b)", LegacyModelRules.overview(a, b), Int32(as_overview_map(a, b)))
+                try check("after wait \(a)\(b)", LegacyModelRules.afterWait(a, b), Int32(as_after_wait(a, b)))
+                for c in bools { for d in bools {
+                    try check("queue plan \(a)\(b)\(c)\(d)", LegacyModelRules.queue(a, b, c, d), Int32(as_queue_plan(a, b, c, d)))
+                    for e in bools { for f in bools {
+                        try check("largest \(a)\(b)\(c)\(d)\(e)\(f)", LegacyModelRules.largest(a, b, c, d, e, f), Int32(as_largest_plan(a, b, c, d, e, f)))
+                    } }
+                } }
+            }
+        }
+        for x in -3...3 {
+            try check("worth listing \(x)", x > 0, md_worth_listing(Int64(x)))
+            try check("review passes \(x)", x == 0, md_review_passes(Int64(x)))
+            if x >= 0 {  // a match count
+                try check("find \(x)", LegacyModelRules.find(false, x), Int32(as_find_plan(false, Int64(x))))
+                try check("find empty \(x)", LegacyModelRules.find(true, x), Int32(as_find_plan(true, Int64(x))))
+            }
+            for y in -3...3 {
+                try check("trimmed \(x) \(y)", x != y, md_queue_trimmed(Int64(x), Int64(y)))
+                try check("disputed \(x) \(y)", x == y, md_disputed_all_known(Int64(x), Int64(y)))
+                for measured in bools where x >= 0 && y >= 0 {
+                    try check("select \(measured) \(x) \(y)", LegacyModelRules.select(measured, x, y), Int32(as_select_plan(measured, Int64(x), Int64(y))))
+                }
+            }
+        }
+        // List orders: each comparator against the predicate it replaced; a tie falls back to the paths.
+        func order(_ code: UInt32, first: UInt32, second: UInt32) -> Bool? {
+            code == first ? true : code == second ? false : nil
+        }
+        for a in bools { for b in bools { for c in bools { for d in bools {
+            let legacyPlan: Bool? = a != b ? a : c != d ? c : nil
+            try check("plan order \(a)\(b)\(c)\(d)", legacyPlan, order(un_plan_order(a, b, c, d), first: UInt32(UN_ORDER_FIRST), second: UInt32(UN_ORDER_SECOND)))
+        } } } }
+        for a in bools { for b in bools {
+            try check("queue order \(a)\(b)", a != b ? a : nil, order(un_queue_order(a, b), first: UInt32(UN_ORDER_FIRST), second: UInt32(UN_ORDER_SECOND)))
+        } }
+        for sizeA in -2...2 { for sizeB in -2...2 {
+            for rankA in 0...4 { for rankB in 0...4 {
+                let legacy: Bool? = rankA != rankB ? rankA < rankB : sizeA != sizeB ? sizeA > sizeB : nil
+                try check("cache order \(rankA) \(rankB) \(sizeA) \(sizeB)", legacy,
+                          order(cv_list_order(UInt32(rankA), UInt32(rankB), Int64(sizeA), Int64(sizeB)), first: UInt32(CV_ORDER_FIRST), second: UInt32(CV_ORDER_SECOND)))
+            } }
+            for probableA in bools { for probableB in bools {
+                let legacy: Bool? = probableA != probableB ? probableA : sizeA != sizeB ? sizeA > sizeB : nil
+                let confidence = { (probable: Bool) in UInt32(probable ? LO_PROBABLE : LO_POSSIBLE) }
+                try check("leftovers order \(probableA)\(probableB) \(sizeA) \(sizeB)", legacy,
+                          order(lo_group_order(confidence(probableA), confidence(probableB), Int64(sizeA), Int64(sizeB)), first: UInt32(LO_ORDER_FIRST), second: UInt32(LO_ORDER_SECOND)))
+            } }
+        } }
         print("MODEL_RULES_DIFFERENTIAL_OK checks=\(checks)")
     }
 }

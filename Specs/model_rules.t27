@@ -266,6 +266,50 @@ pub fn md_running_check_applies(app_moved: bool, has_application: bool) -> bool 
     return app_moved == false and has_application;
 }
 
+; --- Small decisions of the screens -----------------------------------------------------------------
+; A folder needs the system open panel first when the sandbox has not granted it.
+pub fn md_needs_permission(has_access: bool) -> bool {
+    return has_access == false;
+}
+
+pub fn md_can_start_scan(moving: bool) -> bool {
+    return moving == false;
+}
+
+; Entering an unmapped folder drops queued items around it; the person is told when any were dropped.
+pub fn md_queue_trimmed(before: i64, after: i64) -> bool {
+    return after != before;
+}
+
+; A review opens only when every selected item passed its checks.
+pub fn md_review_passes(failures: i64) -> bool {
+    return failures == 0;
+}
+
+; Re-checking an uncertain move works only when every disputed path still has its original snapshot.
+pub fn md_disputed_all_known(found: i64, disputed: i64) -> bool {
+    return found == disputed;
+}
+
+pub fn md_can_repeat_duplicate_scan(has_root: bool, scanning: bool) -> bool {
+    return has_root and scanning == false;
+}
+
+; A Library or cache folder is read only when it is a real folder that could be listed.
+pub fn md_location_usable(symlinked: bool, listed: bool) -> bool {
+    return symlinked == false and listed;
+}
+
+; Empty entries are not listed as caches.
+pub fn md_worth_listing(size: i64) -> bool {
+    return size > 0;
+}
+
+; A stored folder grant is renewed when the system says it went stale and a new one could be made.
+pub fn md_renew_grant(stale: bool, renewed: bool) -> bool {
+    return stale and renewed;
+}
+
 ; --- The assistant -----------------------------------------------------------------------------------------------
 pub fn md_assistant_busy(map_moving: bool, map_review_shown: bool, uninstaller_moving: bool, uninstaller_reviewing: bool, uninstaller_review_shown: bool, uninstaller_outcome_shown: bool, leftovers_locked: bool, caches_locked: bool) -> bool {
     return map_moving or map_review_shown or uninstaller_moving or uninstaller_reviewing or uninstaller_review_shown or uninstaller_outcome_shown or leftovers_locked or caches_locked;
@@ -400,4 +444,23 @@ test md_review_steps_and_assistant {
     assert md_tool_limit(50, true, 8, 15) == 15;
     assert md_tool_limit(0, true, 8, 15) == 1;
     assert md_tool_limit(0, false, 8, 15) == 8;
+}
+
+test md_small_decisions {
+    assert md_needs_permission(false) == true;
+    assert md_can_start_scan(true) == false;
+    assert md_queue_trimmed(3, 2) == true;
+    assert md_queue_trimmed(2, 2) == false;
+    assert md_review_passes(0) == true;
+    assert md_review_passes(1) == false;
+    assert md_disputed_all_known(2, 2) == true;
+    assert md_disputed_all_known(1, 2) == false;
+    assert md_can_repeat_duplicate_scan(true, false) == true;
+    assert md_can_repeat_duplicate_scan(false, false) == false;
+    assert md_location_usable(false, true) == true;
+    assert md_location_usable(true, true) == false;
+    assert md_worth_listing(1) == true;
+    assert md_worth_listing(0) == false;
+    assert md_renew_grant(true, true) == true;
+    assert md_renew_grant(true, false) == false;
 }

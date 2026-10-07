@@ -363,7 +363,7 @@ struct DuplicateFinderScanner: Sendable {
                 switch Int32(du_larger_first(lhs.key, rhs.key)) {
                 case DU_FIRST: return true
                 case DU_SECOND: return false
-                default: return lhs.value.first?.url.path ?? "" < rhs.value.first?.url.path ?? ""
+                default: return T27Text.less(lhs.value.first?.url.path ?? "", rhs.value.first?.url.path ?? "")
                 }
             }
         let candidateCount = candidateBuckets.reduce(0) { $0 + $1.value.count }
@@ -372,7 +372,7 @@ struct DuplicateFinderScanner: Sendable {
         var hashedFileCount = 0
         var digestBuckets: [String: [DigestedCandidate]] = [:]
         for (_, candidates) in candidateBuckets {
-            for candidate in candidates.sorted(by: { $0.url.path < $1.url.path }) {
+            for candidate in candidates.sorted(by: { T27Text.less($0.url.path, $1.url.path) }) {
                 try Self.checkCancellation()
                 do {
                     let digest = try digest(candidate, counter: counter)
@@ -395,7 +395,7 @@ struct DuplicateFinderScanner: Sendable {
         for digested in digestBuckets.values where du_is_group(UInt32(clamping: digested.count)) {
             try Self.checkCancellation()
             var partitions: [[DigestedCandidate]] = []
-            for candidate in digested.sorted(by: { $0.candidate.url.path < $1.candidate.url.path }) {
+            for candidate in digested.sorted(by: { T27Text.less($0.candidate.url.path, $1.candidate.url.path) }) {
                 try Self.checkCancellation()
                 var matchedPartition = false
                 for index in partitions.indices {
@@ -426,7 +426,7 @@ struct DuplicateFinderScanner: Sendable {
             }
 
             for partition in partitions where du_is_group(UInt32(clamping: partition.count)) {
-                let sorted = partition.sorted { $0.candidate.url.path < $1.candidate.url.path }
+                let sorted = partition.sorted { T27Text.less($0.candidate.url.path, $1.candidate.url.path) }
                 guard let first = sorted.first else { continue }
                 let files = sorted.map { item in
                     DuplicateFileSnapshot(
@@ -454,7 +454,7 @@ struct DuplicateFinderScanner: Sendable {
             switch Int32(du_larger_first(lhs.logicalDuplicateBytes, rhs.logicalDuplicateBytes)) {
             case DU_FIRST: return true
             case DU_SECOND: return false
-            default: return lhs.id < rhs.id
+            default: return T27Text.less(lhs.id, rhs.id)
             }
         }
         let counts = tally.snapshot()

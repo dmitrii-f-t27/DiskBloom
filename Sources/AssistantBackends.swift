@@ -34,7 +34,6 @@ final class OpenAICompatibleBackend: AssistantBackend {
     private let executor: AssistantToolExecutor
     private var history: [JSONValue]
 
-    private static let maxToolRounds = 8
     private static let maxHistory = 60
 
     init(baseURL: String, model: String, apiKey: String?, executor: @escaping AssistantToolExecutor) {
@@ -48,12 +47,14 @@ final class OpenAICompatibleBackend: AssistantBackend {
     func send(_ text: String) async throws -> String {
         history.append(.object(["role": .string("user"), "content": .string(text)]))
         trimHistory()
-        for _ in 0..<Self.maxToolRounds {
+        var rounds: UInt32 = 0
+        while as_another_round(rounds) {
+            rounds += 1
             try Task.checkCancellation()
             let message = try await complete()
             history.append(Self.storable(message))
             let calls = message["tool_calls"]?.arrayValue ?? []
-            guard !calls.isEmpty else {
+            guard !as_reply_is_final(UInt32(clamping: calls.count)) else {
                 return Self.visibleText(message["content"]?.stringValue ?? "")
             }
             for call in calls {
@@ -255,7 +256,7 @@ enum AppleAssistantSupport {
                 guard let code = language.languageCode?.identifier else { return nil }
                 return Locale.current.localizedString(forLanguageCode: code)
             }
-            let unique = Array(Set(names)).sorted()
+            let unique = Array(Set(names)).sorted(by: T27Text.less)
             return unique.isEmpty ? nil : unique.joined(separator: ", ")
         }
         #endif

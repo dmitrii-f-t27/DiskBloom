@@ -261,7 +261,7 @@ enum ApplicationCatalog {
         }
         return found.sorted {
             let comparison = $0.name.localizedCaseInsensitiveCompare($1.name)
-            return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending
+            return comparison == .orderedSame ? T27Text.less($0.id, $1.id) : comparison == .orderedAscending
         }
     }
 
@@ -376,7 +376,7 @@ enum CodeSignatureReader {
             return nil
         }
         let entitlements = dictionary[kSecCodeInfoEntitlementsDict as String] as? [String: Any]
-        let groups = Array(Set(entitlements?["com.apple.security.application-groups"] as? [String] ?? [])).sorted()
+        let groups = Array(Set(entitlements?["com.apple.security.application-groups"] as? [String] ?? [])).sorted(by: T27Text.less)
         return ValidatedCodeSignature(
             identifier: identifier,
             teamIdentifier: teamIdentifier,
@@ -476,7 +476,7 @@ enum ApplicationRemovalAnalyzer {
         }
         let groups = (validatedSignature?.applicationGroups ?? [])
             .compactMap(AppRemovalPathSafety.safeIdentifier)
-        for group in Set(groups).sorted() {
+        for group in Set(groups).sorted(by: T27Text.less) {
             specs += [AppRemovalRule.groupContainer, .groupApplicationScripts].map { AppCandidateSpec(rule: $0, key: group) }
         }
 
@@ -511,9 +511,11 @@ enum ApplicationRemovalAnalyzer {
         }
 
         items.sort {
-            if $0.isRequired != $1.isRequired { return $0.isRequired }
-            if $0.isDefaultSelected != $1.isDefaultSelected { return $0.isDefaultSelected }
-            return $0.url.path.localizedCaseInsensitiveCompare($1.url.path) == .orderedAscending
+            switch Int32(un_plan_order($0.isRequired, $1.isRequired, $0.isDefaultSelected, $1.isDefaultSelected)) {
+            case UN_ORDER_FIRST: return true
+            case UN_ORDER_SECOND: return false
+            default: return $0.url.path.localizedCaseInsensitiveCompare($1.url.path) == .orderedAscending
+            }
         }
 
         let privilegedPaths = [
@@ -833,7 +835,7 @@ enum AppRemovalPolicy {
     }
 
     static func overlappingSelectionReason(_ items: [AppRemovalItem]) -> String? {
-        let paths = items.map { $0.url.standardizedFileURL.path }.sorted()
+        let paths = items.map { $0.url.standardizedFileURL.path }.sorted(by: T27Text.less)
         for (index, path) in paths.enumerated() {
             for other in paths.dropFirst(index + 1) where T27Text.inside(other, path) {
                 return "Selected paths overlap: \(path) and \(other)"
@@ -851,8 +853,11 @@ enum AppRemovalCoordinator {
         mover: MoveSteps.Mover = MoveSteps.systemTrashMover
     ) -> AppRemovalOutcome {
         let ordered = items.sorted {
-            if $0.isRequired != $1.isRequired { return $0.isRequired }
-            return $0.url.path < $1.url.path
+            switch Int32(un_queue_order($0.isRequired, $1.isRequired)) {
+            case UN_ORDER_FIRST: return true
+            case UN_ORDER_SECOND: return false
+            default: return T27Text.less($0.url.path, $1.url.path)
+            }
         }
         let queueFailure = MoveSteps.run(MV_UNINSTALLER, MV_PHASE_QUEUE, appMoved: applicationAlreadyMoved) { step, _ in
             switch step {
@@ -1313,7 +1318,7 @@ final class AppUninstallerModel: ObservableObject {
               md_can_recheck_uncertain(!outcome.uncertainPaths.isEmpty, isReviewing, isMovingToTrash) else { return }
         let uncertainSet = Set(outcome.uncertainPaths)
         let uncertainItems = plan.items.filter { uncertainSet.contains($0.url.path) }
-        guard uncertainItems.count == uncertainSet.count else {
+        guard md_disputed_all_known(Int64(uncertainItems.count), Int64(uncertainSet.count)) else {
             notice = AppNotice(
                 title: "Result still unconfirmed",
                 message: "The plan no longer contains all disputed paths. Choose the application again or check the Trash manually."
@@ -1337,7 +1342,7 @@ final class AppUninstallerModel: ObservableObject {
             }.value
             guard reviewGeneration == generation, !Task.isCancelled else { return }
             isReviewing = false
-            if failures.isEmpty {
+            if md_review_passes(Int64(failures.count)) {
                 lastOutcome = nil
                 lastApplicationName = nil
                 showingOutcomeReport = false

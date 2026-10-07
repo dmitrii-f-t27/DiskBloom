@@ -90,6 +90,9 @@ static const uint32_t CV_WORD_LENGTHS[6] = { 7, 7, 8, 11, 15, 11 };
 #define CV_CHAR_OTHER 0
 #define CV_CHAR_LOWER_LETTER 1
 #define CV_CHAR_DASH 2
+#define CV_ORDER_FIRST 0
+#define CV_ORDER_SECOND 1
+#define CV_ORDER_TIE 2
 /* -------------------------------------------------------
    Function prototypes
    ------------------------------------------------------- */
@@ -111,5 +114,6 @@ uint32_t cv_verdict(uint32_t location, uint32_t kind, bool unreadable, bool appl
 uint32_t cv_category(uint32_t location, uint32_t kind, bool unreadable, bool apple, bool directory, bool bundle_id, bool owner_known, bool owner_running);
 bool cv_selectable(uint32_t verdict);
 uint32_t cv_move_block(uint32_t verdict, bool owner_running_now, bool developer, bool xcode_running_now, bool path_unchanged, bool direct_child, bool symlink_on_path);
+uint32_t cv_list_order(uint32_t verdict_a, uint32_t verdict_b, int64_t size_a, int64_t size_b);
 /* Function bodies: see the full header. */
 #endif

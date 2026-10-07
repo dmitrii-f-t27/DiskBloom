@@ -41,6 +41,33 @@ static const uint8_t AS_TEXT[757] = { 100, 105, 115, 107, 95, 109, 97, 112, 100,
 #define AS_SHOW_FULL 2
 static const uint8_t AS_W_COMPLETIONS[17] = { 47, 99, 104, 97, 116, 47, 99, 111, 109, 112, 108, 101, 116, 105, 111, 110, 115 };
 static const uint8_t AS_W_MODELS[7] = { 47, 109, 111, 100, 101, 108, 115 };
+#define AS_MAX_TOOL_ROUNDS 8
+#define AS_MAP_SCANNING 0
+#define AS_MAP_SHOWS 1
+#define AS_MAP_EMPTY 2
+#define AS_LARGEST_NO_SUCH_PATH 0
+#define AS_LARGEST_FOCUSED 1
+#define AS_LARGEST_NOT_A_FOLDER 2
+#define AS_LARGEST_SCAN_FOLDER 3
+#define AS_LARGEST_START_CURRENT 4
+#define AS_LARGEST_USE_CURRENT 5
+#define AS_WAIT_STILL_RUNNING 0
+#define AS_WAIT_NOTHING 1
+#define AS_WAIT_READY 2
+#define AS_SELECT_NOT_MEASURED 0
+#define AS_SELECT_UNKNOWN_REFS 1
+#define AS_SELECT_ONLY_REFUSED 2
+#define AS_SELECT_DONE 3
+#define AS_SELECT_DONE_WITH_SKIPPED 4
+#define AS_QUEUE_NO_SUCH_PATH 0
+#define AS_QUEUE_NOT_IN_MAP 1
+#define AS_QUEUE_ALREADY 2
+#define AS_QUEUE_REFUSED 3
+#define AS_QUEUE_ADD 4
+#define AS_FIND_ASK_NAME 0
+#define AS_FIND_NONE 1
+#define AS_FIND_OPEN_ONE 2
+#define AS_FIND_LIST 3
 #define AS_CATALOG_SKIP 0
 #define AS_CATALOG_ADD 1
 #define AS_CATALOG_DESCEND 2
@@ -68,6 +95,18 @@ uint32_t as_history_cut(uint8_t roles[static 4096], uint32_t count, uint32_t kee
 bool as_is_open_tag(uint8_t t[static 1048576], uint32_t n, uint32_t at);
 bool as_is_close_tag(uint8_t t[static 1048576], uint32_t n, uint32_t at);
 uint32_t as_strip_thinking(uint8_t text[static 1048576], uint32_t len, uint8_t out[static 1048576]);
+bool as_can_send(bool text_empty, bool thinking);
+bool as_reply_is_final(uint32_t tool_calls);
+bool as_another_round(uint32_t rounds_done);
+bool as_is_whole(double value);
+uint32_t as_overview_map(bool scanning, bool has_focus);
+uint32_t as_largest_plan(bool has_path, bool path_exists, bool focused, bool is_folder, bool has_focus, bool scanning);
+uint32_t as_after_wait(bool still_running, bool has_result);
+bool as_should_start_measuring(bool has_analysis, bool scanning);
+uint32_t as_select_plan(bool measured, int64_t chosen, int64_t refused);
+uint32_t as_queue_plan(bool path_exists, bool in_map, bool already, bool refused);
+uint32_t as_find_plan(bool query_empty, int64_t matches);
+bool as_preset_sets_address(bool preset_address_empty);
 uint32_t as_catalog_entry(bool readable, bool directory, bool symlink, bool app_extension, int64_t depth_left, bool package);
 /* Function bodies: see the full header. */
 #endif

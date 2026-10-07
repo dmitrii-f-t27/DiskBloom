@@ -267,6 +267,127 @@ pub fn as_strip_thinking(text: [1048576]u8, len: u32, out: [1048576]u8) -> u32 {
     return n;
 }
 
+; --- Conversation turns ------------------------------------------------------------------------------
+pub const AS_MAX_TOOL_ROUNDS : u32 = 8;
+
+; A message is sent only with text and while no answer is pending.
+pub fn as_can_send(text_empty: bool, thinking: bool) -> bool {
+    return text_empty == false and thinking == false;
+}
+
+; A model message without tool calls is the final answer; after AS_MAX_TOOL_ROUNDS rounds the
+; assistant stops asking.
+pub fn as_reply_is_final(tool_calls: u32) -> bool {
+    return tool_calls == 0;
+}
+
+pub fn as_another_round(rounds_done: u32) -> bool {
+    return rounds_done < AS_MAX_TOOL_ROUNDS;
+}
+
+; A JSON number is written without a fraction when it is whole.
+pub fn as_is_whole(value: f64) -> bool {
+    var truncated: i64 = value;
+    var back: f64 = truncated;
+    return back == value;
+}
+
+; --- What each tool does -------------------------------------------------------------------------------
+pub const AS_MAP_SCANNING : u32 = 0;
+pub const AS_MAP_SHOWS : u32 = 1;
+pub const AS_MAP_EMPTY : u32 = 2;
+
+pub fn as_overview_map(scanning: bool, has_focus: bool) -> u32 {
+    if (scanning) { return AS_MAP_SCANNING; }
+    if (has_focus) { return AS_MAP_SHOWS; }
+    return AS_MAP_EMPTY;
+}
+
+; largest_items: open the given folder (focus it if the map already holds it, scan it otherwise), refuse
+; a file, or with no path use the map that is open, starting the home scan if nothing is.
+pub const AS_LARGEST_NO_SUCH_PATH : u32 = 0;
+pub const AS_LARGEST_FOCUSED : u32 = 1;
+pub const AS_LARGEST_NOT_A_FOLDER : u32 = 2;
+pub const AS_LARGEST_SCAN_FOLDER : u32 = 3;
+pub const AS_LARGEST_START_CURRENT : u32 = 4;
+pub const AS_LARGEST_USE_CURRENT : u32 = 5;
+
+pub fn as_largest_plan(has_path: bool, path_exists: bool, focused: bool, is_folder: bool, has_focus: bool, scanning: bool) -> u32 {
+    if (has_path) {
+        if (path_exists == false) { return AS_LARGEST_NO_SUCH_PATH; }
+        if (focused) { return AS_LARGEST_FOCUSED; }
+        if (is_folder == false) { return AS_LARGEST_NOT_A_FOLDER; }
+        return AS_LARGEST_SCAN_FOLDER;
+    }
+    if (has_focus == false and scanning == false) { return AS_LARGEST_START_CURRENT; }
+    return AS_LARGEST_USE_CURRENT;
+}
+
+; After waiting for a scan: still running, nothing measured, or results.
+pub const AS_WAIT_STILL_RUNNING : u32 = 0;
+pub const AS_WAIT_NOTHING : u32 = 1;
+pub const AS_WAIT_READY : u32 = 2;
+
+pub fn as_after_wait(still_running: bool, has_result: bool) -> u32 {
+    if (still_running) { return AS_WAIT_STILL_RUNNING; }
+    if (has_result == false) { return AS_WAIT_NOTHING; }
+    return AS_WAIT_READY;
+}
+
+pub fn as_should_start_measuring(has_analysis: bool, scanning: bool) -> bool {
+    return has_analysis == false and scanning == false;
+}
+
+; select_caches
+pub const AS_SELECT_NOT_MEASURED : u32 = 0;
+pub const AS_SELECT_UNKNOWN_REFS : u32 = 1;
+pub const AS_SELECT_ONLY_REFUSED : u32 = 2;
+pub const AS_SELECT_DONE : u32 = 3;
+pub const AS_SELECT_DONE_WITH_SKIPPED : u32 = 4;
+
+pub fn as_select_plan(measured: bool, chosen: i64, refused: i64) -> u32 {
+    if (measured == false) { return AS_SELECT_NOT_MEASURED; }
+    if (chosen == 0) {
+        if (refused == 0) { return AS_SELECT_UNKNOWN_REFS; }
+        return AS_SELECT_ONLY_REFUSED;
+    }
+    if (refused > 0) { return AS_SELECT_DONE_WITH_SKIPPED; }
+    return AS_SELECT_DONE;
+}
+
+; queue_for_cleanup
+pub const AS_QUEUE_NO_SUCH_PATH : u32 = 0;
+pub const AS_QUEUE_NOT_IN_MAP : u32 = 1;
+pub const AS_QUEUE_ALREADY : u32 = 2;
+pub const AS_QUEUE_REFUSED : u32 = 3;
+pub const AS_QUEUE_ADD : u32 = 4;
+
+pub fn as_queue_plan(path_exists: bool, in_map: bool, already: bool, refused: bool) -> u32 {
+    if (path_exists == false) { return AS_QUEUE_NO_SUCH_PATH; }
+    if (in_map == false) { return AS_QUEUE_NOT_IN_MAP; }
+    if (already) { return AS_QUEUE_ALREADY; }
+    if (refused) { return AS_QUEUE_REFUSED; }
+    return AS_QUEUE_ADD;
+}
+
+; find_app
+pub const AS_FIND_ASK_NAME : u32 = 0;
+pub const AS_FIND_NONE : u32 = 1;
+pub const AS_FIND_OPEN_ONE : u32 = 2;
+pub const AS_FIND_LIST : u32 = 3;
+
+pub fn as_find_plan(query_empty: bool, matches: i64) -> u32 {
+    if (query_empty) { return AS_FIND_ASK_NAME; }
+    if (matches == 0) { return AS_FIND_NONE; }
+    if (matches == 1) { return AS_FIND_OPEN_ONE; }
+    return AS_FIND_LIST;
+}
+
+; Choosing a preset keeps a custom address when the preset has none.
+pub fn as_preset_sets_address(preset_address_empty: bool) -> bool {
+    return preset_address_empty == false;
+}
+
 ; --- Application catalog ------------------------------------------------------------------------------------
 pub const AS_CATALOG_SKIP : u32 = 0;
 pub const AS_CATALOG_ADD : u32 = 1;
@@ -369,4 +490,50 @@ test as_history_thinking_catalog {
     assert as_catalog_entry(true, true, false, false, 1, true) == AS_CATALOG_SKIP;
     assert as_catalog_entry(true, true, true, true, 1, false) == AS_CATALOG_SKIP;
     assert as_catalog_entry(false, true, false, true, 1, false) == AS_CATALOG_SKIP;
+}
+
+test as_turns {
+    assert as_can_send(false, false) == true;
+    assert as_can_send(true, false) == false;
+    assert as_can_send(false, true) == false;
+    assert as_reply_is_final(0) == true;
+    assert as_reply_is_final(2) == false;
+    assert as_another_round(7) == true;
+    assert as_another_round(8) == false;
+    assert as_is_whole(3.0) == true;
+    assert as_is_whole(3.5) == false;
+    assert as_is_whole(-2.0) == true;
+}
+
+test as_tool_plans {
+    assert as_overview_map(true, true) == AS_MAP_SCANNING;
+    assert as_overview_map(false, true) == AS_MAP_SHOWS;
+    assert as_overview_map(false, false) == AS_MAP_EMPTY;
+    assert as_largest_plan(true, false, false, false, false, false) == AS_LARGEST_NO_SUCH_PATH;
+    assert as_largest_plan(true, true, true, false, false, false) == AS_LARGEST_FOCUSED;
+    assert as_largest_plan(true, true, false, false, false, false) == AS_LARGEST_NOT_A_FOLDER;
+    assert as_largest_plan(true, true, false, true, false, false) == AS_LARGEST_SCAN_FOLDER;
+    assert as_largest_plan(false, false, false, false, false, false) == AS_LARGEST_START_CURRENT;
+    assert as_largest_plan(false, false, false, false, true, false) == AS_LARGEST_USE_CURRENT;
+    assert as_largest_plan(false, false, false, false, false, true) == AS_LARGEST_USE_CURRENT;
+    assert as_after_wait(true, true) == AS_WAIT_STILL_RUNNING;
+    assert as_after_wait(false, false) == AS_WAIT_NOTHING;
+    assert as_after_wait(false, true) == AS_WAIT_READY;
+    assert as_should_start_measuring(false, false) == true;
+    assert as_should_start_measuring(true, false) == false;
+    assert as_select_plan(false, 1, 0) == AS_SELECT_NOT_MEASURED;
+    assert as_select_plan(true, 0, 0) == AS_SELECT_UNKNOWN_REFS;
+    assert as_select_plan(true, 0, 2) == AS_SELECT_ONLY_REFUSED;
+    assert as_select_plan(true, 2, 0) == AS_SELECT_DONE;
+    assert as_select_plan(true, 2, 1) == AS_SELECT_DONE_WITH_SKIPPED;
+    assert as_queue_plan(false, true, false, false) == AS_QUEUE_NO_SUCH_PATH;
+    assert as_queue_plan(true, false, false, false) == AS_QUEUE_NOT_IN_MAP;
+    assert as_queue_plan(true, true, true, true) == AS_QUEUE_ALREADY;
+    assert as_queue_plan(true, true, false, true) == AS_QUEUE_REFUSED;
+    assert as_queue_plan(true, true, false, false) == AS_QUEUE_ADD;
+    assert as_find_plan(true, 3) == AS_FIND_ASK_NAME;
+    assert as_find_plan(false, 0) == AS_FIND_NONE;
+    assert as_find_plan(false, 1) == AS_FIND_OPEN_ONE;
+    assert as_find_plan(false, 2) == AS_FIND_LIST;
+    assert as_preset_sets_address(false) == true;
 }

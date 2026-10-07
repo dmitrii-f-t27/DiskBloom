@@ -395,6 +395,20 @@ pub fn cv_move_block(verdict: u32, owner_running_now: bool, developer: bool, xco
     return CV_MOVE_ALLOWED;
 }
 
+; --- List order ------------------------------------------------------------------------------------
+; Actionable verdicts first, then larger caches; ties fall back to the paths (CV_ORDER_TIE).
+pub const CV_ORDER_FIRST : u32 = 0;
+pub const CV_ORDER_SECOND : u32 = 1;
+pub const CV_ORDER_TIE : u32 = 2;
+
+pub fn cv_list_order(verdict_a: u32, verdict_b: u32, size_a: i64, size_b: i64) -> u32 {
+    if (verdict_a < verdict_b) { return CV_ORDER_FIRST; }
+    if (verdict_a > verdict_b) { return CV_ORDER_SECOND; }
+    if (size_a > size_b) { return CV_ORDER_FIRST; }
+    if (size_a < size_b) { return CV_ORDER_SECOND; }
+    return CV_ORDER_TIE;
+}
+
 ; --- Laws ----------------------------------------------------------------------------------------
 invariant cv_verdicts_are_ranked { assert CV_SAFE < CV_OPTIONAL and CV_OPTIONAL < CV_QUIT_FIRST and CV_QUIT_FIRST < CV_USE_TOOL and CV_USE_TOOL < CV_KEEP; }
 invariant cv_allowed_is_zero { assert CV_MOVE_ALLOWED == 0; }
@@ -555,4 +569,12 @@ test cv_xcode_projects_and_updater_owners {
     assert cv_updater_owner_name(n, 19, out) == 10;
     assert out[0] == 118;
     assert out[6] == 32;
+}
+
+test cv_list_order_ranks_then_sizes {
+    assert cv_list_order(CV_SAFE, CV_KEEP, 1, 100) == CV_ORDER_FIRST;
+    assert cv_list_order(CV_KEEP, CV_SAFE, 100, 1) == CV_ORDER_SECOND;
+    assert cv_list_order(CV_SAFE, CV_SAFE, 5, 3) == CV_ORDER_FIRST;
+    assert cv_list_order(CV_SAFE, CV_SAFE, 3, 5) == CV_ORDER_SECOND;
+    assert cv_list_order(CV_SAFE, CV_SAFE, 3, 3) == CV_ORDER_TIE;
 }

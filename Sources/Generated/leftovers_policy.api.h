@@ -57,6 +57,9 @@
 #define LO_MOVE_READ_ONLY 8
 #define LO_MOVE_CLOUD 9
 #define LO_MOVE_CONTENTS 10
+#define LO_ORDER_FIRST 0
+#define LO_ORDER_SECOND 1
+#define LO_ORDER_TIE 2
 /* -------------------------------------------------------
    Function prototypes
    ------------------------------------------------------- */
@@ -68,5 +71,6 @@ uint32_t lo_claim(bool canonical, bool exact, bool related, bool namespace_sibli
 uint32_t lo_entry_issue(bool stat_ok, bool owned_by_user, bool immutable, bool same_device, bool symlink, bool executable_bundle, bool executable_file);
 uint32_t lo_tree_issue(bool has_path, bool snapshot_complete, bool unreadable, bool inside_library, bool contents_ok);
 uint32_t lo_move_issue(bool item_blocked, bool id_still_canonical, bool path_unchanged, bool path_matches_rule, bool symlinked_component, bool regular_folder, bool volume_local, bool volume_read_only, bool ubiquitous, bool tree_ok);
+uint32_t lo_group_order(uint32_t confidence_a, uint32_t confidence_b, int64_t size_a, int64_t size_b);
 /* Function bodies: see the full header. */
 #endif
