@@ -11,8 +11,8 @@ struct DiskScanner: Sendable {
     private var incompleteManifestEvents = 0
 
     init(maxDepth: Int = 6, maxChildrenPerFolder: Int = 72) {
-        self.maxDepth = max(2, maxDepth)
-        self.maxChildrenPerFolder = max(12, maxChildrenPerFolder)
+        self.maxDepth = Int(sr_depth_limit(Int64(maxDepth)))
+        self.maxChildrenPerFolder = Int(sr_visible_children_limit(Int64(maxChildrenPerFolder)))
     }
 
     mutating func scan(root: URL, counter: ScanCounter) throws -> ScanSnapshot {
@@ -40,14 +40,33 @@ struct DiskScanner: Sendable {
         )
     }
 
+    /// Maps one entry; what to do with it is decided by Specs/scan_rules.t27 (sr_map_action).
     private mutating func scanNode(_ url: URL, depth: Int, counter: ScanCounter) throws -> DiskNode? {
         try checkCancellation()
         counter.record(url)
 
-        let values: URLResourceValues
-        do {
-            values = try url.resourceValues(forKeys: resourceKeys)
-        } catch {
+        let values = try? url.resourceValues(forKeys: resourceKeys)
+        let isDirectory = values?.isDirectory == true
+        let isPackage = values?.isPackage == true
+        let capturedIdentity = values == nil ? nil : FileIdentity.read(for: url)
+        let linkKey = values != nil && !isDirectory && values?.isSymbolicLink != true
+            ? FileIdentity.hardLinkKeyIfNeeded(for: url)
+            : nil
+        let action = sr_map_action(
+            values != nil,
+            values?.isSymbolicLink == true,
+            values?.isVolume == true,
+            isDirectory,
+            isPackage,
+            UInt32(depth),
+            UInt32(maxDepth),
+            linkKey.map { seenFileIdentifiers.contains($0) } ?? false,
+            capturedIdentity != nil,
+            capturedIdentity.map { seenDirectoryIdentifiers.contains($0) } ?? false
+        )
+
+        switch action {
+        case UInt32(SR_UNREADABLE):
             return DiskNode(
                 url: url,
                 name: displayName(for: url),
@@ -57,19 +76,16 @@ struct DiskScanner: Sendable {
                 unreadableCount: 1,
                 isDirectory: false
             )
-        }
-
-        if values.isSymbolicLink == true {
+        case UInt32(SR_SYMLINK):
             skippedSymbolicLinks += 1
-            let identity = FileIdentity.read(for: url)
             return DiskNode(
                 url: url,
-                resourceIdentifier: identity,
+                resourceIdentifier: capturedIdentity,
                 fingerprint: ContentFingerprint.node(
                     name: displayName(for: url),
-                    identity: identity,
+                    identity: capturedIdentity,
                     size: 0,
-                    modificationDate: values.contentModificationDate,
+                    modificationDate: values?.contentModificationDate,
                     isDirectory: false,
                     children: nil
                 ),
@@ -80,43 +96,14 @@ struct DiskScanner: Sendable {
                 unreadableCount: 0,
                 isDirectory: false
             )
-        }
-
-        if depth > 0, values.isVolume == true {
+        case UInt32(SR_SKIP_MOUNT):
             skippedMountPoints += 1
             incompleteManifestEvents += 1
             return nil
-        }
-
-        let capturedIdentity = FileIdentity.read(for: url)
-        let isDirectory = values.isDirectory == true
-        let isPackage = values.isPackage == true
-        if !isDirectory {
-            if let identifier = FileIdentity.hardLinkKeyIfNeeded(for: url) {
-                if seenFileIdentifiers.contains(identifier) {
-                    let size = allocatedSize(from: values)
-                    return DiskNode(
-                        url: url,
-                        resourceIdentifier: capturedIdentity,
-                        fingerprint: ContentFingerprint.node(
-                            name: displayName(for: url),
-                            identity: capturedIdentity,
-                            size: size,
-                            modificationDate: values.contentModificationDate,
-                            isDirectory: false,
-                            children: nil
-                        ),
-                        name: displayName(for: url),
-                        size: 0,
-                        fileCount: 0,
-                        directoryCount: 0,
-                        unreadableCount: 0,
-                        isDirectory: false
-                    )
-                }
-                seenFileIdentifiers.insert(identifier)
-            }
-            let size = allocatedSize(from: values)
+        case UInt32(SR_FILE_REPEAT_LINK), UInt32(SR_FILE):
+            let size = values.map(allocatedSize(from:)) ?? 0
+            let repeated = action == UInt32(SR_FILE_REPEAT_LINK)
+            if !repeated, let linkKey { seenFileIdentifiers.insert(linkKey) }
             return DiskNode(
                 url: url,
                 resourceIdentifier: capturedIdentity,
@@ -124,29 +111,28 @@ struct DiskScanner: Sendable {
                     name: displayName(for: url),
                     identity: capturedIdentity,
                     size: size,
-                    modificationDate: values.contentModificationDate,
+                    modificationDate: values?.contentModificationDate,
                     isDirectory: false,
                     children: nil
                 ),
                 name: displayName(for: url),
-                size: size,
-                fileCount: 1,
+                size: repeated ? 0 : size,
+                fileCount: repeated ? 0 : 1,
                 directoryCount: 0,
                 unreadableCount: 0,
                 isDirectory: false
             )
+        case UInt32(SR_SKIP_SEEN_FOLDER):
+            incompleteManifestEvents += 1
+            return nil
+        default:
+            break
         }
 
+        if depth > 0, let capturedIdentity { seenDirectoryIdentifiers.insert(capturedIdentity) }
+        guard let values else { return nil }
 
-        if depth > 0, let capturedIdentity {
-            if seenDirectoryIdentifiers.contains(capturedIdentity) {
-                incompleteManifestEvents += 1
-                return nil
-            }
-            seenDirectoryIdentifiers.insert(capturedIdentity)
-        }
-
-        if depth >= maxDepth || (isPackage && depth > 0) {
+        if action == UInt32(SR_MEASURE) {
             let measured = try measureDirectory(
                 url,
                 capturedIdentity: capturedIdentity,
@@ -200,7 +186,12 @@ struct DiskScanner: Sendable {
             }
         }
 
-        let identityStayedStable = FileIdentity.read(for: url) == capturedIdentity
+        let identityAfter = FileIdentity.read(for: url)
+        let identityStayedStable = sr_folder_fingerprint_holds(
+            capturedIdentity != nil,
+            identityAfter != nil,
+            identityAfter == capturedIdentity
+        )
         return DiskNode(
             url: url,
             resourceIdentifier: capturedIdentity,
@@ -251,81 +242,86 @@ struct DiskScanner: Sendable {
         for entry in entries {
             try checkCancellation()
             counter.record(entry)
-            let values: URLResourceValues
-            do {
-                values = try entry.resourceValues(forKeys: resourceKeys)
-            } catch {
+            let values = try? entry.resourceValues(forKeys: resourceKeys)
+            let isDirectory = values?.isDirectory == true
+            let nestedIdentity = values != nil && isDirectory && values?.isSymbolicLink != true && values?.isVolume != true
+                ? FileIdentity.read(for: entry)
+                : nil
+            let linkKey = values != nil && !isDirectory && values?.isSymbolicLink != true && values?.isVolume != true
+                ? FileIdentity.hardLinkKeyIfNeeded(for: entry)
+                : nil
+            let action = sr_measure_action(
+                values != nil,
+                values?.isSymbolicLink == true,
+                values?.isVolume == true,
+                isDirectory,
+                linkKey.map { seenFileIdentifiers.contains($0) } ?? false,
+                nestedIdentity != nil,
+                nestedIdentity.map { seenDirectoryIdentifiers.contains($0) } ?? false
+            )
+            switch action {
+            case UInt32(SR_UNREADABLE):
                 result.unreadableCount += 1
-                continue
-            }
-            if values.isSymbolicLink == true {
+            case UInt32(SR_SYMLINK):
                 skippedSymbolicLinks += 1
                 result.addFingerprint(
                     ContentFingerprint.node(
                         name: displayName(for: entry),
                         identity: FileIdentity.read(for: entry),
                         size: 0,
-                        modificationDate: values.contentModificationDate,
+                        modificationDate: values?.contentModificationDate,
                         isDirectory: false,
                         children: nil
                     )
                 )
-                continue
-            }
-            if values.isVolume == true {
+            case UInt32(SR_SKIP_MOUNT):
                 skippedMountPoints += 1
                 incompleteManifestEvents += 1
                 result.addFingerprint(nil)
-                continue
-            }
-            if values.isDirectory == true {
-                let nestedIdentity = FileIdentity.read(for: entry)
-                if let nestedIdentity {
-                    if seenDirectoryIdentifiers.contains(nestedIdentity) {
-                        incompleteManifestEvents += 1
-                        result.addFingerprint(nil)
-                        continue
-                    }
-                    seenDirectoryIdentifiers.insert(nestedIdentity)
+            case UInt32(SR_SKIP_SEEN_FOLDER):
+                incompleteManifestEvents += 1
+                result.addFingerprint(nil)
+            case UInt32(SR_MEASURE):
+                if let nestedIdentity { seenDirectoryIdentifiers.insert(nestedIdentity) }
+                if let values {
+                    let nested = try measureDirectory(
+                        entry,
+                        capturedIdentity: nestedIdentity,
+                        capturedValues: values,
+                        counter: counter
+                    )
+                    result.add(nested)
                 }
-                let nested = try measureDirectory(
-                    entry,
-                    capturedIdentity: nestedIdentity,
-                    capturedValues: values,
-                    counter: counter
+            case UInt32(SR_FILE_REPEAT_LINK):
+                result.addFingerprint(
+                    ContentFingerprint.node(
+                        name: displayName(for: entry),
+                        identity: FileIdentity.read(for: entry),
+                        size: values.map(allocatedSize(from:)) ?? 0,
+                        modificationDate: values?.contentModificationDate,
+                        isDirectory: false,
+                        children: nil
+                    )
                 )
-                result.add(nested)
-            } else {
-                if let identifier = FileIdentity.hardLinkKeyIfNeeded(for: entry) {
-                    if seenFileIdentifiers.contains(identifier) {
-                        result.addFingerprint(
-                            ContentFingerprint.node(
-                                name: displayName(for: entry),
-                                identity: FileIdentity.read(for: entry),
-                                size: allocatedSize(from: values),
-                                modificationDate: values.contentModificationDate,
-                                isDirectory: false,
-                                children: nil
-                            )
-                        )
-                        continue
-                    }
-                    seenFileIdentifiers.insert(identifier)
-                }
-                result.size += allocatedSize(from: values)
+            default:
+                if let linkKey { seenFileIdentifiers.insert(linkKey) }
+                let size = values.map(allocatedSize(from:)) ?? 0
+                result.size += size
                 result.fileCount += 1
-                let leafFingerprint = ContentFingerprint.node(
-                    name: displayName(for: entry),
-                    identity: FileIdentity.read(for: entry),
-                    size: allocatedSize(from: values),
-                    modificationDate: values.contentModificationDate,
-                    isDirectory: false,
-                    children: nil
+                result.addFingerprint(
+                    ContentFingerprint.node(
+                        name: displayName(for: entry),
+                        identity: FileIdentity.read(for: entry),
+                        size: size,
+                        modificationDate: values?.contentModificationDate,
+                        isDirectory: false,
+                        children: nil
+                    )
                 )
-                result.addFingerprint(leafFingerprint)
             }
         }
-        if FileIdentity.read(for: url) == capturedIdentity {
+        let identityAfter = FileIdentity.read(for: url)
+        if sr_folder_fingerprint_holds(capturedIdentity != nil, identityAfter != nil, identityAfter == capturedIdentity) {
             result.fingerprint = ContentFingerprint.node(
                 name: displayName(for: url),
                 identity: capturedIdentity,
@@ -356,12 +352,11 @@ struct DiskScanner: Sendable {
     }
 
     private func allocatedSize(from values: URLResourceValues) -> Int64 {
-        Int64(
-            values.totalFileAllocatedSize
-                ?? values.fileAllocatedSize
-                ?? values.totalFileSize
-                ?? values.fileSize
-                ?? 0
+        sr_allocated_size(
+            values.totalFileAllocatedSize != nil, Int64(values.totalFileAllocatedSize ?? 0),
+            values.fileAllocatedSize != nil, Int64(values.fileAllocatedSize ?? 0),
+            values.totalFileSize != nil, Int64(values.totalFileSize ?? 0),
+            values.fileSize != nil, Int64(values.fileSize ?? 0)
         )
     }
 
@@ -416,7 +411,7 @@ private struct ChildAccumulator {
     private(set) var totalFingerprint: ContentFingerprint? = .empty
 
     init(maxVisibleChildren: Int) {
-        maxRetained = max(1, maxVisibleChildren - 1)
+        maxRetained = Int(sr_retained_limit(UInt32(clamping: maxVisibleChildren)))
         retained.reserveCapacity(maxRetained)
     }
 
@@ -432,29 +427,33 @@ private struct ChildAccumulator {
             totalFingerprint = nil
         }
 
-        guard retained.count >= maxRetained else {
+        let smallestIndex = retained.indices.min(by: { retained[$0].size < retained[$1].size })
+        switch sr_keep_child(
+            UInt32(clamping: retained.count),
+            UInt32(clamping: maxRetained),
+            smallestIndex.map { retained[$0].size } ?? 0,
+            node.size
+        ) {
+        case UInt32(SR_RETAIN):
             retained.append(node)
-            return
-        }
-        guard let smallestIndex = retained.indices.min(by: { retained[$0].size < retained[$1].size }) else {
-            aggregate(node)
-            return
-        }
-        if node.size > retained[smallestIndex].size {
-            let displaced = retained[smallestIndex]
-            retained[smallestIndex] = node
-            aggregate(displaced)
-        } else {
+        case UInt32(SR_DISPLACE_SMALLEST):
+            if let smallestIndex {
+                let displaced = retained[smallestIndex]
+                retained[smallestIndex] = node
+                aggregate(displaced)
+            }
+        default:
             aggregate(node)
         }
     }
 
     mutating func finishedChildren() -> [DiskNode] {
         retained.sort { lhs, rhs in
-            if lhs.size == rhs.size {
-                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            switch sr_order(lhs.size, rhs.size) {
+            case UInt32(SR_FIRST): true
+            case UInt32(SR_SECOND): false
+            default: lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
             }
-            return lhs.size > rhs.size
         }
         guard discardedNodeCount > 0 else { return retained }
         let other = DiskNode(

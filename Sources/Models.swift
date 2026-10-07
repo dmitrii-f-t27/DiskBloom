@@ -57,6 +57,7 @@ enum FileIdentity {
     }
 }
 
+/// Three words that change whenever anything inside an item changes; rules in Specs/fingerprint.t27.
 struct ContentFingerprint: Sendable, Equatable {
     private(set) var xor: UInt64
     private(set) var sum: UInt64
@@ -72,43 +73,41 @@ struct ContentFingerprint: Sendable, Equatable {
         isDirectory: Bool,
         children: ContentFingerprint?
     ) -> ContentFingerprint? {
-        guard let identity else { return nil }
-        if isDirectory && children == nil { return nil }
+        guard fp_node_exists(identity != nil, isDirectory, children != nil), let identity else { return nil }
         var result = children ?? .empty
         let timeBits = modificationDate?.timeIntervalSince1970.bitPattern ?? 0
         let hash = stableHash("\(isDirectory ? "d" : "f")|\(name)|\(identity)|\(size)|\(timeBits)")
-        result.combine(hash: hash)
+        result.xor = fp_leaf_xor(result.xor, hash)
+        result.sum = fp_leaf_sum(result.sum, hash)
+        result.itemCount = fp_leaf_count(result.itemCount)
         return result
     }
 
     mutating func combine(_ other: ContentFingerprint) {
-        let shift = Int(other.itemCount % 63) + 1
-        xor ^= other.xor.rotatedLeft(by: shift)
-        sum &+= other.sum &* 0x9E37_79B1_85EB_CA87
-        itemCount &+= other.itemCount
+        xor = fp_combine_xor(xor, other.xor, other.itemCount)
+        sum = fp_combine_sum(sum, other.sum)
+        itemCount = fp_combine_count(itemCount, other.itemCount)
     }
 
-    private mutating func combine(hash: UInt64) {
-        xor ^= hash
-        sum &+= hash
-        itemCount &+= 1
-    }
-
+    /// FNV-1a over the UTF-8 bytes, fed to the spec in chunks of FP_CHUNK.
     private static func stableHash(_ value: String) -> UInt64 {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in value.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 0x0000_0100_0000_01B3
-        }
+        var hash = UInt64(FP_OFFSET_BASIS)
+        let bytes = Array(value.utf8)
+        let chunk = Int(FP_CHUNK)
+        var start = 0
+        repeat {
+            let end = min(bytes.count, start + chunk)
+            hash = withUnsafeTemporaryAllocation(of: UInt8.self, capacity: chunk) { buffer in
+                let base = buffer.baseAddress!
+                base.initialize(repeating: 0, count: chunk)
+                bytes[start..<end].withUnsafeBufferPointer { slice in
+                    if let source = slice.baseAddress { base.update(from: source, count: end - start) }
+                }
+                return fp_hash_continue(hash, base, UInt32(end - start))
+            }
+            start = end
+        } while start < bytes.count
         return hash
-    }
-}
-
-private extension UInt64 {
-    func rotatedLeft(by amount: Int) -> UInt64 {
-        let shift = amount & 63
-        guard shift != 0 else { return self }
-        return (self << shift) | (self >> (64 - shift))
     }
 }
 
@@ -147,10 +146,10 @@ struct DiskNode: Identifiable, Sendable {
         self.resourceIdentifier = resourceIdentifier
         self.fingerprint = fingerprint
         self.name = name
-        self.size = max(0, size)
-        self.fileCount = max(0, fileCount)
-        self.directoryCount = max(0, directoryCount)
-        self.unreadableCount = max(0, unreadableCount)
+        self.size = sr_non_negative(size)
+        self.fileCount = Int(sr_non_negative(Int64(fileCount)))
+        self.directoryCount = Int(sr_non_negative(Int64(directoryCount)))
+        self.unreadableCount = Int(sr_non_negative(Int64(unreadableCount)))
         self.isDirectory = isDirectory
         self.isVirtual = isVirtual
         self.isPackage = isPackage

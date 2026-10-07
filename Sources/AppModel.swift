@@ -25,51 +25,61 @@ enum WorkspaceSection: String, Sendable {
 }
 
 enum SnapshotValidator {
+    /// Whether an item still matches its snapshot, decided by Specs/scan_rules.t27; nil when it does.
     static func validate(_ node: DiskNode, candidateURL: URL? = nil) -> String? {
-        guard !node.isVirtual, let originalURL = node.url else {
-            return "An aggregate group cannot be reviewed as a single item."
+        let originalURL = node.url
+        let url = candidateURL ?? originalURL ?? URL(fileURLWithPath: "/")
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        var valuesError: Error?
+        var values: URLResourceValues?
+        if exists {
+            do { values = try url.resourceValues(forKeys: [.isSymbolicLinkKey]) } catch { valuesError = error }
         }
-        if let candidateURL,
-           candidateURL.standardizedFileURL.path != originalURL.standardizedFileURL.path {
-            return "The item’s path changed after confirmation. Rescan: \(originalURL.path)"
+        let actual = values != nil ? FileIdentity.read(for: url) : nil
+        let precheck = sn_precheck(
+            node.isVirtual || originalURL == nil,
+            candidateURL.map { candidate in originalURL.map { T27Text.same(candidate.standardizedFileURL.path, $0.standardizedFileURL.path) } ?? false } ?? true,
+            exists,
+            values != nil,
+            values?.isSymbolicLink == true,
+            node.resourceIdentifier != nil && actual != nil,
+            node.resourceIdentifier.flatMap { expected in actual.map { T27Text.same($0, expected) } } ?? false,
+            node.fingerprint != nil
+        )
+        let path = originalURL?.path ?? url.path
+        switch precheck {
+        case UInt32(SN_OK): break
+        case UInt32(SN_AGGREGATE): return "An aggregate group cannot be reviewed as a single item."
+        case UInt32(SN_PATH_CHANGED): return "The item’s path changed after confirmation. Rescan: \(path)"
+        case UInt32(SN_GONE): return "The item no longer exists: \(url.path)"
+        case UInt32(SN_VALUES_UNREADABLE): return "Could not re-verify \(url.path): \(valuesError?.localizedDescription ?? "")"
+        case UInt32(SN_BECAME_SYMLINK): return "The item became a symbolic link after scanning: \(url.path)"
+        case UInt32(SN_IDENTITY_UNKNOWN): return "Could not confirm the item’s identity: \(url.path). Rescan."
+        case UInt32(SN_IDENTITY_CHANGED): return "The item changed after scanning: \(url.path). Rescan."
+        default: return "No complete content snapshot exists for the item: \(url.path). Rescan."
         }
-        let url = candidateURL ?? originalURL
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            return "The item no longer exists: \(url.path)"
-        }
-        do {
-            let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey])
-            if values.isSymbolicLink == true {
-                return "The item became a symbolic link after scanning: \(url.path)"
-            }
-            guard let expected = node.resourceIdentifier,
-                  let actual = FileIdentity.read(for: url) else {
-                return "Could not confirm the item’s identity: \(url.path). Rescan."
-            }
-            if actual != expected {
-                return "The item changed after scanning: \(url.path). Rescan."
-            }
-        } catch {
-            return "Could not re-verify \(url.path): \(error.localizedDescription)"
-        }
-        guard let expectedFingerprint = node.fingerprint else {
-            return "No complete content snapshot exists for the item: \(url.path). Rescan."
-        }
+        var refreshed: DiskNode?
+        var measureError: Error?
         do {
             var scanner = DiskScanner()
-            let refreshed = try scanner.scan(root: url, counter: ScanCounter()).root
-            guard refreshed.resourceIdentifier == node.resourceIdentifier,
-                  refreshed.isDirectory == node.isDirectory,
-                  refreshed.fingerprint == expectedFingerprint,
-                  refreshed.size == node.size,
-                  refreshed.fileCount == node.fileCount,
-                  refreshed.directoryCount == node.directoryCount else {
-                return "Contents changed after analysis: \(url.path). Review the updated data before moving."
-            }
+            refreshed = try scanner.scan(root: url, counter: ScanCounter()).root
         } catch {
-            return "Could not re-measure \(url.path): \(error.localizedDescription)"
+            measureError = error
         }
-        return nil
+        let comparison = sn_compare(
+            refreshed != nil,
+            refreshed?.resourceIdentifier == node.resourceIdentifier,
+            refreshed?.isDirectory == node.isDirectory,
+            refreshed?.fingerprint == node.fingerprint,
+            refreshed?.size == node.size,
+            refreshed?.fileCount == node.fileCount,
+            refreshed?.directoryCount == node.directoryCount
+        )
+        switch comparison {
+        case UInt32(SN_OK): return nil
+        case UInt32(SN_REMEASURE_FAILED): return "Could not re-measure \(url.path): \(measureError?.localizedDescription ?? "")"
+        default: return "Contents changed after analysis: \(url.path). Review the updated data before moving."
+        }
     }
 }
 
