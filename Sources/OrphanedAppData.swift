@@ -3,7 +3,7 @@ import Combine
 import Darwin
 import Foundation
 
-enum OrphanDataRisk: String, Sendable {
+enum OrphanDataRisk: String, CaseIterable, Sendable {
     case disposable
     case privateState
     case persistentData
@@ -27,10 +27,27 @@ enum OrphanDataRisk: String, Sendable {
         }
     }
 
-    var needsExtraAcknowledgement: Bool { self != .disposable }
+    var t27Code: Int32 {
+        switch self {
+        case .disposable: LO_RISK_DISPOSABLE
+        case .privateState: LO_RISK_PRIVATE
+        case .persistentData: LO_RISK_PERSISTENT
+        }
+    }
+
+    init(t27 code: UInt32) {
+        self = Self.allCases.first { UInt32($0.t27Code) == code } ?? .persistentData
+    }
+
+    var needsExtraAcknowledgement: Bool { lo_risk_needs_acknowledgement(UInt32(t27Code)) }
 }
 
 enum OrphanDataConfidence: String, Sendable {
+    /// How certain a group is, decided by Specs/leftovers_policy.t27 from its distinct Library folders.
+    init(distinctRules: Int) {
+        self = lo_confidence(UInt32(distinctRules)) == UInt32(LO_PROBABLE) ? .probable : .possible
+    }
+
     case probable
     case possible
 
@@ -87,16 +104,10 @@ enum OrphanDataRule: String, CaseIterable, Sendable {
         }
     }
 
-    var risk: OrphanDataRisk {
-        switch self {
-        case .cache, .savedState, .log:
-            .disposable
-        case .httpStorage, .webKit:
-            .privateState
-        case .applicationSupport, .container, .applicationScripts:
-            .persistentData
-        }
-    }
+    /// The folder's code in Specs/leftovers_policy.t27: its position in the declaration.
+    var t27Code: Int32 { Int32(Self.allCases.firstIndex(of: self) ?? 0) }
+
+    var risk: OrphanDataRisk { OrphanDataRisk(t27: lo_rule_risk(UInt32(t27Code))) }
 
     func identifier(from entry: URL) -> String? {
         let name = entry.lastPathComponent
@@ -199,7 +210,7 @@ struct OrphanCleanupOutcome: Sendable {
 }
 
 struct OrphanOwnerIndex: Sendable {
-    private let claims: [String: String]
+    let claims: [String: String]
     let processCheckAvailable: Bool
 
     init(claims: [String: String] = [:], processCheckAvailable: Bool = true) {
@@ -214,22 +225,27 @@ struct OrphanOwnerIndex: Sendable {
     }
 
     func claimReason(for identifier: String) -> String? {
-        guard let canonical = OrphanBundleIdentifier.canonical(identifier) else {
-            return "The bundle ID failed the safety check."
+        let canonical = OrphanBundleIdentifier.canonical(identifier)
+        let related = canonical.flatMap { id in
+            claims.keys.sorted().first { $0.hasPrefix(id + ".") || id.hasPrefix($0 + ".") }
         }
-        if let reason = claims[canonical] { return reason }
-        if let related = claims.keys.sorted().first(where: {
-            $0.hasPrefix(canonical + ".") || canonical.hasPrefix($0 + ".")
-        }) {
-            return "An installed or active related bundle ID \(related) was found."
+        let namespace = canonical.flatMap(OrphanBundleIdentifier.vendorNamespace)
+        let sibling = namespace.flatMap { space in
+            claims.keys.sorted().first { OrphanBundleIdentifier.vendorNamespace($0) == space }
         }
-        if let namespace = OrphanBundleIdentifier.vendorNamespace(canonical),
-           let sibling = claims.keys.sorted().first(where: {
-               OrphanBundleIdentifier.vendorNamespace($0) == namespace
-           }) {
-            return "An installed or active bundle ID \(sibling) from the same namespace \(namespace) was found."
+        let claim = lo_claim(
+            canonical != nil,
+            canonical.map { claims[$0] != nil } ?? false,
+            related != nil,
+            sibling != nil
+        )
+        switch claim {
+        case UInt32(LO_CLAIM_NONE): return nil
+        case UInt32(LO_CLAIM_INVALID_ID): return "The bundle ID failed the safety check."
+        case UInt32(LO_CLAIM_EXACT): return canonical.flatMap { claims[$0] }
+        case UInt32(LO_CLAIM_RELATED): return "An installed or active related bundle ID \(related ?? "") was found."
+        default: return "An installed or active bundle ID \(sibling ?? "") from the same namespace \(namespace ?? "") was found."
         }
-        return nil
     }
 
     static func capture(
@@ -420,25 +436,11 @@ enum OrphanedAppDataAnalyzer {
                 try checkCancellation()
                 progress.record(entry)
                 examined += 1
-                guard let rawIdentifier = rule.identifier(from: entry),
-                      let canonical = OrphanBundleIdentifier.canonical(rawIdentifier),
-                      !canonical.hasPrefix("com.apple."),
-                      !canonical.hasPrefix("group."),
-                      rule.expectedURL(homeURL: normalizedHome, identifier: rawIdentifier)
-                        .standardizedFileURL.path == entry.standardizedFileURL.path,
-                      let values = try? entry.resourceValues(forKeys: [
-                          .isDirectoryKey,
-                          .isSymbolicLinkKey,
-                          .volumeIsLocalKey,
-                          .volumeIsReadOnlyKey,
-                          .isUbiquitousItemKey
-                      ]),
-                      values.isDirectory == true,
-                      values.isSymbolicLink != true,
-                      values.volumeIsLocal == true,
-                      values.volumeIsReadOnly != true,
-                      values.isUbiquitousItem != true,
-                      !AppRemovalPathSafety.pathHasSymlinkedComponent(entry) else {
+                guard let (rawIdentifier, canonical) = OrphanedAppDataAnalyzer.candidate(
+                    entry: entry,
+                    rule: rule,
+                    homeURL: normalizedHome
+                ) else {
                     skippedUnsafe += 1
                     continue
                 }
@@ -492,7 +494,7 @@ enum OrphanedAppDataAnalyzer {
                 id: identifier,
                 identifier: sorted.first?.identifier ?? identifier,
                 items: sorted,
-                confidence: Set(sorted.map(\.rule)).count >= 2 ? .probable : .possible
+                confidence: OrphanDataConfidence(distinctRules: Set(sorted.map(\.rule)).count)
             )
         }.sorted {
             if $0.confidence != $1.confidence { return $0.confidence == .probable }
@@ -513,6 +515,35 @@ enum OrphanedAppDataAnalyzer {
     private static func checkCancellation() throws {
         if Task.isCancelled { throw CancellationError() }
     }
+
+    /// Whether a Library entry may be offered at all; returns its raw and canonical bundle ID.
+    static func candidate(entry: URL, rule: OrphanDataRule, homeURL: URL) -> (String, String)? {
+        let rawIdentifier = rule.identifier(from: entry)
+        let canonical = OrphanBundleIdentifier.canonical(rawIdentifier)
+        let values = try? entry.resourceValues(forKeys: [
+            .isDirectoryKey,
+            .isSymbolicLinkKey,
+            .volumeIsLocalKey,
+            .volumeIsReadOnlyKey,
+            .isUbiquitousItemKey
+        ])
+        let accepted = lo_is_candidate(
+            rawIdentifier != nil,
+            canonical != nil,
+            canonical?.hasPrefix("com.apple.") == true,
+            canonical?.hasPrefix("group.") == true,
+            rawIdentifier.map { rule.expectedURL(homeURL: homeURL, identifier: $0).standardizedFileURL.path == entry.standardizedFileURL.path } ?? false,
+            values != nil,
+            values?.isDirectory == true,
+            values?.isSymbolicLink == true,
+            values?.volumeIsLocal == true,
+            values?.volumeIsReadOnly == true,
+            values?.isUbiquitousItem == true,
+            AppRemovalPathSafety.pathHasSymlinkedComponent(entry)
+        )
+        guard accepted, let rawIdentifier, let canonical else { return nil }
+        return (rawIdentifier, canonical)
+    }
 }
 
 enum OrphanDataPolicy {
@@ -521,52 +552,60 @@ enum OrphanDataPolicy {
         homeURL: URL = UserHome.url,
         candidateURL: URL? = nil
     ) -> String? {
-        if let issue = item.eligibilityIssue { return "\(item.url.path): \(issue)" }
-        guard OrphanBundleIdentifier.canonical(item.identifier) == item.canonicalIdentifier else {
-            return "The bundle ID no longer passes the safety check: \(item.identifier)"
-        }
         let original = item.url.standardizedFileURL
         let candidate = (candidateURL ?? original).standardizedFileURL
-        guard candidate.path == original.path else {
-            return "The coordinated path changed: \(original.path)"
-        }
-        let expected = item.rule.expectedURL(homeURL: homeURL, identifier: item.identifier)
-            .standardizedFileURL
-        guard expected.path == original.path else {
-            return "The path does not match an exact allowed rule: \(original.path)"
-        }
-        if AppRemovalPathSafety.pathHasSymlinkedComponent(candidate) {
-            return "The path contains a symbolic link: \(candidate.path)"
-        }
-        guard let values = try? candidate.resourceValues(forKeys: [
+        let expected = item.rule.expectedURL(homeURL: homeURL, identifier: item.identifier).standardizedFileURL
+        let values = try? candidate.resourceValues(forKeys: [
             .isDirectoryKey,
             .isSymbolicLinkKey,
             .volumeIsLocalKey,
             .volumeIsReadOnlyKey,
             .isUbiquitousItemKey
-        ]), values.isDirectory == true, values.isSymbolicLink != true else {
-            return "The item is no longer a regular folder: \(candidate.path)"
+        ])
+        let treeIssue = treeEligibilityIssue(for: item.node, homeURL: homeURL)
+        let issue = lo_move_issue(
+            item.eligibilityIssue != nil,
+            OrphanBundleIdentifier.canonical(item.identifier) == item.canonicalIdentifier,
+            candidate.path == original.path,
+            expected.path == original.path,
+            AppRemovalPathSafety.pathHasSymlinkedComponent(candidate),
+            values?.isDirectory == true && values?.isSymbolicLink != true,
+            values?.volumeIsLocal == true,
+            values?.volumeIsReadOnly == true,
+            values?.isUbiquitousItem == true,
+            treeIssue == nil
+        )
+        switch issue {
+        case UInt32(LO_MOVE_OK): return SnapshotValidator.validate(item.node, candidateURL: candidate)
+        case UInt32(LO_MOVE_BLOCKED): return "\(item.url.path): \(item.eligibilityIssue ?? "")"
+        case UInt32(LO_MOVE_ID_CHANGED): return "The bundle ID no longer passes the safety check: \(item.identifier)"
+        case UInt32(LO_MOVE_PATH_CHANGED): return "The coordinated path changed: \(original.path)"
+        case UInt32(LO_MOVE_RULE_MISMATCH): return "The path does not match an exact allowed rule: \(original.path)"
+        case UInt32(LO_MOVE_SYMLINK): return "The path contains a symbolic link: \(candidate.path)"
+        case UInt32(LO_MOVE_NOT_FOLDER): return "The item is no longer a regular folder: \(candidate.path)"
+        case UInt32(LO_MOVE_NETWORK): return "Network or unknown volume is protected: \(candidate.path)"
+        case UInt32(LO_MOVE_READ_ONLY): return "The volume is read-only: \(candidate.path)"
+        case UInt32(LO_MOVE_CLOUD): return "Cloud item is protected: \(candidate.path)"
+        default: return "\(candidate.path): \(treeIssue ?? "")"
         }
-        if values.volumeIsLocal != true { return "Network or unknown volume is protected: \(candidate.path)" }
-        if values.volumeIsReadOnly == true { return "The volume is read-only: \(candidate.path)" }
-        if values.isUbiquitousItem == true { return "Cloud item is protected: \(candidate.path)" }
-        if let issue = treeEligibilityIssue(for: item.node, homeURL: homeURL) { return "\(candidate.path): \(issue)" }
-        return SnapshotValidator.validate(item.node, candidateURL: candidate)
     }
 
     static func treeEligibilityIssue(for node: DiskNode, homeURL: URL) -> String? {
-        guard let url = node.url else { return "Could not obtain the exact path." }
-        guard node.resourceIdentifier != nil, node.fingerprint != nil else {
-            return "The folder snapshot is incomplete; removal is disabled."
-        }
-        guard node.unreadableCount == 0 else {
-            return "It contains inaccessible items; removal is disabled."
-        }
         let library = homeURL.appendingPathComponent("Library", isDirectory: true).standardizedFileURL.path
-        guard url.standardizedFileURL.path.hasPrefix(library + "/") else {
-            return "The path is outside the user Library."
+        let insideLibrary = node.url.map { $0.standardizedFileURL.path.hasPrefix(library + "/") } ?? false
+        let complete = node.resourceIdentifier != nil && node.fingerprint != nil
+        // The walk is the expensive fact: it runs only when every cheaper fact already passed.
+        let contentsIssue = node.url != nil && complete && node.unreadableCount == 0 && insideLibrary
+            ? node.url.flatMap(inspectTree(at:))
+            : nil
+        switch lo_tree_issue(node.url != nil, complete, node.unreadableCount > 0, insideLibrary, contentsIssue == nil) {
+        case UInt32(LO_TREE_OK): return nil
+        case UInt32(LO_TREE_NO_PATH): return "Could not obtain the exact path."
+        case UInt32(LO_TREE_INCOMPLETE): return "The folder snapshot is incomplete; removal is disabled."
+        case UInt32(LO_TREE_UNREADABLE): return "It contains inaccessible items; removal is disabled."
+        case UInt32(LO_TREE_OUTSIDE_LIBRARY): return "The path is outside the user Library."
+        default: return contentsIssue
         }
-        return inspectTree(at: url)
     }
 
     static func overlappingSelectionReason(_ items: [OrphanDataItem]) -> String? {
@@ -599,33 +638,33 @@ enum OrphanDataPolicy {
         if let enumerationIssue { return enumerationIssue }
 
         let executableBundleExtensions: Set<String> = ["app", "appex", "xpc", "systemextension"]
+        let immutableFlags = UInt32(UF_IMMUTABLE | UF_APPEND | SF_IMMUTABLE | SF_APPEND)
+        let executableBits = mode_t(S_IXUSR | S_IXGRP | S_IXOTH)
         for url in urls {
             var info = stat()
             let result = url.withUnsafeFileSystemRepresentation { path in
                 guard let path else { return Int32(-1) }
                 return lstat(path, &info)
             }
-            guard result == 0 else { return "Could not check permissions: \(url.path)" }
-            if info.st_uid != geteuid() {
-                return "It contains an item owned by another user: \(url.path)"
-            }
-            let immutableFlags = UInt32(UF_IMMUTABLE | UF_APPEND | SF_IMMUTABLE | SF_APPEND)
-            if info.st_flags & immutableFlags != 0 {
-                return "It contains an item protected by flags: \(url.path)"
-            }
-            if FileIdentity.deviceID(for: url) != rootDevice {
-                return "A boundary of another volume was found inside: \(url.path)"
-            }
             let fileType = info.st_mode & S_IFMT
-            if fileType == S_IFLNK {
-                return "A symbolic link was found inside: \(url.path)"
-            }
-            if executableBundleExtensions.contains(url.pathExtension.lowercased()) {
-                return "An executable bundle was found inside: \(url.path)"
-            }
-            let executableBits = mode_t(S_IXUSR | S_IXGRP | S_IXOTH)
-            if fileType == S_IFREG, info.st_mode & executableBits != 0 {
-                return "An executable file was found inside: \(url.path)"
+            let issue = lo_entry_issue(
+                result == 0,
+                info.st_uid == geteuid(),
+                info.st_flags & immutableFlags != 0,
+                FileIdentity.deviceID(for: url) == rootDevice,
+                fileType == S_IFLNK,
+                executableBundleExtensions.contains(url.pathExtension.lowercased()),
+                fileType == S_IFREG && info.st_mode & executableBits != 0
+            )
+            switch issue {
+            case UInt32(LO_ENTRY_OK): continue
+            case UInt32(LO_ENTRY_NO_STAT): return "Could not check permissions: \(url.path)"
+            case UInt32(LO_ENTRY_OTHER_USER): return "It contains an item owned by another user: \(url.path)"
+            case UInt32(LO_ENTRY_FLAGS): return "It contains an item protected by flags: \(url.path)"
+            case UInt32(LO_ENTRY_OTHER_VOLUME): return "A boundary of another volume was found inside: \(url.path)"
+            case UInt32(LO_ENTRY_SYMLINK): return "A symbolic link was found inside: \(url.path)"
+            case UInt32(LO_ENTRY_EXECUTABLE_BUNDLE): return "An executable bundle was found inside: \(url.path)"
+            default: return "An executable file was found inside: \(url.path)"
             }
         }
         return nil

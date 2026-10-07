@@ -14,7 +14,7 @@ struct InstalledApplication: Identifiable, Sendable, Hashable {
     var id: String { url.standardizedFileURL.path }
 }
 
-enum AppRemovalMatch: String, Sendable {
+enum AppRemovalMatch: String, CaseIterable, Sendable {
     case application
     case exactIdentifier
     case exactName
@@ -29,6 +29,19 @@ enum AppRemovalMatch: String, Sendable {
         }
     }
 
+    var t27Code: Int32 {
+        switch self {
+        case .application: UN_MATCH_APPLICATION
+        case .exactIdentifier: UN_MATCH_EXACT_ID
+        case .exactName: UN_MATCH_EXACT_NAME
+        case .declaredGroup: UN_MATCH_GROUP
+        }
+    }
+
+    init(t27 code: UInt32) {
+        self = Self.allCases.first { UInt32($0.t27Code) == code } ?? .exactName
+    }
+
     var tintName: String {
         switch self {
         case .application: "blue"
@@ -39,7 +52,7 @@ enum AppRemovalMatch: String, Sendable {
     }
 }
 
-enum AppRemovalRisk: String, Sendable {
+enum AppRemovalRisk: String, CaseIterable, Sendable {
     case application
     case disposableState
     case persistentData
@@ -56,12 +69,23 @@ enum AppRemovalRisk: String, Sendable {
         }
     }
 
-    var needsExtraAcknowledgement: Bool {
-        self == .persistentData || self == .sharedData
+    var t27Code: Int32 {
+        switch self {
+        case .application: UN_RISK_APPLICATION
+        case .disposableState: UN_RISK_DISPOSABLE
+        case .persistentData: UN_RISK_PERSISTENT
+        case .sharedData: UN_RISK_SHARED
+        }
     }
+
+    init(t27 code: UInt32) {
+        self = Self.allCases.first { UInt32($0.t27Code) == code } ?? .sharedData
+    }
+
+    var needsExtraAcknowledgement: Bool { un_risk_needs_acknowledgement(UInt32(t27Code)) }
 }
 
-enum AppRemovalRule: String, Sendable {
+enum AppRemovalRule: String, CaseIterable, Sendable {
     case application
     case identifierApplicationSupport
     case identifierCache
@@ -100,39 +124,12 @@ enum AppRemovalRule: String, Sendable {
         }
     }
 
-    var match: AppRemovalMatch {
-        switch self {
-        case .application: .application
-        case .nameApplicationSupport, .nameCache, .namePreference, .nameSavedState, .nameLog: .exactName
-        case .groupContainer, .groupApplicationScripts: .declaredGroup
-        default: .exactIdentifier
-        }
-    }
+    /// The rule's code in Specs/uninstaller_policy.t27: its position in the declaration.
+    var t27Code: Int32 { Int32(Self.allCases.firstIndex(of: self) ?? 0) }
 
-    var risk: AppRemovalRisk {
-        switch self {
-        case .application:
-            .application
-        case .identifierApplicationSupport, .identifierContainer, .identifierApplicationScripts,
-             .nameApplicationSupport:
-            .persistentData
-        case .groupContainer, .groupApplicationScripts,
-             .nameCache, .namePreference, .nameSavedState, .nameLog:
-            .sharedData
-        default:
-            .disposableState
-        }
-    }
-
-    var normallySelected: Bool {
-        switch self {
-        case .application, .identifierCache, .identifierPreference, .identifierSavedState,
-             .identifierHTTPStorage, .identifierWebKit, .identifierLog, .identifierCookie:
-            true
-        default:
-            false
-        }
-    }
+    var match: AppRemovalMatch { AppRemovalMatch(t27: un_rule_match(UInt32(t27Code))) }
+    var risk: AppRemovalRisk { AppRemovalRisk(t27: un_rule_risk(UInt32(t27Code))) }
+    var normallySelected: Bool { un_rule_normally_selected(UInt32(t27Code)) }
 
     func expectedURL(applicationURL: URL, homeURL: URL, key: String) -> URL? {
         let library = homeURL.appendingPathComponent("Library", isDirectory: true)
@@ -240,8 +237,14 @@ struct AppRemovalOutcome: Sendable {
 private struct AppCandidateSpec: Sendable {
     let rule: AppRemovalRule
     let key: String
+}
+
+/// What the plan says about one measured item.
+struct AppRemovalItemDecision: Sendable, Equatable {
     let explanation: String
-    let defaultSelected: Bool
+    let isDefaultSelected: Bool
+    let eligibilityIssue: String?
+    let riskOverride: AppRemovalRisk?
 }
 
 enum ApplicationCatalog {
@@ -441,15 +444,22 @@ enum ApplicationRemovalAnalyzer {
             duplicateIdentifier = false
         }
 
+        let applicationKey = safeIdentifier ?? application.name
         var items: [AppRemovalItem] = [
             makeItem(
                 snapshot: appSnapshot,
                 rule: .application,
-                key: safeIdentifier ?? application.name,
-                explanation: "The .app bundle itself. It is always part of the plan.",
-                required: true,
-                defaultSelected: true,
-                additionalIssue: applicationIssue
+                key: applicationKey,
+                decision: itemDecision(
+                    rule: .application,
+                    key: applicationKey,
+                    required: true,
+                    duplicate: duplicateIdentifier,
+                    signatureBacked: signatureBackedIdentifier,
+                    snapshot: appSnapshot,
+                    applicationIssue: applicationIssue
+                ),
+                required: true
             )
         ]
 
@@ -468,55 +478,16 @@ enum ApplicationRemovalAnalyzer {
                 .identifierApplicationScripts,
                 .identifierLaunchAgent
             ]
-            for rule in identifierRules {
-                let sharedNote = duplicateIdentifier
-                    ? " This bundle ID was also found in another installed application, so the item is treated as potentially shared."
-                    : (signatureBackedIdentifier
-                        ? ""
-                        : " The bundle ID is not backed by a signature with an Apple trust anchor and Team ID, so default selection is off.")
-                specs.append(
-                    AppCandidateSpec(
-                        rule: rule,
-                        key: safeIdentifier,
-                        explanation: "Path built from the exact bundle ID “\(safeIdentifier)”." + sharedNote,
-                        defaultSelected: duplicateIdentifier || !signatureBackedIdentifier ? false : rule.normallySelected
-                    )
-                )
-            }
+            specs += identifierRules.map { AppCandidateSpec(rule: $0, key: safeIdentifier) }
         }
-
         if let safeName {
-            for rule in [
-                AppRemovalRule.nameApplicationSupport,
-                .nameCache,
-                .namePreference,
-                .nameSavedState,
-                .nameLog
-            ] {
-                specs.append(
-                    AppCandidateSpec(
-                        rule: rule,
-                        key: safeName,
-                        explanation: "Only the exact name “\(safeName)” matched; check the path manually.",
-                        defaultSelected: false
-                    )
-                )
-            }
+            specs += [AppRemovalRule.nameApplicationSupport, .nameCache, .namePreference, .nameSavedState, .nameLog]
+                .map { AppCandidateSpec(rule: $0, key: safeName) }
         }
-
         let groups = (validatedSignature?.applicationGroups ?? [])
             .compactMap(AppRemovalPathSafety.safeIdentifier)
         for group in Set(groups).sorted() {
-            for rule in [AppRemovalRule.groupContainer, .groupApplicationScripts] {
-                specs.append(
-                    AppCandidateSpec(
-                        rule: rule,
-                        key: group,
-                        explanation: "App Group “\(group)” is declared in a signature with an Apple trust anchor and Team ID, but may be shared.",
-                        defaultSelected: false
-                    )
-                )
-            }
+            specs += [AppRemovalRule.groupContainer, .groupApplicationScripts].map { AppCandidateSpec(rule: $0, key: group) }
         }
 
         var seenPaths: Set<String> = [application.id]
@@ -530,25 +501,21 @@ enum ApplicationRemovalAnalyzer {
             guard seenPaths.insert(path).inserted,
                   FileManager.default.fileExists(atPath: path) else { continue }
             let snapshot = try scan(candidateURL, progress: progress)
-            let identifierTrustIssue: String?
-            if spec.rule.match == .exactIdentifier, duplicateIdentifier {
-                identifierTrustIssue = "This bundle ID is used by another installed application. Default selection is off."
-            } else if spec.rule.match == .exactIdentifier, !signatureBackedIdentifier {
-                identifierTrustIssue = "The bundle ID is not backed by a signature with an Apple trust anchor and Team ID. Check the path manually."
-            } else {
-                identifierTrustIssue = nil
-            }
             items.append(
                 makeItem(
                     snapshot: snapshot,
                     rule: spec.rule,
                     key: spec.key,
-                    explanation: spec.explanation,
-                    required: false,
-                    defaultSelected: spec.defaultSelected,
-                    additionalIssue: identifierTrustIssue,
-                    keepSelectableWithIssue: identifierTrustIssue != nil,
-                    riskOverride: identifierTrustIssue == nil ? nil : .sharedData
+                    decision: itemDecision(
+                        rule: spec.rule,
+                        key: spec.key,
+                        required: false,
+                        duplicate: duplicateIdentifier,
+                        signatureBacked: signatureBackedIdentifier,
+                        snapshot: snapshot,
+                        applicationIssue: nil
+                    ),
+                    required: false
                 )
             )
         }
@@ -584,39 +551,116 @@ enum ApplicationRemovalAnalyzer {
         return try scanner.scan(root: url, counter: progress)
     }
 
+    private static func itemDecision(
+        rule: AppRemovalRule,
+        key: String,
+        required: Bool,
+        duplicate: Bool,
+        signatureBacked: Bool,
+        snapshot: ScanSnapshot,
+        applicationIssue: String?
+    ) -> AppRemovalItemDecision {
+        AppRemovalDecisions.item(
+            rule: rule,
+            key: key,
+            required: required,
+            duplicate: duplicate,
+            signatureBacked: signatureBacked,
+            complete: snapshot.root.resourceIdentifier != nil && snapshot.root.fingerprint != nil,
+            unreadableCount: snapshot.root.unreadableCount,
+            foreignMounts: snapshot.skippedMountPoints,
+            applicationIssue: applicationIssue
+        )
+    }
+
     private static func makeItem(
         snapshot: ScanSnapshot,
         rule: AppRemovalRule,
         key: String,
-        explanation: String,
-        required: Bool,
-        defaultSelected: Bool,
-        additionalIssue: String?,
-        keepSelectableWithIssue: Bool = false,
-        riskOverride: AppRemovalRisk? = nil
+        decision: AppRemovalItemDecision,
+        required: Bool
     ) -> AppRemovalItem {
         let node = snapshot.root
-        let snapshotIssue: String?
-        if node.resourceIdentifier == nil || node.fingerprint == nil {
-            snapshotIssue = "Could not capture a complete snapshot of the item."
-        } else if node.unreadableCount > 0 {
-            snapshotIssue = "It contains inaccessible items: \(node.unreadableCount)."
-        } else if snapshot.skippedMountPoints > 0 {
-            snapshotIssue = "Another volume was found inside; a complete snapshot is impossible."
-        } else {
-            snapshotIssue = nil
-        }
-        let eligibilityIssue = snapshotIssue ?? (keepSelectableWithIssue ? nil : additionalIssue)
         return AppRemovalItem(
             id: node.url?.standardizedFileURL.path ?? UUID().uuidString,
             node: node,
             rule: rule,
             key: key,
-            explanation: explanation + (keepSelectableWithIssue ? " " + (additionalIssue ?? "") : ""),
+            explanation: decision.explanation,
             isRequired: required,
-            isDefaultSelected: defaultSelected && eligibilityIssue == nil,
+            isDefaultSelected: decision.isDefaultSelected,
+            eligibilityIssue: decision.eligibilityIssue,
+            riskOverride: decision.riskOverride
+        )
+    }
+}
+
+/// Plan decisions asked of Specs/uninstaller_policy.t27; Swift only words them.
+enum AppRemovalDecisions {
+    static func item(
+        rule: AppRemovalRule,
+        key: String,
+        required: Bool,
+        duplicate: Bool,
+        signatureBacked: Bool,
+        complete: Bool,
+        unreadableCount: Int,
+        foreignMounts: Int,
+        applicationIssue: String?
+    ) -> AppRemovalItemDecision {
+        let code = UInt32(rule.t27Code)
+        let trust = un_trust(code, duplicate, signatureBacked)
+        let snapshot = un_snapshot_issue(complete, unreadableCount > 0, foreignMounts > 0)
+        let block = un_item_block(snapshot, required, applicationIssue != nil)
+
+        var explanation: String
+        if required {
+            explanation = "The .app bundle itself. It is always part of the plan."
+        } else {
+            switch rule.match {
+            case .exactIdentifier:
+                explanation = "Path built from the exact bundle ID “\(key)”."
+                switch trust {
+                case UInt32(UN_TRUST_DUPLICATE):
+                    explanation += " This bundle ID was also found in another installed application, so the item is treated as potentially shared."
+                case UInt32(UN_TRUST_UNSIGNED):
+                    explanation += " The bundle ID is not backed by a signature with an Apple trust anchor and Team ID, so default selection is off."
+                default:
+                    break
+                }
+            case .exactName:
+                explanation = "Only the exact name “\(key)” matched; check the path manually."
+            default:
+                explanation = "App Group “\(key)” is declared in a signature with an Apple trust anchor and Team ID, but may be shared."
+            }
+        }
+        switch trust {
+        case UInt32(UN_TRUST_DUPLICATE):
+            explanation += " This bundle ID is used by another installed application. Default selection is off."
+        case UInt32(UN_TRUST_UNSIGNED):
+            explanation += " The bundle ID is not backed by a signature with an Apple trust anchor and Team ID. Check the path manually."
+        default:
+            break
+        }
+
+        let eligibilityIssue: String?
+        switch block {
+        case UInt32(UN_BLOCK_SNAPSHOT):
+            switch snapshot {
+            case UInt32(UN_SNAP_INCOMPLETE): eligibilityIssue = "Could not capture a complete snapshot of the item."
+            case UInt32(UN_SNAP_UNREADABLE): eligibilityIssue = "It contains inaccessible items: \(unreadableCount)."
+            default: eligibilityIssue = "Another volume was found inside; a complete snapshot is impossible."
+            }
+        case UInt32(UN_BLOCK_APPLICATION):
+            eligibilityIssue = applicationIssue
+        default:
+            eligibilityIssue = nil
+        }
+        return AppRemovalItemDecision(
+            explanation: explanation,
+            isDefaultSelected: un_selected_by_default(code, duplicate, signatureBacked, block),
             eligibilityIssue: eligibilityIssue,
-            riskOverride: riskOverride
+            riskOverride: trust == UInt32(UN_TRUST_OK) ? nil : AppRemovalRisk(t27: un_effective_risk(code, duplicate, signatureBacked))
         )
     }
 }
@@ -625,23 +669,8 @@ enum AppRemovalPolicy {
     static func applicationEligibilityReason(for application: InstalledApplication) -> String? {
         let url = application.url.standardizedFileURL
         let path = url.path
-        guard url.pathExtension.lowercased() == "app" else {
-            return "The selected item is not an .app bundle."
-        }
-        if AppRemovalPathSafety.pathHasSymlinkedComponent(url) {
-            return "The application path contains a symbolic link. Such an item is view-only."
-        }
         let protectedRoots = ["/System", "/usr", "/bin", "/sbin", "/private", "/Library"]
-        if protectedRoots.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
-            return "System and system-wide applications are protected. Use the vendor’s official uninstall method."
-        }
-        if application.bundleIdentifier?.hasPrefix("com.apple.") == true {
-            return "Apple applications with a com.apple.* bundle ID are protected in this mode."
-        }
         let selfPath = Bundle.main.bundleURL.standardizedFileURL.path
-        if path == selfPath || selfPath.hasPrefix(path + "/") {
-            return "DiskBloom cannot move itself or its containing bundle to the Trash."
-        }
         let home = UserHome.path
         let blockedUserRoots = [
             home + "/Library",
@@ -652,29 +681,41 @@ enum AppRemovalPolicy {
             home + "/Google Drive",
             home + "/iCloud Drive"
         ]
-        if blockedUserRoots.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
-            return "Applications inside Library, the Trash or a cloud folder are protected."
-        }
-        if (path as NSString).pathComponents.contains(where: { $0 == ".Trash" || $0 == ".Trashes" }) {
-            return "The item is already in the Trash."
-        }
-        guard let values = try? url.resourceValues(forKeys: [
+        let values = try? url.resourceValues(forKeys: [
             .isDirectoryKey,
             .isPackageKey,
             .isSymbolicLinkKey,
             .volumeIsLocalKey,
             .volumeIsReadOnlyKey,
             .isUbiquitousItemKey
-        ]),
-              values.isDirectory == true,
-              values.isPackage == true,
-              values.isSymbolicLink != true else {
-            return "Could not confirm the application bundle type."
+        ])
+        let issue = un_application_issue(
+            url.pathExtension.lowercased() == "app",
+            AppRemovalPathSafety.pathHasSymlinkedComponent(url),
+            protectedRoots.contains { path == $0 || path.hasPrefix($0 + "/") },
+            application.bundleIdentifier?.hasPrefix("com.apple.") == true,
+            path == selfPath || selfPath.hasPrefix(path + "/"),
+            blockedUserRoots.contains { path == $0 || path.hasPrefix($0 + "/") },
+            (path as NSString).pathComponents.contains { $0 == ".Trash" || $0 == ".Trashes" },
+            values?.isDirectory == true && values?.isPackage == true && values?.isSymbolicLink != true,
+            values?.volumeIsLocal == true,
+            values?.volumeIsReadOnly == true,
+            values?.isUbiquitousItem == true
+        )
+        switch issue {
+        case UInt32(UN_APP_OK): return nil
+        case UInt32(UN_APP_NOT_BUNDLE): return "The selected item is not an .app bundle."
+        case UInt32(UN_APP_SYMLINK): return "The application path contains a symbolic link. Such an item is view-only."
+        case UInt32(UN_APP_SYSTEM): return "System and system-wide applications are protected. Use the vendor’s official uninstall method."
+        case UInt32(UN_APP_APPLE): return "Apple applications with a com.apple.* bundle ID are protected in this mode."
+        case UInt32(UN_APP_SELF): return "DiskBloom cannot move itself or its containing bundle to the Trash."
+        case UInt32(UN_APP_USER_ROOT): return "Applications inside Library, the Trash or a cloud folder are protected."
+        case UInt32(UN_APP_IN_TRASH): return "The item is already in the Trash."
+        case UInt32(UN_APP_TYPE_UNCONFIRMED): return "Could not confirm the application bundle type."
+        case UInt32(UN_APP_NETWORK): return "Network and unknown volumes are not supported."
+        case UInt32(UN_APP_READ_ONLY): return "The volume is read-only."
+        default: return "Cloud applications are view-only."
         }
-        if values.volumeIsLocal != true { return "Network and unknown volumes are not supported." }
-        if values.volumeIsReadOnly == true { return "The volume is read-only." }
-        if values.isUbiquitousItem == true { return "Cloud applications are view-only." }
-        return nil
     }
 
     static func validateTrustedSignature(
@@ -705,31 +746,34 @@ enum AppRemovalPolicy {
     static func continuationEligibilityReason(for plan: AppRemovalPlan) -> String? {
         let originalPath = plan.application.url.standardizedFileURL.path
         let installedApplications = ApplicationCatalog.discover()
-        if let identifier = plan.application.bundleIdentifier, !identifier.isEmpty {
-            let registeredApplications = NSWorkspace.shared.urlsForApplications(withBundleIdentifier: identifier)
-            if installedApplications.contains(where: { $0.bundleIdentifier == identifier }) {
-                return "A new or different copy with bundle ID \(identifier) is installed. A new analysis is needed."
-            }
-            if registeredApplications.contains(where: { url in
+        let identifier = plan.application.bundleIdentifier.flatMap { $0.isEmpty ? nil : $0 }
+        let registeredApplications = identifier.map { NSWorkspace.shared.urlsForApplications(withBundleIdentifier: $0) } ?? []
+        let reason = un_continuation(
+            identifier != nil,
+            identifier.map { id in installedApplications.contains { $0.bundleIdentifier == id } } ?? false,
+            registeredApplications.contains { url in
                 let path = url.standardizedFileURL.path
                 let components = (path as NSString).pathComponents
                 let isInTrash = components.contains(".Trash") || components.contains(".Trashes")
                 return !isInTrash && FileManager.default.fileExists(atPath: path)
-            }) {
-                return "LaunchServices registered another existing copy with bundle ID \(identifier). A new analysis is needed."
-            }
-        } else if installedApplications.contains(where: {
-            $0.name.localizedCaseInsensitiveCompare(plan.application.name) == .orderedSame
-        }) {
+            },
+            installedApplications.contains { $0.name.localizedCaseInsensitiveCompare(plan.application.name) == .orderedSame },
+            FileManager.default.fileExists(atPath: originalPath),
+            AppRunningDetector.reason(for: plan.application) != nil
+        )
+        switch reason {
+        case UInt32(UN_CONT_OK): return nil
+        case UInt32(UN_CONT_SAME_ID_INSTALLED):
+            return "A new or different copy with bundle ID \(identifier ?? "") is installed. A new analysis is needed."
+        case UInt32(UN_CONT_REGISTERED_COPY):
+            return "LaunchServices registered another existing copy with bundle ID \(identifier ?? ""). A new analysis is needed."
+        case UInt32(UN_CONT_SAME_NAME_INSTALLED):
             return "An application with the same name “\(plan.application.name)” is installed. A new analysis is needed."
-        }
-        if FileManager.default.fileExists(atPath: originalPath) {
+        case UInt32(UN_CONT_REAPPEARED):
             return "An application exists again at the original path: \(originalPath). A new analysis is needed."
-        }
-        if AppRunningDetector.reason(for: plan.application) != nil {
+        default:
             return "A running process with the previous bundle ID was found. Cleanup of the old plan is blocked."
         }
-        return nil
     }
 
     static func validate(
@@ -739,60 +783,50 @@ enum AppRemovalPolicy {
         candidateURL: URL? = nil,
         requireApplicationPresence: Bool = true
     ) -> String? {
-        if requireApplicationPresence,
-           let reason = applicationEligibilityReason(for: application) { return reason }
-        if let issue = item.eligibilityIssue { return "\(item.url.path): \(issue)" }
+        let applicationIssue = requireApplicationPresence ? applicationEligibilityReason(for: application) : nil
         let original = item.url.standardizedFileURL
         let candidate = (candidateURL ?? original).standardizedFileURL
+        let keySafe: Bool
         switch item.match {
-        case .exactIdentifier, .declaredGroup:
-            guard AppRemovalPathSafety.safeIdentifier(item.key) == item.key else {
-                return "Unsafe path identifier: \(original.path)"
-            }
-        case .exactName:
-            guard AppRemovalPathSafety.safeDisplayName(item.key) == item.key else {
-                return "Unsafe name for a path: \(original.path)"
-            }
-        case .application:
-            break
+        case .exactIdentifier, .declaredGroup: keySafe = AppRemovalPathSafety.safeIdentifier(item.key) == item.key
+        case .exactName: keySafe = AppRemovalPathSafety.safeDisplayName(item.key) == item.key
+        case .application: keySafe = true
         }
-        guard candidate.path == original.path else {
-            return "The coordinated path changed: \(original.path)"
+        let expected = item.rule.expectedURL(applicationURL: application.url, homeURL: homeURL, key: item.key)?.standardizedFileURL
+        let values = try? original.resourceValues(forKeys: [.volumeIsLocalKey, .volumeIsReadOnlyKey, .isUbiquitousItemKey])
+        let library = homeURL.appendingPathComponent("Library", isDirectory: true).standardizedFileURL.path
+        let isApplication = item.rule == .application
+        let issue = un_item_issue(
+            applicationIssue != nil,
+            item.eligibilityIssue != nil,
+            keySafe,
+            candidate.path == original.path,
+            expected?.path == original.path,
+            AppRemovalPathSafety.pathHasSymlinkedComponent(original),
+            values != nil,
+            values?.volumeIsLocal == true,
+            values?.volumeIsReadOnly == true,
+            values?.isUbiquitousItem == true,
+            isApplication,
+            isApplication && ApplicationCatalog.profile(for: original).bundleIdentifier == application.bundleIdentifier,
+            original.path.hasPrefix(library + "/")
+        )
+        switch issue {
+        case UInt32(UN_ITEM_OK): return SnapshotValidator.validate(item.node, candidateURL: candidate)
+        case UInt32(UN_ITEM_APPLICATION): return applicationIssue
+        case UInt32(UN_ITEM_BLOCKED): return "\(item.url.path): \(item.eligibilityIssue ?? "")"
+        case UInt32(UN_ITEM_UNSAFE_KEY):
+            return item.match == .exactName ? "Unsafe name for a path: \(original.path)" : "Unsafe path identifier: \(original.path)"
+        case UInt32(UN_ITEM_PATH_CHANGED): return "The coordinated path changed: \(original.path)"
+        case UInt32(UN_ITEM_RULE_MISMATCH): return "The path does not match an allowed rule: \(original.path)"
+        case UInt32(UN_ITEM_SYMLINK): return "The path contains a symbolic link: \(original.path)"
+        case UInt32(UN_ITEM_VOLUME_UNKNOWN): return "Could not check the volume: \(original.path)"
+        case UInt32(UN_ITEM_NOT_LOCAL): return "The item is not on a local volume: \(original.path)"
+        case UInt32(UN_ITEM_READ_ONLY): return "The item is on a read-only volume: \(original.path)"
+        case UInt32(UN_ITEM_CLOUD): return "Cloud item is protected: \(original.path)"
+        case UInt32(UN_ITEM_BUNDLE_ID_CHANGED): return "The application’s bundle ID changed after analysis: \(original.path)"
+        default: return "The related item is outside the user Library: \(original.path)"
         }
-        guard let expected = item.rule.expectedURL(
-            applicationURL: application.url,
-            homeURL: homeURL,
-            key: item.key
-        )?.standardizedFileURL,
-              expected.path == original.path else {
-            return "The path does not match an allowed rule: \(original.path)"
-        }
-        if AppRemovalPathSafety.pathHasSymlinkedComponent(original) {
-            return "The path contains a symbolic link: \(original.path)"
-        }
-        guard let values = try? original.resourceValues(forKeys: [
-            .volumeIsLocalKey,
-            .volumeIsReadOnlyKey,
-            .isUbiquitousItemKey
-        ]) else {
-            return "Could not check the volume: \(original.path)"
-        }
-        if values.volumeIsLocal != true { return "The item is not on a local volume: \(original.path)" }
-        if values.volumeIsReadOnly == true { return "The item is on a read-only volume: \(original.path)" }
-        if values.isUbiquitousItem == true { return "Cloud item is protected: \(original.path)" }
-
-        if item.rule == .application {
-            let currentProfile = ApplicationCatalog.profile(for: original)
-            if currentProfile.bundleIdentifier != application.bundleIdentifier {
-                return "The application’s bundle ID changed after analysis: \(original.path)"
-            }
-        } else {
-            let library = homeURL.appendingPathComponent("Library", isDirectory: true).standardizedFileURL.path
-            guard original.path.hasPrefix(library + "/") else {
-                return "The related item is outside the user Library: \(original.path)"
-            }
-        }
-        return SnapshotValidator.validate(item.node, candidateURL: candidate)
     }
 
     static func overlappingSelectionReason(_ items: [AppRemovalItem]) -> String? {
