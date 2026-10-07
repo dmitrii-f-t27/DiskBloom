@@ -154,6 +154,10 @@ Five suites cover the scanner, cleanup safety, app removal, possible leftovers a
 - An Apple trust anchor and a Team ID are not a notarization/Gatekeeper check and do not prove by themselves that a developer exclusively owns a bundle ID. The strict signature check deliberately fails closed: a modified bundle can require manual selection of related paths.
 - It is impossible to find every arbitrarily named leftover of a third-party app. DiskBloom shows only confirmed exact relations and clearly marked possible ones; apps with a privileged helper or a system extension may need the vendor's official uninstaller.
 
+## Decisions written in t27
+
+The safety decisions — which caches may be cleared and whether an item may go to the Trash — are written in t27, the spec language of the Trinity stack, and compiled to C that Swift calls. See [Specs/README.md](Specs/README.md).
+
 ## Privacy
 
 DiskBloom has no analytics and no telemetry, and its disk tools never use the network. Only the optional assistant, when you connect an API, sends your questions and the names, paths and sizes it looks up to the provider you chose. See [PRIVACY.md](PRIVACY.md).

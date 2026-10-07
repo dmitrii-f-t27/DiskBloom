@@ -35,6 +35,11 @@ PRODUCT_BUNDLE_IDENTIFIER="$(config_value PRODUCT_BUNDLE_IDENTIFIER)"
 /bin/rm -rf "$APP_PATH"
 /bin/mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$BUILD_DIR"
 
+# The decisions written in t27 (Specs/*.t27) arrive as generated C in Sources/Generated.
+xcrun clang -c -O2 -std=c11 -Wall -Wno-parentheses-equality -Werror \
+  -isysroot "$SDK_PATH" -target arm64-apple-macosx14.0 \
+  "$ROOT_DIR/Sources/Generated/t27_specs.c" -o "$BUILD_DIR/t27_specs.o"
+
 xcrun swiftc \
   -emit-executable \
   -parse-as-library \
@@ -50,6 +55,9 @@ xcrun swiftc \
   -framework Combine \
   -framework Security \
   -Xlinker -weak_framework -Xlinker FoundationModels \
+  -import-objc-header "$ROOT_DIR/Sources/Generated/DiskBloom-Bridging.h" \
+  -Xcc -Wno-parentheses-equality \
+  "$BUILD_DIR/t27_specs.o" \
   "$ROOT_DIR"/Sources/*.swift \
   -o "$APP_PATH/Contents/MacOS/DiskBloom"
 

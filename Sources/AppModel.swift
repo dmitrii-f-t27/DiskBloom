@@ -86,6 +86,7 @@ private struct NavigationState {
 }
 
 enum DeletionPolicy {
+    /// The facts Specs/deletion_policy.t27 decides from. Missing facts are filled conservatively.
     static func rejectionReason(
         for node: DiskNode,
         scanRootURL: URL,
@@ -93,89 +94,75 @@ enum DeletionPolicy {
         candidateURL: URL? = nil,
         appURL: URL = Bundle.main.bundleURL
     ) -> String? {
-        guard !node.isVirtual, let originalNodeURL = node.url else {
-            return "An aggregate group cannot be moved to the Trash. Open the folder and choose a specific item."
-        }
-        if let candidateURL,
-           candidateURL.standardizedFileURL.path != originalNodeURL.standardizedFileURL.path {
-            return "The item’s path changed after confirmation. Rescan and confirm the new path."
-        }
-        let url = candidateURL ?? originalNodeURL
+        let originalNodeURL = node.url
+        let url = candidateURL ?? originalNodeURL ?? scanRootURL
         let original = url.standardizedFileURL
         let resolved = original.resolvingSymlinksInPath()
-        guard original.path == resolved.path else {
-            return "Symbolic links and redirected paths are view-only."
-        }
-        guard original.path != UserHome.path else {
-            return "The home folder is protected. Choose an item inside it."
-        }
         let scanRoot = scanRootURL.standardizedFileURL.resolvingSymlinksInPath()
-        if scanRoot.path == "/" {
-            return "Cleanup is disabled while viewing the entire system disk. Choose a specific user folder."
-        }
-        if original.path == scanRoot.path {
-            return "The root of the current analysis is protected. Choose a specific item inside it."
-        }
-        guard original.path.hasPrefix(scanRoot.path + "/") else {
-            return "The item is no longer inside the selected analysis area. Rescan."
-        }
-        if let activeScanURL {
-            let activePath = activeScanURL.standardizedFileURL.resolvingSymlinksInPath().path
-            if original.path == activePath || activePath.hasPrefix(original.path + "/") {
-                return "The item contains the current analysis area. Go back to the parent map first."
-            }
-        }
         let home = UserHome.path
         let isInsideHome = original.path.hasPrefix(home + "/")
         let components = original.pathComponents
-        let isInsideExternalVolume = components.count >= 4 && components[1] == "Volumes"
-        guard isInsideHome || isInsideExternalVolume else {
-            return "System directories are available for analysis only. Cleanup is allowed inside the home folder or a selected external disk."
+        let relativePath = isInsideHome ? String(original.path.dropFirst(home.count + 1)) : ""
+
+        var library = UInt32(DP_LIB_NONE)
+        if isInsideHome, relativePath == "Library" || relativePath.hasPrefix("Library/") {
+            let allowedLibraryPaths = ["Library/Caches", "Library/Developer/Xcode/DerivedData"]
+            let isAllowed = allowedLibraryPaths.contains { relativePath == $0 || relativePath.hasPrefix($0 + "/") }
+            library = UInt32(isAllowed ? DP_LIB_ALLOWED_CACHE : DP_LIB_OTHER)
         }
-        if isInsideHome {
-            let relativePath = String(original.path.dropFirst(home.count + 1))
-            let allowedLibraryPaths = [
-                "Library/Caches",
-                "Library/Developer/Xcode/DerivedData"
-            ]
-            let isAllowedLibraryCache = allowedLibraryPaths.contains { allowedPath in
-                relativePath == allowedPath || relativePath.hasPrefix(allowedPath + "/")
-            }
-            if (relativePath == "Library" || relativePath.hasPrefix("Library/")) && !isAllowedLibraryCache {
-                return "The Library folder holds app state, profiles and cloud data. DiskBloom allows cleanup only for Caches and Xcode DerivedData."
-            }
-            let firstComponent = relativePath.split(separator: "/").first.map(String.init) ?? ""
-            if firstComponent.hasPrefix(".") && firstComponent != ".cache" {
-                return "Hidden settings and credential directories are protected. Use Finder for them only after checking your backup."
-            }
-            let protectedHomePaths = ["mlx/profiles", "My Drive"].map { home + "/" + $0 }
-            if protectedHomePaths.contains(where: { protectedPath in
-                original.path == protectedPath || original.path.hasPrefix(protectedPath + "/")
-            }) {
-                return "Profiles and cloud data are protected. DiskBloom does not move them to the Trash."
-            }
-        }
-        if original.pathComponents.contains(where: { $0 == ".Trash" || $0 == ".Trashes" }) {
-            return "Cloud data, profiles, credentials and app state are protected. DiskBloom does not move them to the Trash."
-        }
-        let volumeValues = try? original.resourceValues(forKeys: [.volumeIsLocalKey, .volumeIsReadOnlyKey])
-        if volumeValues?.volumeIsLocal != true {
-            return "Cleanup on network and unknown volumes is disabled."
-        }
-        if volumeValues?.volumeIsReadOnly == true {
-            return "This volume is read-only."
-        }
-        guard FileIdentity.deviceID(for: original) == FileIdentity.deviceID(for: scanRoot) else {
-            return "The item is on a different volume than the selected analysis root."
-        }
+        let firstComponent = relativePath.split(separator: "/").first.map(String.init) ?? ""
+        let protectedHomePaths = ["mlx/profiles", "My Drive"].map { home + "/" + $0 }
+        let activePath = activeScanURL?.standardizedFileURL.resolvingSymlinksInPath().path
         let appPath = appURL.standardizedFileURL.path
-        if original.path == appPath || appPath.hasPrefix(original.path + "/") {
-            return "A running application and the folder that contains it are protected."
+        let volumeValues = try? original.resourceValues(forKeys: [.volumeIsLocalKey, .volumeIsReadOnlyKey])
+
+        let reason = dp_rejection(
+            node.isVirtual || originalNodeURL == nil,
+            candidateURL.map { $0.standardizedFileURL.path != originalNodeURL?.standardizedFileURL.path } ?? false,
+            original.path != resolved.path,
+            original.path == home,
+            scanRoot.path == "/",
+            original.path == scanRoot.path,
+            original.path.hasPrefix(scanRoot.path + "/"),
+            activePath.map { original.path == $0 || $0.hasPrefix(original.path + "/") } ?? false,
+            isInsideHome,
+            components.count >= 4 && components[1] == "Volumes",
+            library,
+            firstComponent.hasPrefix(".") && firstComponent != ".cache",
+            protectedHomePaths.contains { original.path == $0 || original.path.hasPrefix($0 + "/") },
+            components.contains { $0 == ".Trash" || $0 == ".Trashes" },
+            volumeValues?.volumeIsLocal == true,
+            volumeValues?.volumeIsReadOnly == true,
+            FileIdentity.deviceID(for: original) == FileIdentity.deviceID(for: scanRoot),
+            original.path == appPath || appPath.hasPrefix(original.path + "/"),
+            node.resourceIdentifier != nil
+        )
+        return message(for: reason)
+    }
+
+    /// The sentence shown for each refusal code of Specs/deletion_policy.t27.
+    static func message(for reason: UInt32) -> String? {
+        switch reason {
+        case UInt32(DP_ALLOWED): nil
+        case UInt32(DP_AGGREGATE): "An aggregate group cannot be moved to the Trash. Open the folder and choose a specific item."
+        case UInt32(DP_PATH_CHANGED): "The item’s path changed after confirmation. Rescan and confirm the new path."
+        case UInt32(DP_SYMLINK): "Symbolic links and redirected paths are view-only."
+        case UInt32(DP_HOME_ROOT): "The home folder is protected. Choose an item inside it."
+        case UInt32(DP_WHOLE_DISK): "Cleanup is disabled while viewing the entire system disk. Choose a specific user folder."
+        case UInt32(DP_SCAN_ROOT): "The root of the current analysis is protected. Choose a specific item inside it."
+        case UInt32(DP_OUTSIDE_SCAN): "The item is no longer inside the selected analysis area. Rescan."
+        case UInt32(DP_CONTAINS_ACTIVE_SCAN): "The item contains the current analysis area. Go back to the parent map first."
+        case UInt32(DP_SYSTEM_AREA): "System directories are available for analysis only. Cleanup is allowed inside the home folder or a selected external disk."
+        case UInt32(DP_LIBRARY): "The Library folder holds app state, profiles and cloud data. DiskBloom allows cleanup only for Caches and Xcode DerivedData."
+        case UInt32(DP_HIDDEN): "Hidden settings and credential directories are protected. Use Finder for them only after checking your backup."
+        case UInt32(DP_PROTECTED_HOME): "Profiles and cloud data are protected. DiskBloom does not move them to the Trash."
+        case UInt32(DP_TRASH): "Cloud data, profiles, credentials and app state are protected. DiskBloom does not move them to the Trash."
+        case UInt32(DP_NETWORK): "Cleanup on network and unknown volumes is disabled."
+        case UInt32(DP_READ_ONLY): "This volume is read-only."
+        case UInt32(DP_OTHER_VOLUME): "The item is on a different volume than the selected analysis root."
+        case UInt32(DP_RUNNING_APP): "A running application and the folder that contains it are protected."
+        default: "The item could not be reliably identified. It is view-only."
         }
-        guard node.resourceIdentifier != nil else {
-            return "The item could not be reliably identified. It is view-only."
-        }
-        return nil
     }
 
     static func validateImmediatelyBeforeTrash(
