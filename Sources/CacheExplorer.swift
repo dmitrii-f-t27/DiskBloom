@@ -45,21 +45,28 @@ enum CacheVerdict: String, CaseIterable, Sendable {
         }
     }
 
-    var isSelectable: Bool { self == .safe || self == .optional }
-
-    /// Sort order in the list: actionable first.
-    var rank: Int {
+    /// The verdict's code in Specs/cache_verdict.t27; codes are also the list order.
+    var t27Code: Int32 {
         switch self {
-        case .safe: 0
-        case .optional: 1
-        case .quitFirst: 2
-        case .useTool: 3
-        case .keep: 4
+        case .safe: CV_SAFE
+        case .optional: CV_OPTIONAL
+        case .quitFirst: CV_QUIT_FIRST
+        case .useTool: CV_USE_TOOL
+        case .keep: CV_KEEP
         }
     }
+
+    init(t27 code: UInt32) {
+        self = Self.allCases.first { UInt32($0.t27Code) == code } ?? .keep
+    }
+
+    var isSelectable: Bool { cv_selectable(UInt32(t27Code)) }
+
+    /// Sort order in the list: actionable first.
+    var rank: Int { Int(t27Code) }
 }
 
-enum CacheCategory: String, Sendable {
+enum CacheCategory: String, CaseIterable, Sendable {
     case application
     case browser
     case developer
@@ -78,6 +85,22 @@ enum CacheCategory: String, Sendable {
         case .updater: "Updates & crash reports"
         case .unknown: "Unidentified"
         }
+    }
+
+    var t27Code: Int32 {
+        switch self {
+        case .application: CV_CAT_APPLICATION
+        case .browser: CV_CAT_BROWSER
+        case .developer: CV_CAT_DEVELOPER
+        case .packageManager: CV_CAT_PACKAGE
+        case .system: CV_CAT_SYSTEM
+        case .updater: CV_CAT_UPDATER
+        case .unknown: CV_CAT_UNKNOWN
+        }
+    }
+
+    init(t27 code: UInt32) {
+        self = Self.allCases.first { UInt32($0.t27Code) == code } ?? .unknown
     }
 
     var icon: String {
@@ -248,6 +271,14 @@ enum CacheLocationKind: Sendable {
     case userCaches
     case derivedData
     case dotCache
+
+    var t27Code: Int32 {
+        switch self {
+        case .userCaches: CV_LOC_USER_CACHES
+        case .derivedData: CV_LOC_DERIVED_DATA
+        case .dotCache: CV_LOC_DOT_CACHE
+        }
+    }
 }
 
 /// Rules that turn a cache entry into a verdict with a plain-language reason.
@@ -336,6 +367,7 @@ enum CacheClassifier {
         "com.vivaldi.vivaldi": ("Vivaldi", "com.vivaldi.vivaldi")
     ]
 
+    /// Collects the facts about one cache entry and lets Specs/cache_verdict.t27 decide.
     static func classify(
         name: String,
         isDirectory: Bool,
@@ -344,199 +376,132 @@ enum CacheClassifier {
         context: CacheOwnerContext
     ) -> Result {
         let lower = name.lowercased()
-
-        if unreadableCount > 0 {
-            return Result(
-                title: friendlyTitle(for: name, location: location),
-                owner: nil,
-                category: lower.hasPrefix("com.apple.") ? .system : .unknown,
-                verdict: .keep,
-                reason: "macOS protects part of this folder, so its size is incomplete and DiskBloom will not move it.",
-                cleanupHint: nil
-            )
-        }
+        let isApple = lower.hasPrefix("com.apple.")
+        let looksLikeBundleIdentifier = OrphanBundleIdentifier.canonical(name) != nil
+        var kind = UInt32(CV_KIND_OTHER)
+        var owner: CacheOwnerContext.Owner?
+        var ownerRunning = false
+        var knownTitle: String?
+        var hint: String?
 
         switch location {
         case .derivedData:
-            let xcode = context.owner(forIdentifier: "com.apple.dt.Xcode")
-            let running = context.isRunning(identifier: "com.apple.dt.Xcode")
-            return Result(
-                title: friendlyTitle(for: name, location: location),
-                owner: xcode ?? CacheOwnerContext.Owner(name: "Xcode", bundleIdentifier: "com.apple.dt.Xcode"),
-                category: .developer,
-                verdict: running ? .quitFirst : .safe,
-                reason: running
-                    ? "Quit Xcode first: it may be building or indexing this project right now."
-                    : "Xcode build products and indexes. Xcode rebuilds them on the next build.",
-                cleanupHint: nil
-            )
+            owner = context.owner(forIdentifier: "com.apple.dt.Xcode")
+                ?? CacheOwnerContext.Owner(name: "Xcode", bundleIdentifier: "com.apple.dt.Xcode")
+            ownerRunning = context.isRunning(identifier: "com.apple.dt.Xcode")
         case .dotCache:
             if let known = packageManagers[lower] {
-                return Result(
-                    title: known.title,
-                    owner: nil,
-                    category: .packageManager,
-                    verdict: .optional,
-                    reason: lower == "huggingface"
-                        ? "Downloaded AI models. Safe to clear, but each model downloads again the next time it is used, which can take long."
-                        : "Tool cache. Rebuilt on next use; files may be downloaded again.",
-                    cleanupHint: known.hint
-                )
+                kind = UInt32(lower == "huggingface" ? CV_KIND_MODELS : CV_KIND_PACKAGE)
+                knownTitle = known.title
+                hint = known.hint
             }
-            return Result(
-                title: name,
-                owner: nil,
-                category: .packageManager,
-                verdict: .optional,
-                reason: "Command-line tool cache in ~/.cache. Rebuilt on next use; files may be downloaded again.",
-                cleanupHint: nil
-            )
         case .userCaches:
-            break
-        }
-
-        if keepNames.contains(lower) || keepPrefixes.contains(where: { lower.hasPrefix($0) }) {
-            return Result(
-                title: friendlyTitle(for: name, location: location),
-                owner: nil,
-                category: .system,
-                verdict: .keep,
-                reason: "Holds iCloud, sign-in, sync or system state. macOS manages it; clearing it can sign you out or restart a sync.",
-                cleanupHint: nil
-            )
-        }
-
-        if let known = packageManagers[lower] {
-            return Result(
-                title: known.title,
-                owner: nil,
-                category: .packageManager,
-                verdict: .optional,
-                reason: "Package downloads. Safe to clear; the next install downloads them again.",
-                cleanupHint: known.hint
-            )
-        }
-
-        if let browser = browsers[lower] {
-            let owner = context.owner(forIdentifier: browser.identifier)
-                ?? CacheOwnerContext.Owner(name: browser.title, bundleIdentifier: browser.identifier)
-            if context.isRunning(owner) {
-                return Result(
-                    title: "\(browser.title) web cache",
-                    owner: owner,
-                    category: .browser,
-                    verdict: .quitFirst,
-                    reason: "Quit \(owner.name) first: it is using this cache right now.",
-                    cleanupHint: nil
-                )
+            if keepNames.contains(lower) || keepPrefixes.contains(where: { lower.hasPrefix($0) }) {
+                kind = UInt32(CV_KIND_KEEP)
+            } else if let known = packageManagers[lower] {
+                kind = UInt32(lower == "huggingface" ? CV_KIND_MODELS : CV_KIND_PACKAGE)
+                knownTitle = known.title
+                hint = known.hint
+            } else if let browser = browsers[lower] {
+                kind = UInt32(CV_KIND_BROWSER)
+                owner = context.owner(forIdentifier: browser.identifier)
+                    ?? CacheOwnerContext.Owner(name: browser.title, bundleIdentifier: browser.identifier)
+                ownerRunning = context.isRunning(owner)
+                knownTitle = "\(browser.title) web cache"
+            } else if lower.hasSuffix(".shipit") || lower.contains("updater") {
+                kind = UInt32(CV_KIND_UPDATE_DOWNLOAD)
+                owner = updaterOwner(name, context: context)
+                ownerRunning = context.isRunning(owner)
+            } else if lower.contains("crashpad") || lower == "sentrycrash" || lower.hasPrefix("com.crashlytics") {
+                kind = UInt32(CV_KIND_CRASH_REPORTS)
+                owner = updaterOwner(name, context: context)
+                ownerRunning = context.isRunning(owner)
+            } else {
+                owner = looksLikeBundleIdentifier ? context.owner(forIdentifier: name) : context.owner(forName: name)
+                ownerRunning = context.isRunning(owner)
             }
-            return Result(
-                title: "\(browser.title) web cache",
-                owner: owner,
-                category: .browser,
-                verdict: .safe,
-                reason: "Web page cache. Sign-ins, passwords and history are stored elsewhere and stay; pages load a little slower the first time.",
-                cleanupHint: nil
-            )
         }
 
-        if lower.hasSuffix(".shipit")
-            || lower.contains("updater")
-            || lower.contains("crashpad")
-            || lower == "sentrycrash"
-            || lower.hasPrefix("com.crashlytics") {
-            let strippedName = name
-                .replacingOccurrences(of: "@", with: "")
-                .replacingOccurrences(of: "-updater", with: "", options: .caseInsensitive)
-                .replacingOccurrences(of: "_", with: " ")
-            let owner = context.owner(forIdentifier: name) ?? context.owner(forName: strippedName)
-            if context.isRunning(owner), lower.hasSuffix(".shipit") || lower.contains("updater") {
-                return Result(
-                    title: owner.map { "\($0.name) updates" } ?? friendlyTitle(for: name, location: location),
-                    owner: owner,
-                    category: .updater,
-                    verdict: .quitFirst,
-                    reason: "Quit \(owner?.name ?? "the app") first: an update may be in progress.",
-                    cleanupHint: nil
-                )
-            }
-            return Result(
-                title: owner.map { "\($0.name) updates" } ?? friendlyTitle(for: name, location: location),
-                owner: owner,
-                category: .updater,
-                verdict: .safe,
-                reason: "Downloaded updates or crash reports. Apps download a fresh update when one is needed.",
-                cleanupHint: nil
-            )
-        }
-
-        let looksLikeBundleIdentifier = OrphanBundleIdentifier.canonical(name) != nil
-        let owner = looksLikeBundleIdentifier ? context.owner(forIdentifier: name) : context.owner(forName: name)
-        let isApple = lower.hasPrefix("com.apple.")
-
-        if let owner, context.isRunning(owner) {
-            return Result(
-                title: owner.name,
-                owner: owner,
-                category: isApple ? .system : .application,
-                verdict: .quitFirst,
-                reason: "Quit \(owner.name) first: it is using this cache right now.",
-                cleanupHint: nil
-            )
-        }
-
-        if isApple {
-            return Result(
-                title: owner?.name ?? friendlyTitle(for: name, location: location),
-                owner: owner,
-                category: .system,
-                verdict: .optional,
-                reason: "Created by macOS or an Apple app. It is rebuilt when needed, so clearing it rarely frees space for long.",
-                cleanupHint: nil
-            )
-        }
-
-        if !isDirectory {
-            return Result(
-                title: name,
-                owner: owner,
-                category: owner == nil ? .unknown : .application,
-                verdict: .safe,
-                reason: "A single cached file. Its owner recreates it if needed.",
-                cleanupHint: nil
-            )
-        }
-
-        if let owner {
-            return Result(
-                title: owner.name,
-                owner: owner,
-                category: .application,
-                verdict: .safe,
-                reason: "App cache. \(owner.name) rebuilds it when needed; documents and settings are stored elsewhere.",
-                cleanupHint: nil
-            )
-        }
-
-        if looksLikeBundleIdentifier {
-            return Result(
-                title: friendlyTitle(for: name, location: location),
-                owner: nil,
-                category: .application,
-                verdict: .safe,
-                reason: "Cache of an app that is not installed any more. Nothing will rebuild it.",
-                cleanupHint: nil
-            )
-        }
-
-        return Result(
-            title: name,
-            owner: nil,
-            category: .unknown,
-            verdict: .optional,
-            reason: "The owner could not be identified. Usually a cache, but look at the contents before clearing.",
-            cleanupHint: nil
+        let facts = (
+            UInt32(location.t27Code), kind, unreadableCount > 0, isApple, isDirectory,
+            looksLikeBundleIdentifier, owner != nil, ownerRunning
         )
+        let reason = cv_reason(facts.0, facts.1, facts.2, facts.3, facts.4, facts.5, facts.6, facts.7)
+        let verdict = CacheVerdict(t27: cv_verdict_of_reason(reason))
+        let category = CacheCategory(t27: cv_category(facts.0, facts.1, facts.2, facts.3, facts.4, facts.5, facts.6, facts.7))
+        let friendly = friendlyTitle(for: name, location: location)
+        let ownerName = owner?.name ?? "the app"
+
+        switch reason {
+        case UInt32(CV_R_PROTECTED):
+            return Result(title: friendly, owner: nil, category: category, verdict: verdict,
+                          reason: "macOS protects part of this folder, so its size is incomplete and DiskBloom will not move it.",
+                          cleanupHint: nil)
+        case UInt32(CV_R_XCODE_RUNNING):
+            return Result(title: friendly, owner: owner, category: category, verdict: verdict,
+                          reason: "Quit Xcode first: it may be building or indexing this project right now.", cleanupHint: nil)
+        case UInt32(CV_R_XCODE_BUILD):
+            return Result(title: friendly, owner: owner, category: category, verdict: verdict,
+                          reason: "Xcode build products and indexes. Xcode rebuilds them on the next build.", cleanupHint: nil)
+        case UInt32(CV_R_MODELS):
+            return Result(title: knownTitle ?? name, owner: nil, category: category, verdict: verdict,
+                          reason: "Downloaded AI models. Safe to clear, but each model downloads again the next time it is used, which can take long.",
+                          cleanupHint: hint)
+        case UInt32(CV_R_TOOL_CACHE):
+            return Result(title: knownTitle ?? name, owner: nil, category: category, verdict: verdict,
+                          reason: "Tool cache. Rebuilt on next use; files may be downloaded again.", cleanupHint: hint)
+        case UInt32(CV_R_DOT_CACHE):
+            return Result(title: name, owner: nil, category: category, verdict: verdict,
+                          reason: "Command-line tool cache in ~/.cache. Rebuilt on next use; files may be downloaded again.",
+                          cleanupHint: nil)
+        case UInt32(CV_R_SYSTEM_STATE):
+            return Result(title: friendly, owner: nil, category: category, verdict: verdict,
+                          reason: "Holds iCloud, sign-in, sync or system state. macOS manages it; clearing it can sign you out or restart a sync.",
+                          cleanupHint: nil)
+        case UInt32(CV_R_PACKAGE_DOWNLOADS):
+            return Result(title: knownTitle ?? name, owner: nil, category: category, verdict: verdict,
+                          reason: "Package downloads. Safe to clear; the next install downloads them again.", cleanupHint: hint)
+        case UInt32(CV_R_BROWSER_RUNNING), UInt32(CV_R_APP_RUNNING):
+            return Result(title: knownTitle ?? ownerName, owner: owner, category: category, verdict: verdict,
+                          reason: "Quit \(ownerName) first: it is using this cache right now.", cleanupHint: nil)
+        case UInt32(CV_R_BROWSER_CACHE):
+            return Result(title: knownTitle ?? ownerName, owner: owner, category: category, verdict: verdict,
+                          reason: "Web page cache. Sign-ins, passwords and history are stored elsewhere and stay; pages load a little slower the first time.",
+                          cleanupHint: nil)
+        case UInt32(CV_R_UPDATE_IN_PROGRESS):
+            return Result(title: owner.map { "\($0.name) updates" } ?? friendly, owner: owner, category: category, verdict: verdict,
+                          reason: "Quit \(ownerName) first: an update may be in progress.", cleanupHint: nil)
+        case UInt32(CV_R_UPDATES):
+            return Result(title: owner.map { "\($0.name) updates" } ?? friendly, owner: owner, category: category, verdict: verdict,
+                          reason: "Downloaded updates or crash reports. Apps download a fresh update when one is needed.", cleanupHint: nil)
+        case UInt32(CV_R_APPLE):
+            return Result(title: owner?.name ?? friendly, owner: owner, category: category, verdict: verdict,
+                          reason: "Created by macOS or an Apple app. It is rebuilt when needed, so clearing it rarely frees space for long.",
+                          cleanupHint: nil)
+        case UInt32(CV_R_LOOSE_FILE):
+            return Result(title: name, owner: owner, category: category, verdict: verdict,
+                          reason: "A single cached file. Its owner recreates it if needed.", cleanupHint: nil)
+        case UInt32(CV_R_APP_CACHE):
+            return Result(title: ownerName, owner: owner, category: category, verdict: verdict,
+                          reason: "App cache. \(ownerName) rebuilds it when needed; documents and settings are stored elsewhere.",
+                          cleanupHint: nil)
+        case UInt32(CV_R_UNINSTALLED):
+            return Result(title: friendly, owner: nil, category: category, verdict: verdict,
+                          reason: "Cache of an app that is not installed any more. Nothing will rebuild it.", cleanupHint: nil)
+        default:
+            return Result(title: name, owner: nil, category: category, verdict: verdict,
+                          reason: "The owner could not be identified. Usually a cache, but look at the contents before clearing.",
+                          cleanupHint: nil)
+        }
+    }
+
+    /// Updater folders are named after the app (`com.vendor.app.ShipIt`, `vendor_app-updater`).
+    private static func updaterOwner(_ name: String, context: CacheOwnerContext) -> CacheOwnerContext.Owner? {
+        let strippedName = name
+            .replacingOccurrences(of: "@", with: "")
+            .replacingOccurrences(of: "-updater", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "_", with: " ")
+        return context.owner(forIdentifier: name) ?? context.owner(forName: strippedName)
     }
 
     static func friendlyTitle(for name: String, location: CacheLocationKind) -> String {
@@ -691,25 +656,30 @@ enum CachePolicy {
         runningIdentifiers: Set<String>,
         candidateURL: URL? = nil
     ) -> String? {
-        guard item.verdict.isSelectable else {
-            return "\(item.url.path): \(item.verdict.title.lowercased()) — DiskBloom does not move it."
-        }
-        if let owner = item.ownerBundleIdentifier,
-           runningIdentifiers.contains(owner.lowercased()) {
-            return "Quit \(item.ownerName ?? owner) first: it started using \(item.url.path)."
-        }
-        if item.category == .developer,
-           runningIdentifiers.contains("com.apple.dt.xcode") {
-            return "Quit Xcode first: \(item.url.path) belongs to its build data."
-        }
         let candidate = (candidateURL ?? item.url).standardizedFileURL
-        guard candidate.path == item.url.standardizedFileURL.path else {
+        let block = cv_move_block(
+            UInt32(item.verdict.t27Code),
+            item.ownerBundleIdentifier.map { runningIdentifiers.contains($0.lowercased()) } ?? false,
+            item.category == .developer,
+            runningIdentifiers.contains("com.apple.dt.xcode"),
+            candidate.path == item.url.standardizedFileURL.path,
+            candidate.deletingLastPathComponent().standardizedFileURL.path == item.locationRoot.path,
+            AppRemovalPathSafety.pathHasSymlinkedComponent(candidate)
+        )
+        switch block {
+        case UInt32(CV_MOVE_ALLOWED):
+            break
+        case UInt32(CV_MOVE_NOT_SELECTABLE):
+            return "\(item.url.path): \(item.verdict.title.lowercased()) — DiskBloom does not move it."
+        case UInt32(CV_MOVE_OWNER_RUNNING):
+            return "Quit \(item.ownerName ?? item.ownerBundleIdentifier ?? "the app") first: it started using \(item.url.path)."
+        case UInt32(CV_MOVE_XCODE_RUNNING):
+            return "Quit Xcode first: \(item.url.path) belongs to its build data."
+        case UInt32(CV_MOVE_PATH_CHANGED):
             return "The coordinated path changed: \(item.url.path)"
-        }
-        guard candidate.deletingLastPathComponent().standardizedFileURL.path == item.locationRoot.path else {
+        case UInt32(CV_MOVE_NOT_DIRECT_CHILD):
             return "The item is no longer directly inside \(item.locationRoot.path)."
-        }
-        if AppRemovalPathSafety.pathHasSymlinkedComponent(candidate) {
+        default:
             return "The path contains a symbolic link: \(candidate.path)"
         }
         return DeletionPolicy.validateImmediatelyBeforeTrash(

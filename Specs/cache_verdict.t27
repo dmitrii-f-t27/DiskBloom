@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: MIT
+; Specs/cache_verdict.t27 -- DiskBloom: which caches may be cleared, and why
+; The Caches section measures every entry of ~/Library/Caches, Xcode DerivedData and ~/.cache.
+; Swift collects the facts about one entry (where it lives, what its name matches, whether its
+; owner is installed or running) and this spec decides: a verdict, a reason and a category.
+; Name matching against the tables (keep names, package managers, browsers, updaters) stays in
+; Sources/CacheExplorer.swift; every decision made from those facts lives here.
+; A second rule set, cv_move_block, is asked again right before a selected cache moves to the Trash.
+; Generated C: Sources/Generated/cache_verdict.h (Specs/generate.sh). ASCII only.
+
+module DiskBloomCacheVerdict;
+
+; --- Where the entry lives ---------------------------------------------------------------------
+pub const CV_LOC_USER_CACHES : u32 = 0;
+pub const CV_LOC_DERIVED_DATA : u32 = 1;
+pub const CV_LOC_DOT_CACHE : u32 = 2;
+
+; --- What the entry's name matched (Swift looks it up in its tables) ---------------------------
+pub const CV_KIND_OTHER : u32 = 0;
+pub const CV_KIND_KEEP : u32 = 1;
+pub const CV_KIND_PACKAGE : u32 = 2;
+pub const CV_KIND_MODELS : u32 = 3;
+pub const CV_KIND_BROWSER : u32 = 4;
+pub const CV_KIND_UPDATE_DOWNLOAD : u32 = 5;
+pub const CV_KIND_CRASH_REPORTS : u32 = 6;
+
+; --- Verdicts, in list order: actionable first ---------------------------------------------------
+pub const CV_SAFE : u32 = 0;
+pub const CV_OPTIONAL : u32 = 1;
+pub const CV_QUIT_FIRST : u32 = 2;
+pub const CV_USE_TOOL : u32 = 3;
+pub const CV_KEEP : u32 = 4;
+
+; --- Categories ----------------------------------------------------------------------------------
+pub const CV_CAT_APPLICATION : u32 = 0;
+pub const CV_CAT_BROWSER : u32 = 1;
+pub const CV_CAT_DEVELOPER : u32 = 2;
+pub const CV_CAT_PACKAGE : u32 = 3;
+pub const CV_CAT_SYSTEM : u32 = 4;
+pub const CV_CAT_UPDATER : u32 = 5;
+pub const CV_CAT_UNKNOWN : u32 = 6;
+
+; --- Reasons (Swift turns each into a sentence with the owner's name) ---------------------------
+pub const CV_R_PROTECTED : u32 = 0;
+pub const CV_R_XCODE_RUNNING : u32 = 1;
+pub const CV_R_XCODE_BUILD : u32 = 2;
+pub const CV_R_MODELS : u32 = 3;
+pub const CV_R_TOOL_CACHE : u32 = 4;
+pub const CV_R_DOT_CACHE : u32 = 5;
+pub const CV_R_SYSTEM_STATE : u32 = 6;
+pub const CV_R_PACKAGE_DOWNLOADS : u32 = 7;
+pub const CV_R_BROWSER_RUNNING : u32 = 8;
+pub const CV_R_BROWSER_CACHE : u32 = 9;
+pub const CV_R_UPDATE_IN_PROGRESS : u32 = 10;
+pub const CV_R_UPDATES : u32 = 11;
+pub const CV_R_APP_RUNNING : u32 = 12;
+pub const CV_R_APPLE : u32 = 13;
+pub const CV_R_LOOSE_FILE : u32 = 14;
+pub const CV_R_APP_CACHE : u32 = 15;
+pub const CV_R_UNINSTALLED : u32 = 16;
+pub const CV_R_UNKNOWN_OWNER : u32 = 17;
+
+; --- Why a selected cache is refused right before the move ---------------------------------------
+pub const CV_MOVE_ALLOWED : u32 = 0;
+pub const CV_MOVE_NOT_SELECTABLE : u32 = 1;
+pub const CV_MOVE_OWNER_RUNNING : u32 = 2;
+pub const CV_MOVE_XCODE_RUNNING : u32 = 3;
+pub const CV_MOVE_PATH_CHANGED : u32 = 4;
+pub const CV_MOVE_NOT_DIRECT_CHILD : u32 = 5;
+pub const CV_MOVE_SYMLINK : u32 = 6;
+
+; --- The reason: the one decision the verdict and the category are read from --------------------
+; Facts:
+;   location        CV_LOC_*
+;   kind            CV_KIND_* (what the name matched)
+;   unreadable      part of the folder could not be read (macOS protects it)
+;   apple           the name starts with com.apple.
+;   directory       the entry is a folder, not a loose file
+;   bundle_id       the name is shaped like a bundle ID
+;   owner_known     an installed or running app owns it
+;   owner_running   that owner (for DerivedData: Xcode) is running now
+
+pub fn cv_reason(location: u32, kind: u32, unreadable: bool, apple: bool, directory: bool, bundle_id: bool, owner_known: bool, owner_running: bool) -> u32 {
+    if (unreadable) { return CV_R_PROTECTED; }
+    if (location == CV_LOC_DERIVED_DATA) {
+        if (owner_running) { return CV_R_XCODE_RUNNING; }
+        return CV_R_XCODE_BUILD;
+    }
+    if (location == CV_LOC_DOT_CACHE) {
+        if (kind == CV_KIND_MODELS) { return CV_R_MODELS; }
+        if (kind == CV_KIND_PACKAGE) { return CV_R_TOOL_CACHE; }
+        return CV_R_DOT_CACHE;
+    }
+    if (kind == CV_KIND_KEEP) { return CV_R_SYSTEM_STATE; }
+    if (kind == CV_KIND_PACKAGE or kind == CV_KIND_MODELS) { return CV_R_PACKAGE_DOWNLOADS; }
+    if (kind == CV_KIND_BROWSER) {
+        if (owner_running) { return CV_R_BROWSER_RUNNING; }
+        return CV_R_BROWSER_CACHE;
+    }
+    if (kind == CV_KIND_UPDATE_DOWNLOAD) {
+        if (owner_running) { return CV_R_UPDATE_IN_PROGRESS; }
+        return CV_R_UPDATES;
+    }
+    if (kind == CV_KIND_CRASH_REPORTS) { return CV_R_UPDATES; }
+    if (owner_known and owner_running) { return CV_R_APP_RUNNING; }
+    if (apple) { return CV_R_APPLE; }
+    if (directory == false) { return CV_R_LOOSE_FILE; }
+    if (owner_known) { return CV_R_APP_CACHE; }
+    if (bundle_id) { return CV_R_UNINSTALLED; }
+    return CV_R_UNKNOWN_OWNER;
+}
+
+pub fn cv_verdict_of_reason(reason: u32) -> u32 {
+    if (reason == CV_R_PROTECTED or reason == CV_R_SYSTEM_STATE) { return CV_KEEP; }
+    if (reason == CV_R_XCODE_RUNNING or reason == CV_R_BROWSER_RUNNING) { return CV_QUIT_FIRST; }
+    if (reason == CV_R_UPDATE_IN_PROGRESS or reason == CV_R_APP_RUNNING) { return CV_QUIT_FIRST; }
+    if (reason == CV_R_MODELS or reason == CV_R_TOOL_CACHE or reason == CV_R_DOT_CACHE) { return CV_OPTIONAL; }
+    if (reason == CV_R_PACKAGE_DOWNLOADS or reason == CV_R_APPLE or reason == CV_R_UNKNOWN_OWNER) { return CV_OPTIONAL; }
+    return CV_SAFE;
+}
+
+pub fn cv_verdict(location: u32, kind: u32, unreadable: bool, apple: bool, directory: bool, bundle_id: bool, owner_known: bool, owner_running: bool) -> u32 {
+    return cv_verdict_of_reason(cv_reason(location, kind, unreadable, apple, directory, bundle_id, owner_known, owner_running));
+}
+
+pub fn cv_category(location: u32, kind: u32, unreadable: bool, apple: bool, directory: bool, bundle_id: bool, owner_known: bool, owner_running: bool) -> u32 {
+    var reason: u32 = cv_reason(location, kind, unreadable, apple, directory, bundle_id, owner_known, owner_running);
+    if (reason == CV_R_PROTECTED) {
+        if (apple) { return CV_CAT_SYSTEM; }
+        return CV_CAT_UNKNOWN;
+    }
+    if (reason == CV_R_XCODE_RUNNING or reason == CV_R_XCODE_BUILD) { return CV_CAT_DEVELOPER; }
+    if (reason == CV_R_MODELS or reason == CV_R_TOOL_CACHE or reason == CV_R_DOT_CACHE) { return CV_CAT_PACKAGE; }
+    if (reason == CV_R_PACKAGE_DOWNLOADS) { return CV_CAT_PACKAGE; }
+    if (reason == CV_R_SYSTEM_STATE or reason == CV_R_APPLE) { return CV_CAT_SYSTEM; }
+    if (reason == CV_R_BROWSER_RUNNING or reason == CV_R_BROWSER_CACHE) { return CV_CAT_BROWSER; }
+    if (reason == CV_R_UPDATE_IN_PROGRESS or reason == CV_R_UPDATES) { return CV_CAT_UPDATER; }
+    if (reason == CV_R_APP_RUNNING) {
+        if (apple) { return CV_CAT_SYSTEM; }
+        return CV_CAT_APPLICATION;
+    }
+    if (reason == CV_R_LOOSE_FILE) {
+        if (owner_known) { return CV_CAT_APPLICATION; }
+        return CV_CAT_UNKNOWN;
+    }
+    if (reason == CV_R_UNKNOWN_OWNER) { return CV_CAT_UNKNOWN; }
+    return CV_CAT_APPLICATION;
+}
+
+pub fn cv_selectable(verdict: u32) -> bool {
+    return verdict == CV_SAFE or verdict == CV_OPTIONAL;
+}
+
+; --- Right before the move ---------------------------------------------------------------------
+; Facts, read again inside the file coordinator:
+;   verdict             the verdict the list showed
+;   owner_running_now   the owner started since the scan
+;   developer           the cache is Xcode build data
+;   xcode_running_now   Xcode is running now
+;   path_unchanged      the coordinated path is the scanned path
+;   direct_child        the item still sits directly inside the folder it was found in
+;   symlink_on_path     a component of the path is a symbolic link
+
+pub fn cv_move_block(verdict: u32, owner_running_now: bool, developer: bool, xcode_running_now: bool, path_unchanged: bool, direct_child: bool, symlink_on_path: bool) -> u32 {
+    if (cv_selectable(verdict) == false) { return CV_MOVE_NOT_SELECTABLE; }
+    if (owner_running_now) { return CV_MOVE_OWNER_RUNNING; }
+    if (developer and xcode_running_now) { return CV_MOVE_XCODE_RUNNING; }
+    if (path_unchanged == false) { return CV_MOVE_PATH_CHANGED; }
+    if (direct_child == false) { return CV_MOVE_NOT_DIRECT_CHILD; }
+    if (symlink_on_path) { return CV_MOVE_SYMLINK; }
+    return CV_MOVE_ALLOWED;
+}
+
+; --- Laws ----------------------------------------------------------------------------------------
+invariant cv_verdicts_are_ranked { assert CV_SAFE < CV_OPTIONAL and CV_OPTIONAL < CV_QUIT_FIRST and CV_QUIT_FIRST < CV_USE_TOOL and CV_USE_TOOL < CV_KEEP; }
+invariant cv_allowed_is_zero { assert CV_MOVE_ALLOWED == 0; }
+
+test cv_protected_folders_are_kept_whatever_else_holds {
+    assert cv_verdict(CV_LOC_USER_CACHES, CV_KIND_OTHER, true, false, true, true, true, false) == CV_KEEP;
+    assert cv_verdict(CV_LOC_DERIVED_DATA, CV_KIND_OTHER, true, false, true, false, true, false) == CV_KEEP;
+    assert cv_verdict(CV_LOC_DOT_CACHE, CV_KIND_PACKAGE, true, false, true, false, false, false) == CV_KEEP;
+    assert cv_category(CV_LOC_USER_CACHES, CV_KIND_OTHER, true, true, true, true, false, false) == CV_CAT_SYSTEM;
+    assert cv_category(CV_LOC_USER_CACHES, CV_KIND_OTHER, true, false, true, true, false, false) == CV_CAT_UNKNOWN;
+}
+
+test cv_derived_data_waits_for_xcode {
+    assert cv_verdict(CV_LOC_DERIVED_DATA, CV_KIND_OTHER, false, false, true, false, true, true) == CV_QUIT_FIRST;
+    assert cv_verdict(CV_LOC_DERIVED_DATA, CV_KIND_OTHER, false, false, true, false, true, false) == CV_SAFE;
+    assert cv_category(CV_LOC_DERIVED_DATA, CV_KIND_OTHER, false, false, true, false, true, false) == CV_CAT_DEVELOPER;
+}
+
+test cv_tool_caches_are_optional_and_keep_names_do_not_apply_there {
+    assert cv_reason(CV_LOC_DOT_CACHE, CV_KIND_MODELS, false, false, true, false, false, false) == CV_R_MODELS;
+    assert cv_reason(CV_LOC_DOT_CACHE, CV_KIND_PACKAGE, false, false, true, false, false, false) == CV_R_TOOL_CACHE;
+    assert cv_reason(CV_LOC_DOT_CACHE, CV_KIND_KEEP, false, false, true, false, false, false) == CV_R_DOT_CACHE;
+    assert cv_verdict(CV_LOC_DOT_CACHE, CV_KIND_OTHER, false, false, true, false, false, false) == CV_OPTIONAL;
+}
+
+test cv_sign_in_state_is_kept_and_downloads_are_optional {
+    assert cv_verdict(CV_LOC_USER_CACHES, CV_KIND_KEEP, false, true, true, true, false, false) == CV_KEEP;
+    assert cv_verdict(CV_LOC_USER_CACHES, CV_KIND_PACKAGE, false, false, true, false, false, false) == CV_OPTIONAL;
+    assert cv_verdict(CV_LOC_USER_CACHES, CV_KIND_MODELS, false, false, true, false, false, false) == CV_OPTIONAL;
+    assert cv_category(CV_LOC_USER_CACHES, CV_KIND_KEEP, false, true, true, true, false, false) == CV_CAT_SYSTEM;
+}
+
+test cv_a_running_owner_blocks_browsers_updates_and_apps {
+    assert cv_verdict(CV_LOC_USER_CACHES, CV_KIND_BROWSER, false, false, true, false, true, true) == CV_QUIT_FIRST;
+    assert cv_verdict(CV_LOC_USER_CACHES, CV_KIND_BROWSER, false, false, true, false, true, false) == CV_SAFE;
+    assert cv_verdict(CV_LOC_USER_CACHES, CV_KIND_UPDATE_DOWNLOAD, false, false, true, true, true, true) == CV_QUIT_FIRST;
+    assert cv_verdict(CV_LOC_USER_CACHES, CV_KIND_CRASH_REPORTS, false, false, true, false, true, true) == CV_SAFE;
+    assert cv_verdict(CV_LOC_USER_CACHES, CV_KIND_OTHER, false, false, true, true, true, true) == CV_QUIT_FIRST;
+    assert cv_category(CV_LOC_USER_CACHES, CV_KIND_OTHER, false, true, true, true, true, true) == CV_CAT_SYSTEM;
+}
+
+test cv_idle_owners_uninstalled_apps_and_strangers {
+    assert cv_reason(CV_LOC_USER_CACHES, CV_KIND_OTHER, false, true, true, true, false, false) == CV_R_APPLE;
+    assert cv_reason(CV_LOC_USER_CACHES, CV_KIND_OTHER, false, false, false, false, false, false) == CV_R_LOOSE_FILE;
+    assert cv_reason(CV_LOC_USER_CACHES, CV_KIND_OTHER, false, false, true, true, true, false) == CV_R_APP_CACHE;
+    assert cv_reason(CV_LOC_USER_CACHES, CV_KIND_OTHER, false, false, true, true, false, false) == CV_R_UNINSTALLED;
+    assert cv_reason(CV_LOC_USER_CACHES, CV_KIND_OTHER, false, false, true, false, false, false) == CV_R_UNKNOWN_OWNER;
+    assert cv_verdict(CV_LOC_USER_CACHES, CV_KIND_OTHER, false, false, true, true, false, false) == CV_SAFE;
+    assert cv_verdict(CV_LOC_USER_CACHES, CV_KIND_OTHER, false, false, true, false, false, false) == CV_OPTIONAL;
+    assert cv_category(CV_LOC_USER_CACHES, CV_KIND_OTHER, false, false, false, false, true, false) == CV_CAT_APPLICATION;
+}
+
+test cv_the_move_is_refused_when_anything_changed {
+    assert cv_move_block(CV_SAFE, false, false, false, true, true, false) == CV_MOVE_ALLOWED;
+    assert cv_move_block(CV_OPTIONAL, false, false, false, true, true, false) == CV_MOVE_ALLOWED;
+    assert cv_move_block(CV_KEEP, false, false, false, true, true, false) == CV_MOVE_NOT_SELECTABLE;
+    assert cv_move_block(CV_USE_TOOL, false, false, false, true, true, false) == CV_MOVE_NOT_SELECTABLE;
+    assert cv_move_block(CV_SAFE, true, false, false, true, true, false) == CV_MOVE_OWNER_RUNNING;
+    assert cv_move_block(CV_SAFE, false, true, true, true, true, false) == CV_MOVE_XCODE_RUNNING;
+    assert cv_move_block(CV_SAFE, false, false, true, true, true, false) == CV_MOVE_ALLOWED;
+    assert cv_move_block(CV_SAFE, false, false, false, false, true, false) == CV_MOVE_PATH_CHANGED;
+    assert cv_move_block(CV_SAFE, false, false, false, true, false, false) == CV_MOVE_NOT_DIRECT_CHILD;
+    assert cv_move_block(CV_SAFE, false, false, false, true, true, true) == CV_MOVE_SYMLINK;
+}
+
+test cv_every_reason_maps_to_one_verdict {
+    assert cv_verdict_of_reason(CV_R_PROTECTED) == CV_KEEP;
+    assert cv_verdict_of_reason(CV_R_SYSTEM_STATE) == CV_KEEP;
+    assert cv_verdict_of_reason(CV_R_XCODE_RUNNING) == CV_QUIT_FIRST;
+    assert cv_verdict_of_reason(CV_R_BROWSER_RUNNING) == CV_QUIT_FIRST;
+    assert cv_verdict_of_reason(CV_R_UPDATE_IN_PROGRESS) == CV_QUIT_FIRST;
+    assert cv_verdict_of_reason(CV_R_APP_RUNNING) == CV_QUIT_FIRST;
+    assert cv_verdict_of_reason(CV_R_MODELS) == CV_OPTIONAL;
+    assert cv_verdict_of_reason(CV_R_TOOL_CACHE) == CV_OPTIONAL;
+    assert cv_verdict_of_reason(CV_R_DOT_CACHE) == CV_OPTIONAL;
+    assert cv_verdict_of_reason(CV_R_PACKAGE_DOWNLOADS) == CV_OPTIONAL;
+    assert cv_verdict_of_reason(CV_R_APPLE) == CV_OPTIONAL;
+    assert cv_verdict_of_reason(CV_R_UNKNOWN_OWNER) == CV_OPTIONAL;
+    assert cv_verdict_of_reason(CV_R_XCODE_BUILD) == CV_SAFE;
+    assert cv_verdict_of_reason(CV_R_BROWSER_CACHE) == CV_SAFE;
+    assert cv_verdict_of_reason(CV_R_UPDATES) == CV_SAFE;
+    assert cv_verdict_of_reason(CV_R_LOOSE_FILE) == CV_SAFE;
+    assert cv_verdict_of_reason(CV_R_APP_CACHE) == CV_SAFE;
+    assert cv_verdict_of_reason(CV_R_UNINSTALLED) == CV_SAFE;
+}
+
+test cv_only_safe_and_optional_can_be_selected {
+    assert cv_selectable(CV_SAFE) == true;
+    assert cv_selectable(CV_OPTIONAL) == true;
+    assert cv_selectable(CV_QUIT_FIRST) == false;
+    assert cv_selectable(CV_USE_TOOL) == false;
+    assert cv_selectable(CV_KEEP) == false;
+}
