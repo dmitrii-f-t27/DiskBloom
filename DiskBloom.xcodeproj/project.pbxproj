@@ -8,36 +8,46 @@
 
 /* Begin PBXBuildFile section */
 		00A06837FE9A3ACAEF208A24 /* AppUninstallerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E621440422CC0990CFA03FE /* AppUninstallerView.swift */; };
+		01E6AD974D0D2F6BB5510A9B /* CacheExplorerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCF3038EDC99783AF1C2E7AB /* CacheExplorerView.swift */; };
 		1E762144578A2A9E3E61F881 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C8E33FF89D5B6199094FA3B4 /* Assets.xcassets */; };
 		486DF4C793C339DE01020377 /* DuplicateFinderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2F81E51A88472FB9B2FDB62 /* DuplicateFinderView.swift */; };
 		59F4C87F765A3039A51DF864 /* AppRemoval.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1763AD26A69FFA32DB985B /* AppRemoval.swift */; };
 		66AE7B9D5655C0DC3A921A1B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 16C2A45090429D38F356E370 /* PrivacyInfo.xcprivacy */; };
 		892F4324D5ECFB6529ECE460 /* SunburstView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C72EC4FB40E3725A5047B9 /* SunburstView.swift */; };
 		905655C2BBE65318B21E9B56 /* DiskScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FECA0A311AB132F59E4FC81 /* DiskScanner.swift */; };
+		90ACBF8BF5ED6E923D57251C /* Assistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1BA8A47ED47691B4AAF18B9 /* Assistant.swift */; };
 		994D584448510F3AF72BC759 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD7792AFE7D2AC7BB14F43E9 /* Models.swift */; };
 		9AB589A277052A161EA5CEF2 /* DuplicateFinderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC0E1CC44D7D0ABFBFC29AA /* DuplicateFinderModel.swift */; };
 		A04A05ED653E841290387D7C /* OrphanedAppDataView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17929A66338DBCE10F47E50B /* OrphanedAppDataView.swift */; };
 		AA79B7EA2458674E3ADAB836 /* FolderAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47386019A8F91E868D50ACA8 /* FolderAccess.swift */; };
 		B1C20199C34F614DDDA3C0E9 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F40277C6696B048669F8E76F /* ContentView.swift */; };
 		C61DD32948BF929EE58FE719 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 918E1D2362D57CA9637D7190 /* AppModel.swift */; };
+		D0C49475CA5CC9FC7ED29E65 /* CacheExplorer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C1D3CF8F9A54007DA9A7AC /* CacheExplorer.swift */; };
 		D36BFD7D9A7293479BA5FAA1 /* DiskBloomApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A6928612F19E8AE45F487A3 /* DiskBloomApp.swift */; };
 		D70F59B4273210195C53A716 /* OrphanedAppData.swift in Sources */ = {isa = PBXBuildFile; fileRef = D276BAFC103A3D9DC1DC661B /* OrphanedAppData.swift */; };
+		E4F6533978B4455A5AF8809A /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBFB294FD41AD5D13C58ECBA /* AssistantView.swift */; };
 		E92D422D237D128DF6B72E3A /* DuplicateFinder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4913E770899712A7146B559 /* DuplicateFinder.swift */; };
+		EAEB3EF12BA7E66C033B771E /* AssistantBackends.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7228B4972CD5244AB2F1DC83 /* AssistantBackends.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0A6928612F19E8AE45F487A3 /* DiskBloomApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskBloomApp.swift; sourceTree = "<group>"; };
 		16C2A45090429D38F356E370 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		17929A66338DBCE10F47E50B /* OrphanedAppDataView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrphanedAppDataView.swift; sourceTree = "<group>"; };
+		44C1D3CF8F9A54007DA9A7AC /* CacheExplorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheExplorer.swift; sourceTree = "<group>"; };
 		47386019A8F91E868D50ACA8 /* FolderAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderAccess.swift; sourceTree = "<group>"; };
 		6FECA0A311AB132F59E4FC81 /* DiskScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskScanner.swift; sourceTree = "<group>"; };
+		7228B4972CD5244AB2F1DC83 /* AssistantBackends.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantBackends.swift; sourceTree = "<group>"; };
 		7E621440422CC0990CFA03FE /* AppUninstallerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUninstallerView.swift; sourceTree = "<group>"; };
 		918E1D2362D57CA9637D7190 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		A1BA8A47ED47691B4AAF18B9 /* Assistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Assistant.swift; sourceTree = "<group>"; };
 		B92A6A4CF5AA1A46231B5526 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		BC1763AD26A69FFA32DB985B /* AppRemoval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRemoval.swift; sourceTree = "<group>"; };
 		C0C72EC4FB40E3725A5047B9 /* SunburstView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SunburstView.swift; sourceTree = "<group>"; };
 		C8E33FF89D5B6199094FA3B4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		CAECF0452EBCEF172ABF736B /* DiskBloom.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DiskBloom.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CBFB294FD41AD5D13C58ECBA /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
+		CCF3038EDC99783AF1C2E7AB /* CacheExplorerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheExplorerView.swift; sourceTree = "<group>"; };
 		CD7792AFE7D2AC7BB14F43E9 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		D276BAFC103A3D9DC1DC661B /* OrphanedAppData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrphanedAppData.swift; sourceTree = "<group>"; };
 		D4913E770899712A7146B559 /* DuplicateFinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateFinder.swift; sourceTree = "<group>"; };
@@ -88,6 +98,11 @@
 				918E1D2362D57CA9637D7190 /* AppModel.swift */,
 				BC1763AD26A69FFA32DB985B /* AppRemoval.swift */,
 				7E621440422CC0990CFA03FE /* AppUninstallerView.swift */,
+				A1BA8A47ED47691B4AAF18B9 /* Assistant.swift */,
+				7228B4972CD5244AB2F1DC83 /* AssistantBackends.swift */,
+				CBFB294FD41AD5D13C58ECBA /* AssistantView.swift */,
+				44C1D3CF8F9A54007DA9A7AC /* CacheExplorer.swift */,
+				CCF3038EDC99783AF1C2E7AB /* CacheExplorerView.swift */,
 				F40277C6696B048669F8E76F /* ContentView.swift */,
 				0A6928612F19E8AE45F487A3 /* DiskBloomApp.swift */,
 				6FECA0A311AB132F59E4FC81 /* DiskScanner.swift */,
@@ -177,6 +192,11 @@
 				C61DD32948BF929EE58FE719 /* AppModel.swift in Sources */,
 				59F4C87F765A3039A51DF864 /* AppRemoval.swift in Sources */,
 				00A06837FE9A3ACAEF208A24 /* AppUninstallerView.swift in Sources */,
+				90ACBF8BF5ED6E923D57251C /* Assistant.swift in Sources */,
+				EAEB3EF12BA7E66C033B771E /* AssistantBackends.swift in Sources */,
+				E4F6533978B4455A5AF8809A /* AssistantView.swift in Sources */,
+				D0C49475CA5CC9FC7ED29E65 /* CacheExplorer.swift in Sources */,
+				01E6AD974D0D2F6BB5510A9B /* CacheExplorerView.swift in Sources */,
 				B1C20199C34F614DDDA3C0E9 /* ContentView.swift in Sources */,
 				D36BFD7D9A7293479BA5FAA1 /* DiskBloomApp.swift in Sources */,
 				905655C2BBE65318B21E9B56 /* DiskScanner.swift in Sources */,
@@ -267,6 +287,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				OTHER_LDFLAGS = "$(inherited) -weak_framework FoundationModels";
 				PRODUCT_NAME = DiskBloom;
 				SDKROOT = macosx;
 			};
@@ -352,6 +373,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				OTHER_LDFLAGS = "$(inherited) -weak_framework FoundationModels";
 				PRODUCT_NAME = DiskBloom;
 				SDKROOT = macosx;
 			};

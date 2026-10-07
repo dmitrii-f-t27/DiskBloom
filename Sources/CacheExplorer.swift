@@ -82,7 +82,7 @@ enum CacheCategory: String, Sendable {
 
     var icon: String {
         switch self {
-        case .application: "app.fill"
+        case .application: "macwindow"
         case .browser: "globe"
         case .developer: "hammer.fill"
         case .packageManager: "shippingbox.fill"

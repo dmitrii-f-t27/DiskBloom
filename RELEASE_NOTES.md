@@ -1,3 +1,9 @@
+# Unreleased
+
+- **Caches**: a new section that measures app caches, Xcode DerivedData and `~/.cache`, names the owning app and marks each cache safe to clear, optional, in use, keep, or clear with its own tool. Selected caches go through the usual review sheet and re-checks.
+- **Assistant** (⌘K): chat with DiskBloom. It looks up real sizes and opens folders, caches and apps in the app; it can select items but never moves anything. Uses Apple's on-device model by default or any OpenAI-compatible API (NVIDIA, Z.ai, OpenRouter, OpenAI, Ollama, LM Studio, custom) with a model you pick.
+- The Mac App Store edition adds the `network.client` entitlement for the assistant.
+
 # DiskBloom 1.4.0
 
 DiskBloom now speaks English. App version: 1.4, build 5.

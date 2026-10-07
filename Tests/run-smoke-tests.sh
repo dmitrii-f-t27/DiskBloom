@@ -36,6 +36,7 @@ build_test() {
     -framework Foundation \
     -framework Combine \
     -framework Security \
+    -Xlinker -weak_framework -Xlinker FoundationModels \
     "${APP_SOURCES[@]}" \
     "$ROOT_DIR/Tests/Smoke/$name.swift" \
     -o "$BUILD_DIR/$name"

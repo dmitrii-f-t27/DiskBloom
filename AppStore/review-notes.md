@@ -4,7 +4,7 @@ Paste the text below into App Store Connect → App Review Information → Notes
 
 ---
 
-DiskBloom is a local disk space analyzer and cleanup tool. It needs no account and has no network access.
+DiskBloom is a local disk space analyzer and cleanup tool. It needs no account. The disk tools never use the network; only the optional assistant connects to an API address the user enters (network.client entitlement).
 
 How to test:
 
@@ -13,5 +13,7 @@ How to test:
 3. Duplicate Files: click "Choose Folder to Analyze" and pick any folder. The analysis is read-only.
 4. App Uninstaller: after home folder access is granted, pick an application from the list. DiskBloom shows the app bundle and only exact, pre-approved paths in ~/Library (caches, preferences, saved state, logs and similar). Before moving an app it asks for permission to change the folder that contains it (for example /Applications) through the system open panel.
 5. Possible Leftovers: after home folder access, click "Start Analysis". It lists folders in ~/Library whose bundle ID has no installed owner. Because the App Sandbox hides the process list, the results show a warning and every move needs an explicit confirmation.
+6. Caches: click "Measure Caches". Each cache shows its owner and a verdict; only caches marked safe or optional can be selected, and moving uses the same review sheet.
+7. Assistant (⌘K): by default it uses Apple's on-device model (macOS 26 with Apple Intelligence). In its settings a reviewer can instead enter any OpenAI-compatible API address, key and model. The assistant can open sections and select items but never moves anything without the review sheet.
 
 About guideline 2.4.5(i): DiskBloom changes other apps' data only when the user selects exact paths and confirms a review sheet. Every item goes to the Trash through FileManager.trashItem and can be restored from the Trash. The app never asks for administrator rights, does not install helpers and does not collect data.
