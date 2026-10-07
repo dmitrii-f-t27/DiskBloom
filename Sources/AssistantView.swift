@@ -241,7 +241,12 @@ struct AssistantSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var keyDraft = ""
-    @State private var loadedModels: [String] = []
+    @State private var loadedModels: [AssistantModelInfo] = []
+    @State private var modelListSource = ""
+    @State private var modelListError: String?
+    @State private var isLoadingModels = false
+    @State private var modelSearch = ""
+    @State private var showAllModels = false
     @State private var isWorking = false
     @State private var feedback: (ok: Bool, text: String)?
 
@@ -298,7 +303,7 @@ struct AssistantSettingsSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 560, height: 600)
+        .frame(width: 600, height: 720)
         .background(Color.appBackground)
         .preferredColorScheme(.dark)
     }
@@ -325,6 +330,8 @@ struct AssistantSettingsSheet: View {
                         settings.apply(AssistantEndpointPreset.preset(id: id))
                         keyDraft = ""
                         loadedModels = []
+                        modelListError = nil
+                        modelSearch = ""
                         feedback = nil
                     }
                 )) {
@@ -352,6 +359,7 @@ struct AssistantSettingsSheet: View {
                             ? (true, keyDraft.isEmpty ? "Key removed from Keychain." : "Key saved in Keychain.")
                             : (false, "Keychain did not accept the key.")
                         keyDraft = ""
+                        loadModels()
                     }
                     .buttonStyle(SecondaryButtonStyle(compact: true))
                     .disabled(keyDraft.isEmpty && !settings.hasAPIKey)
@@ -366,24 +374,26 @@ struct AssistantSettingsSheet: View {
                     TextField("model name", text: $settings.model)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 11, design: .monospaced))
-                    let choices = loadedModels.isEmpty ? settings.preset.suggestedModels : loadedModels
-                    if !choices.isEmpty {
-                        Menu {
-                            ForEach(choices, id: \.self) { name in
-                                Button(name) { settings.model = name }
-                            }
-                        } label: {
-                            Image(systemName: "chevron.down.circle")
+                    Button {
+                        loadModels()
+                    } label: {
+                        if isLoadingModels {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Reload", systemImage: "arrow.clockwise")
                         }
-                        .menuStyle(.borderlessButton)
-                        .frame(width: 28)
-                        .help(loadedModels.isEmpty ? "Suggested models" : "Models from the provider")
                     }
-                    Button("Load list") { loadModels() }
-                        .buttonStyle(SecondaryButtonStyle(compact: true))
-                        .disabled(isWorking)
+                    .buttonStyle(SecondaryButtonStyle(compact: true))
+                    .disabled(isLoadingModels)
+                    .help("Load every model this provider offers")
                 }
             }
+            if !loadedModels.isEmpty, !loadedModels.contains(where: { $0.id == settings.model }), !settings.model.isEmpty {
+                Label("This provider does not list “\(settings.model)”. Pick a model below.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(CacheVerdict.quitFirst.color)
+            }
+            modelBrowser
 
             HStack(spacing: 10) {
                 Button {
@@ -411,20 +421,144 @@ struct AssistantSettingsSheet: View {
         }
     }
 
+    /// The searchable list of every model the provider offers.
+    @ViewBuilder
+    private var modelBrowser: some View {
+        let chatModels = loadedModels.filter(\.isChatModel)
+        let pool = showAllModels ? loadedModels : chatModels
+        let query = modelSearch.trimmingCharacters(in: .whitespaces).lowercased()
+        let filtered = pool
+            .filter { query.isEmpty || $0.id.lowercased().contains(query) }
+            .sorted {
+                if $0.isRecommended != $1.isRecommended { return $0.isRecommended }
+                return $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending
+            }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(Color.secondaryText)
+                    TextField("Search models", text: $modelSearch)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                }
+                .padding(.horizontal, 9)
+                .frame(height: 28)
+                .background(Color.panelElevated, in: RoundedRectangle(cornerRadius: 7))
+                Toggle("Show all", isOn: $showAllModels)
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 10))
+                    .help("Also show embedding, safety and other models that cannot chat")
+            }
+            Group {
+                if isLoadingModels && loadedModels.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading the model list…")
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 80)
+                } else if let modelListError, loadedModels.isEmpty {
+                    VStack(spacing: 6) {
+                        Text(modelListError)
+                            .multilineTextAlignment(.center)
+                        if !settings.hasAPIKey, !settings.isLocalEndpoint {
+                            Text("Save the API key first; this provider shows its list only with a key.")
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 80)
+                    .padding(.horizontal, 12)
+                } else if loadedModels.isEmpty {
+                    Text("No list yet. Click Reload.")
+                        .frame(maxWidth: .infinity, minHeight: 80)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 2) {
+                            ForEach(filtered) { info in
+                                modelRow(info)
+                            }
+                        }
+                        .padding(4)
+                    }
+                    .frame(height: 230)
+                }
+            }
+            .font(.system(size: 10.5))
+            .foregroundStyle(Color.secondaryText)
+            .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.white.opacity(0.06), lineWidth: 1))
+            if !loadedModels.isEmpty {
+                Text("\(loadedModels.count) models from \(URL(string: modelListSource)?.host ?? "the provider") · \(chatModels.count) can chat · ★ \(loadedModels.filter(\.isRecommended).count) handle the assistant's tools" + (filtered.count != pool.count ? " · \(filtered.count) match" : ""))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(Color.secondaryText)
+            }
+        }
+        .task(id: settings.normalizedBaseURL + "|\(settings.keyRevision)") {
+            if modelListSource != settings.normalizedBaseURL || loadedModels.isEmpty {
+                loadModels()
+            }
+        }
+    }
+
+    private func modelRow(_ info: AssistantModelInfo) -> some View {
+        let isSelected = info.id == settings.model
+        return Button {
+            settings.model = info.id
+            feedback = nil
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? Color.accentMint : Color.secondaryText.opacity(0.5))
+                Text(info.id)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(info.isChatModel ? Color.primaryText : Color.secondaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 6)
+                if info.isRecommended {
+                    Text("★ tools")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Color.accentMint)
+                } else if !info.isChatModel {
+                    Text("not for chat")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.secondaryText)
+                } else if info.declaresTools == false {
+                    Text("no tools")
+                        .font(.system(size: 9))
+                        .foregroundStyle(CacheVerdict.optional.color)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(isSelected ? Color.accentMint.opacity(0.1) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func loadModels() {
-        isWorking = true
-        feedback = nil
         let baseURL = settings.normalizedBaseURL
+        guard URL(string: baseURL)?.host != nil else {
+            modelListError = "Enter the API address first."
+            return
+        }
+        isLoadingModels = true
+        modelListError = nil
         let key = settings.apiKey
         Task {
             do {
                 let models = try await OpenAICompatibleBackend.availableModels(baseURL: baseURL, apiKey: key)
+                guard baseURL == settings.normalizedBaseURL else { return }
                 loadedModels = models
-                feedback = models.isEmpty ? (false, "The provider returned no models; type the name.") : (true, "\(models.count) models loaded. Pick one from the menu.")
+                modelListSource = baseURL
+                if models.isEmpty { modelListError = "The provider returned an empty list; type the model name." }
             } catch {
-                feedback = (false, error.localizedDescription)
+                guard baseURL == settings.normalizedBaseURL else { return }
+                loadedModels = []
+                modelListSource = baseURL
+                modelListError = error.localizedDescription
             }
-            isWorking = false
+            isLoadingModels = false
         }
     }
 
@@ -439,7 +573,11 @@ struct AssistantSettingsSheet: View {
                 let reply = try await OpenAICompatibleBackend.testConnection(baseURL: baseURL, model: model, apiKey: key)
                 feedback = (true, "Works. \(model) answered: \(reply.prefix(60))")
             } catch {
-                feedback = (false, error.localizedDescription)
+                if !loadedModels.isEmpty, !loadedModels.contains(where: { $0.id == model }) {
+                    feedback = (false, "\(URL(string: baseURL)?.host ?? "The provider") has no model “\(model)”. Pick one from the list.")
+                } else {
+                    feedback = (false, error.localizedDescription)
+                }
             }
             isWorking = false
         }

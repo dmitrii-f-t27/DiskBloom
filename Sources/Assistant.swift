@@ -267,15 +267,15 @@ struct AssistantEndpointPreset: Identifiable, Sendable {
             id: "nvidia",
             title: "NVIDIA NIM",
             baseURL: "https://integrate.api.nvidia.com/v1",
-            suggestedModels: ["meta/llama-3.3-70b-instruct", "qwen/qwen3-235b-a22b", "nvidia/llama-3.3-nemotron-super-49b-v1"],
-            note: "Key from build.nvidia.com. Pick a model that supports tool calling."
+            suggestedModels: ["moonshotai/kimi-k3", "z-ai/glm-5.3", "deepseek-ai/deepseek-v4.1-flash", "nvidia/nemotron-3-super-120b-a12b", "openai/gpt-oss-20b"],
+            note: "Key from build.nvidia.com. The full model list loads by itself; ★ marks models that handle the assistant's tools."
         ),
         AssistantEndpointPreset(
             id: "zai",
             title: "Z.ai",
             baseURL: "https://api.z.ai/api/paas/v4",
-            suggestedModels: ["glm-4.6", "glm-4.5-air"],
-            note: "Key from z.ai. GLM models support tool calling."
+            suggestedModels: ["glm-5.3", "glm-4.6"],
+            note: "Key from z.ai. Save the key, and the list of your models loads by itself."
         ),
         AssistantEndpointPreset(
             id: "zai-coding",
