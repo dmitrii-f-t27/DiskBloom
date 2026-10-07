@@ -291,6 +291,27 @@ pub fn tx_contains(hay: [4096]u8, hlen: u32, needle: [4096]u8, nlen: u32) -> boo
     return false;
 }
 
+; Byte order of two texts (Swift passes them in canonical composition, so this is Swift's < on strings):
+; TX_BEFORE, TX_EQUAL or TX_AFTER.
+pub const TX_BEFORE : u32 = 0;
+pub const TX_EQUAL : u32 = 1;
+pub const TX_AFTER : u32 = 2;
+
+pub fn tx_compare(a: [4096]u8, alen: u32, b: [4096]u8, blen: u32) -> u32 {
+    var n: u32 = alen;
+    if (blen < n) { n = blen; }
+    if (n > TX_MAX) { n = TX_MAX; }
+    var i: u32 = 0;
+    while (i < n) {
+        if (a[i] < b[i]) { return TX_BEFORE; }
+        if (a[i] > b[i]) { return TX_AFTER; }
+        i = i + 1;
+    }
+    if (alen < blen) { return TX_BEFORE; }
+    if (alen > blen) { return TX_AFTER; }
+    return TX_EQUAL;
+}
+
 ; True when A is B or inside it.
 pub fn tx_within(a: [4096]u8, alen: u32, b: [4096]u8, blen: u32) -> bool {
     var r: u32 = tx_path_relation(a, alen, b, blen);
@@ -568,6 +589,10 @@ test tx_paths {
     assert tx_contains(b, 2, a, 4) == false;
     assert tx_contains(a, 4, b, 0) == true;
     assert tx_contains(a, 4097, b, 1) == false;
+    assert tx_compare(b, 2, a, 4) == TX_BEFORE;
+    assert tx_compare(a, 4, b, 2) == TX_AFTER;
+    assert tx_compare(a, 4, a, 4) == TX_EQUAL;
+    assert tx_compare(a, 1, b, 2) == TX_BEFORE;
 }
 
 test tx_home_places {

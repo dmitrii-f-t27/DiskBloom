@@ -51,7 +51,7 @@ enum JSONValue: Sendable, Equatable, Codable {
     var stringValue: String? {
         switch self {
         case .string(let value): value
-        case .number(let value): value.rounded() == value ? String(Int(value)) : String(value)
+        case .number(let value): as_is_whole(value) ? String(Int(value)) : String(value)
         case .bool(let value): String(value)
         default: nil
         }
@@ -423,7 +423,7 @@ final class AssistantSettings: ObservableObject {
 
     func apply(_ preset: AssistantEndpointPreset) {
         presetID = preset.id
-        if !preset.baseURL.isEmpty { baseURL = preset.baseURL }
+        if as_preset_sets_address(preset.baseURL.isEmpty) { baseURL = preset.baseURL }
         if let first = preset.suggestedModels.first,
            as_replace_model(true, model.isEmpty, preset.suggestedModels.contains(model)) {
             model = first
@@ -515,12 +515,14 @@ final class AssistantToolbox {
         var lines = [
             "Disk: \(ByteFormat.string(stats.available)) free of \(ByteFormat.string(stats.total)) (\(Int(stats.usedFraction * 100))% used)."
         ]
-        if app.isScanning {
+        switch Int32(as_overview_map(app.isScanning, app.focusNode != nil)) {
+        case AS_MAP_SCANNING:
             lines.append("Disk Map is scanning \(app.currentURL.path) (\(app.progress.itemCount) items so far).")
-        } else if let focus = app.focusNode {
+        case AS_MAP_SHOWS:
+            let focus = app.focusNode!
             lines.append("Disk Map shows \(focus.url?.path ?? focus.name): \(ByteFormat.string(focus.size)). Biggest items:")
             lines += focus.children.prefix(6).map(Self.describe)
-        } else {
+        default:
             lines.append("Disk Map has not scanned anything yet.")
         }
         if let analysis = caches.analysis {
@@ -548,18 +550,21 @@ final class AssistantToolbox {
         let count = Int(md_tool_limit(Int64(limit ?? 0), limit != nil, 8, 15))
         app.selectWorkspaceSection(.diskMap)
 
-        if let path, !path.trimmingCharacters(in: .whitespaces).isEmpty {
-            guard let url = Self.resolve(path) else { return "No such file or folder: \(path)" }
-            if !app.focus(onPath: url.path) {
-                var isDirectory: ObjCBool = false
-                guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-                    return "\(url.path) is a file, not a folder."
-                }
-                app.open(source: url)
-            }
+        let hasPath = path.map { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? false
+        let url = hasPath ? Self.resolve(path!) : nil
+        // Focusing is itself the check whether the map holds the folder, so it runs only once the path exists.
+        let focused = url.map { app.focus(onPath: $0.path) } ?? false
+        var isDirectory: ObjCBool = false
+        let isFolder = url.map { FileManager.default.fileExists(atPath: $0.path, isDirectory: &isDirectory) && isDirectory.boolValue } ?? false
+        switch Int32(as_largest_plan(hasPath, url != nil, focused, isFolder, app.focusNode != nil, app.isScanning)) {
+        case AS_LARGEST_NO_SUCH_PATH: return "No such file or folder: \(path ?? "")"
+        case AS_LARGEST_NOT_A_FOLDER: return "\(url!.path) is a file, not a folder."
+        case AS_LARGEST_SCAN_FOLDER: app.open(source: url!)
+        case AS_LARGEST_START_CURRENT: app.open(source: app.currentURL)
+        default: break
+        }
+        if let url {
             report(AssistantMessage(role: .action, text: "Showing \(Self.displayPath(url)) in Disk Map", target: .folder(url)))
-        } else if app.focusNode == nil, !app.isScanning {
-            app.open(source: app.currentURL)
         }
 
         if let pending = await waitForDiskMap() { return pending }
@@ -577,17 +582,19 @@ final class AssistantToolbox {
         app.selectWorkspaceSection(.cacheExplorer)
         let verdict = Self.verdict(named: filter)
         caches.verdictFilter = verdict
-        if caches.analysis == nil, !caches.isScanning {
+        if as_should_start_measuring(caches.analysis != nil, caches.isScanning) {
             caches.startAnalysis()
         }
         report(AssistantMessage(role: .action, text: "Opened Caches" + (verdict.map { " · \($0.title.lowercased())" } ?? ""), target: .section(.cacheExplorer)))
         await caches.waitForAnalysis()
-        if caches.isScanning {
+        switch Int32(as_after_wait(caches.isScanning, caches.analysis != nil)) {
+        case AS_WAIT_STILL_RUNNING:
             return "Still measuring caches (\(caches.progress.itemCount) items so far). Ask the user to wait a moment, then try again."
-        }
-        guard let analysis = caches.analysis else {
+        case AS_WAIT_NOTHING:
             return "Caches were not measured. The user may need to grant access to the home folder."
+        default: break
         }
+        guard let analysis = caches.analysis else { return "Not ready." }
         cacheRefs = [:]
         for (index, item) in analysis.items.enumerated() { cacheRefs["c\(index + 1)"] = item.id }
         let refByID = Dictionary(uniqueKeysWithValues: cacheRefs.map { ($0.value, $0.key) })
@@ -606,7 +613,9 @@ final class AssistantToolbox {
     private func selectCaches(refs: [String], allSafe: Bool) -> String {
         guard let app, let caches else { return "Not ready." }
         guard !isBusy else { return Self.busyMessage }
-        guard caches.analysis != nil else { return "Caches are not measured yet. Call list_caches first." }
+        guard Int32(as_select_plan(caches.analysis != nil, 1, 0)) != AS_SELECT_NOT_MEASURED else {
+            return "Caches are not measured yet. Call list_caches first."
+        }
         app.selectWorkspaceSection(.cacheExplorer)
         var chosen: [CacheItem] = []
         if allSafe {
@@ -618,14 +627,18 @@ final class AssistantToolbox {
         chosen += caches.select(ids: ids)
         caches.verdictFilter = nil
         caches.highlightedIDs = Set(chosen.map(\.id))
-        guard !chosen.isEmpty else {
-            let reasons = refused.map { "\($0.title): \($0.verdict.title.lowercased())" }.joined(separator: "; ")
-            return reasons.isEmpty ? "Nothing was selected; the refs are unknown. Call list_caches again." : "Not selectable: \(reasons)."
+        let plan = Int32(as_select_plan(true, Int64(chosen.count), Int64(refused.count)))
+        switch plan {
+        case AS_SELECT_UNKNOWN_REFS:
+            return "Nothing was selected; the refs are unknown. Call list_caches again."
+        case AS_SELECT_ONLY_REFUSED:
+            return "Not selectable: " + refused.map { "\($0.title): \($0.verdict.title.lowercased())" }.joined(separator: "; ") + "."
+        default: break
         }
         let total = chosen.reduce(Int64(0)) { $0 + $1.size }
         report(AssistantMessage(role: .action, text: "Selected \(chosen.count) \(Plural.objects(chosen.count)) · \(ByteFormat.compact(total))", target: .section(.cacheExplorer)))
         var result = "Selected \(chosen.count) caches, \(ByteFormat.string(total)). Nothing is deleted yet: the user presses \"Review & Move to Trash\" at the bottom of Caches to see exact paths and confirm."
-        if !refused.isEmpty {
+        if plan == AS_SELECT_DONE_WITH_SKIPPED {
             result += " Skipped because they are in use or kept: " + refused.map(\.title).joined(separator: ", ") + "."
         }
         return result
@@ -634,14 +647,20 @@ final class AssistantToolbox {
     private func queueForCleanup(_ path: String) -> String {
         guard let app else { return "Not ready." }
         guard !isBusy else { return Self.busyMessage }
-        guard let url = Self.resolve(path) else { return "No such file or folder: \(path)" }
-        guard let node = app.node(atPath: url.path) else {
-            return "\(url.path) is not in the current Disk Map. Call largest_items for its parent folder first."
+        let url = Self.resolve(path)
+        let node = url.flatMap { app.node(atPath: $0.path) }
+        let reason = node.flatMap { app.rejectionReason(for: $0) }
+        let already = node.map { app.isCollected($0) } ?? false
+        switch Int32(as_queue_plan(url != nil, node != nil, already, reason != nil)) {
+        case AS_QUEUE_NO_SUCH_PATH: return "No such file or folder: \(path)"
+        case AS_QUEUE_NOT_IN_MAP: return "\(url!.path) is not in the current Disk Map. Call largest_items for its parent folder first."
+        default: break
         }
+        guard let url, let node else { return "Not ready." }
         app.selectWorkspaceSection(.diskMap)
         _ = app.focus(onPath: url.path)
-        if app.isCollected(node) { return "\(node.name) is already in the cleanup queue." }
-        if let reason = app.rejectionReason(for: node) { return "Cannot queue \(node.name): \(reason)" }
+        if already { return "\(node.name) is already in the cleanup queue." }
+        if let reason { return "Cannot queue \(node.name): \(reason)" }
         app.toggleCollection(node)
         guard app.isCollected(node) else { return "\(node.name) could not be queued." }
         report(AssistantMessage(role: .action, text: "Queued \(node.name) · \(ByteFormat.compact(node.size))", target: .folder(url.deletingLastPathComponent())))
@@ -652,7 +671,7 @@ final class AssistantToolbox {
         guard let app, let uninstaller else { return "Not ready." }
         guard !isBusy else { return Self.busyMessage }
         let query = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return "Give an app name." }
+        guard Int32(as_find_plan(query.isEmpty, 0)) != AS_FIND_ASK_NAME else { return "Give an app name." }
         app.selectWorkspaceSection(.appUninstaller)
         uninstaller.loadApplicationsIfNeeded()
         let deadline = ContinuousClock.now + .seconds(30)
@@ -662,8 +681,9 @@ final class AssistantToolbox {
         uninstaller.searchText = query
         let matches = uninstaller.filteredApplications
         report(AssistantMessage(role: .action, text: "App Uninstaller · “\(query)”", target: .section(.appUninstaller)))
-        guard !matches.isEmpty else { return "No installed app matches “\(query)”." }
-        if matches.count == 1, let match = matches.first {
+        let plan = Int32(as_find_plan(false, Int64(matches.count)))
+        if plan == AS_FIND_NONE { return "No installed app matches “\(query)”." }
+        if plan == AS_FIND_OPEN_ONE, let match = matches.first {
             uninstaller.inspect(match)
             return "Opened \(match.name) (\(match.url.path)) in App Uninstaller. It lists the app and its related data; the user chooses what to remove and confirms."
         }
@@ -821,7 +841,7 @@ final class AssistantModel: ObservableObject {
 
     func send(_ preset: String? = nil) {
         let text = (preset ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isThinking else { return }
+        guard as_can_send(text.isEmpty, isThinking) else { return }
         draft = ""
         messages.append(AssistantMessage(role: .user, text: text))
         let status = providerStatus

@@ -169,6 +169,23 @@ pub fn lo_move_issue(item_blocked: bool, id_still_canonical: bool, path_unchange
     return LO_MOVE_OK;
 }
 
+; --- Group order ------------------------------------------------------------------------------------
+; Probable leftovers first, then larger groups; ties fall back to the identifiers (Swift compares them
+; with the system's localised order).
+pub const LO_ORDER_FIRST : u32 = 0;
+pub const LO_ORDER_SECOND : u32 = 1;
+pub const LO_ORDER_TIE : u32 = 2;
+
+pub fn lo_group_order(confidence_a: u32, confidence_b: u32, size_a: i64, size_b: i64) -> u32 {
+    if (confidence_a != confidence_b) {
+        if (confidence_a == LO_PROBABLE) { return LO_ORDER_FIRST; }
+        return LO_ORDER_SECOND;
+    }
+    if (size_a > size_b) { return LO_ORDER_FIRST; }
+    if (size_a < size_b) { return LO_ORDER_SECOND; }
+    return LO_ORDER_TIE;
+}
+
 ; --- Laws ----------------------------------------------------------------------------------------------------------------
 invariant lo_ok_codes_are_zero { assert LO_ENTRY_OK == 0 and LO_TREE_OK == 0 and LO_MOVE_OK == 0 and LO_CLAIM_NONE == 0; }
 
@@ -241,4 +258,12 @@ test lo_move_checks_in_order {
     assert lo_move_issue(false, true, true, true, false, true, true, true, true, false) == LO_MOVE_READ_ONLY;
     assert lo_move_issue(false, true, true, true, false, true, true, false, true, false) == LO_MOVE_CLOUD;
     assert lo_move_issue(false, true, true, true, false, true, true, false, false, false) == LO_MOVE_CONTENTS;
+}
+
+test lo_group_order_probable_then_size {
+    assert lo_group_order(LO_PROBABLE, LO_POSSIBLE, 1, 9) == LO_ORDER_FIRST;
+    assert lo_group_order(LO_POSSIBLE, LO_PROBABLE, 9, 1) == LO_ORDER_SECOND;
+    assert lo_group_order(LO_POSSIBLE, LO_POSSIBLE, 9, 1) == LO_ORDER_FIRST;
+    assert lo_group_order(LO_POSSIBLE, LO_POSSIBLE, 1, 9) == LO_ORDER_SECOND;
+    assert lo_group_order(LO_PROBABLE, LO_PROBABLE, 4, 4) == LO_ORDER_TIE;
 }

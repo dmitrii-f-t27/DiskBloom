@@ -56,6 +56,9 @@ static const uint8_t TX_W_SAVED_STATE[11] = { 46, 115, 97, 118, 101, 100, 83, 11
 static const uint8_t TX_EXT_BYTES[46] = { 97, 112, 112, 97, 112, 112, 101, 120, 120, 112, 99, 102, 114, 97, 109, 101, 119, 111, 114, 107, 98, 117, 110, 100, 108, 101, 115, 121, 115, 116, 101, 109, 101, 120, 116, 101, 110, 115, 105, 111, 110, 112, 108, 105, 115, 116 };
 static const uint32_t TX_EXT_OFFSETS[7] = { 0, 3, 8, 11, 20, 26, 41 };
 static const uint32_t TX_EXT_LENGTHS[7] = { 3, 5, 3, 9, 6, 15, 5 };
+#define TX_BEFORE 0
+#define TX_EQUAL 1
+#define TX_AFTER 2
 /* -------------------------------------------------------
    Function prototypes
    ------------------------------------------------------- */
@@ -73,6 +76,7 @@ bool tx_same(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint
 uint32_t tx_path_relation(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
 bool tx_strict_descendant(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
 bool tx_contains(uint8_t hay[static 4096], uint32_t hlen, uint8_t needle[static 4096], uint32_t nlen);
+uint32_t tx_compare(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
 bool tx_within(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
 bool tx_matches_dir(uint8_t text[static 4096], uint32_t len, uint32_t word_kind);
 uint32_t tx_library_area(uint8_t relative[static 4096], uint32_t len);

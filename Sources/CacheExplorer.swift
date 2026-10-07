@@ -506,13 +506,14 @@ enum CacheAnalyzer {
 
         for (root, kind) in locations {
             try checkCancellation()
-            guard !AppRemovalPathSafety.pathHasSymlinkedComponent(root),
-                  let entries = try? FileManager.default.contentsOfDirectory(
-                      at: root,
-                      includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey],
-                      options: [.skipsHiddenFiles]
-                  ) else { continue }
-            for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            let listing = try? FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            )
+            guard md_location_usable(AppRemovalPathSafety.pathHasSymlinkedComponent(root), listing != nil),
+                  let entries = listing else { continue }
+            for entry in entries.sorted(by: { T27Text.less($0.lastPathComponent, $1.lastPathComponent) }) {
                 try checkCancellation()
                 examined += 1
                 guard let values = try? entry.resourceValues(forKeys: [
@@ -520,7 +521,7 @@ enum CacheAnalyzer {
                 ]), values.isSymbolicLink != true else { continue }
                 var scanner = DiskScanner(maxDepth: 8, maxChildrenPerFolder: 96)
                 let node = try scanner.scan(root: entry, counter: progress).root
-                guard node.size > 0 else { continue }
+                guard md_worth_listing(node.size) else { continue }
                 let result = CacheClassifier.classify(
                     name: entry.lastPathComponent,
                     isDirectory: values.isDirectory == true,
@@ -557,7 +558,7 @@ enum CacheAnalyzer {
             examined += 1
             var scanner = DiskScanner(maxDepth: 3, maxChildrenPerFolder: 24)
             let node = try scanner.scan(root: url, counter: progress).root
-            guard node.size > 0 else { continue }
+            guard md_worth_listing(node.size) else { continue }
             items.append(
                 CacheItem(
                     id: url.path,
@@ -577,9 +578,11 @@ enum CacheAnalyzer {
         }
 
         items.sort {
-            if $0.verdict.rank != $1.verdict.rank { return $0.verdict.rank < $1.verdict.rank }
-            if $0.size != $1.size { return $0.size > $1.size }
-            return $0.id < $1.id
+            switch Int32(cv_list_order(UInt32($0.verdict.rank), UInt32($1.verdict.rank), $0.size, $1.size)) {
+            case CV_ORDER_FIRST: true
+            case CV_ORDER_SECOND: false
+            default: T27Text.less($0.id, $1.id)
+            }
         }
         return CacheAnalysis(items: items, scannedAt: Date(), examinedCount: examined)
     }
@@ -644,7 +647,7 @@ enum CacheCleanupCoordinator {
     ) -> CacheCleanupOutcome {
         var moved: [String] = []
         var failures: [String] = []
-        for item in items.sorted(by: { $0.url.path < $1.url.path }) {
+        for item in items.sorted(by: { T27Text.less($0.url.path, $1.url.path) }) {
             let url = item.url
             let coordinator = NSFileCoordinator(filePresenter: nil)
             var coordinationError: NSError?
@@ -843,7 +846,7 @@ final class CacheExplorerModel: ObservableObject {
             }.value
             guard !Task.isCancelled else { return }
             isReviewing = false
-            if failures.isEmpty {
+            if md_review_passes(Int64(failures.count)) {
                 showingReview = true
             } else {
                 notice = AppNotice(
@@ -877,7 +880,7 @@ final class CacheExplorerModel: ObservableObject {
                 )
             }
             let movedSize = chosen.filter { movedIDs.contains($0.id) }.reduce(0) { $0 + $1.size }
-            if outcome.failures.isEmpty {
+            if md_review_passes(Int64(outcome.failures.count)) {
                 notice = AppNotice(
                     title: "Moved to Trash",
                     message: "\(outcome.movedPaths.count) \(Plural.objects(outcome.movedPaths.count)), \(ByteFormat.string(movedSize)). Space is freed when you empty the Trash; until then everything can be put back from Finder."

@@ -61,6 +61,9 @@
 #define LO_MOVE_READ_ONLY 8
 #define LO_MOVE_CLOUD 9
 #define LO_MOVE_CONTENTS 10
+#define LO_ORDER_FIRST 0
+#define LO_ORDER_SECOND 1
+#define LO_ORDER_TIE 2
 
 /* -------------------------------------------------------
    Function prototypes
@@ -74,6 +77,7 @@ uint32_t lo_claim(bool canonical, bool exact, bool related, bool namespace_sibli
 uint32_t lo_entry_issue(bool stat_ok, bool owned_by_user, bool immutable, bool same_device, bool symlink, bool executable_bundle, bool executable_file);
 uint32_t lo_tree_issue(bool has_path, bool snapshot_complete, bool unreadable, bool inside_library, bool contents_ok);
 uint32_t lo_move_issue(bool item_blocked, bool id_still_canonical, bool path_unchanged, bool path_matches_rule, bool symlinked_component, bool regular_folder, bool volume_local, bool volume_read_only, bool ubiquitous, bool tree_ok);
+uint32_t lo_group_order(uint32_t confidence_a, uint32_t confidence_b, int64_t size_a, int64_t size_b);
 
 /* -------------------------------------------------------
    Function implementations
@@ -216,6 +220,22 @@ uint32_t lo_move_issue(bool item_blocked, bool id_still_canonical, bool path_unc
     return LO_MOVE_OK;
 }
 
+uint32_t lo_group_order(uint32_t confidence_a, uint32_t confidence_b, int64_t size_a, int64_t size_b) {
+    if ((confidence_a != confidence_b)) {
+        if ((confidence_a == LO_PROBABLE)) {
+            return LO_ORDER_FIRST;
+        }
+        return LO_ORDER_SECOND;
+    }
+    if ((size_a > size_b)) {
+        return LO_ORDER_FIRST;
+    }
+    if ((size_a < size_b)) {
+        return LO_ORDER_SECOND;
+    }
+    return LO_ORDER_TIE;
+}
+
 /* -------------------------------------------------------
    Invariants (compile-time assertions)
    ------------------------------------------------------- */
@@ -299,6 +319,14 @@ void test_lo_move_checks_in_order(void) {
     assert((lo_move_issue(false, true, true, true, false, true, true, false, false, false) == LO_MOVE_CONTENTS));
 }
 
+void test_lo_group_order_probable_then_size(void) {
+    assert((lo_group_order(LO_PROBABLE, LO_POSSIBLE, 1, 9) == LO_ORDER_FIRST));
+    assert((lo_group_order(LO_POSSIBLE, LO_PROBABLE, 9, 1) == LO_ORDER_SECOND));
+    assert((lo_group_order(LO_POSSIBLE, LO_POSSIBLE, 9, 1) == LO_ORDER_FIRST));
+    assert((lo_group_order(LO_POSSIBLE, LO_POSSIBLE, 1, 9) == LO_ORDER_SECOND));
+    assert((lo_group_order(LO_PROBABLE, LO_PROBABLE, 4, 4) == LO_ORDER_TIE));
+}
+
 
 /* -------------------------------------------------------
    Test runner (compile with -DT27_TEST_MAIN to execute)
@@ -312,7 +340,8 @@ int main(void) {
     test_lo_any_owner_claims_in_order();
     test_lo_one_unsafe_file_blocks_the_folder();
     test_lo_move_checks_in_order();
-    printf("All %d tests passed.\n", 5);
+    test_lo_group_order_probable_then_size();
+    printf("All %d tests passed.\n", 6);
     return 0;
 }
 #endif /* T27_TEST_MAIN */

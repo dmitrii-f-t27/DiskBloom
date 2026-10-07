@@ -87,6 +87,9 @@
 #define UN_CONT_SAME_NAME_INSTALLED 3
 #define UN_CONT_REAPPEARED 4
 #define UN_CONT_RUNNING 5
+#define UN_ORDER_FIRST 0
+#define UN_ORDER_SECOND 1
+#define UN_ORDER_TIE 2
 
 /* -------------------------------------------------------
    Function prototypes
@@ -104,6 +107,8 @@ bool un_selected_by_default(uint32_t rule, bool duplicate, bool signature_backed
 uint32_t un_application_issue(bool app_extension, bool symlinked, bool system_root, bool apple_id, bool is_self, bool protected_user, bool in_trash, bool type_confirmed, bool volume_local, bool volume_read_only, bool ubiquitous);
 uint32_t un_item_issue(bool application_blocked, bool item_blocked, bool key_safe, bool path_unchanged, bool rule_matches, bool symlinked, bool volume_readable, bool volume_local, bool volume_read_only, bool ubiquitous, bool is_application, bool bundle_id_unchanged, bool inside_library);
 uint32_t un_continuation(bool has_identifier, bool same_id_installed, bool registered_copy, bool same_name_installed, bool original_exists, bool running);
+uint32_t un_plan_order(bool required_a, bool required_b, bool default_a, bool default_b);
+uint32_t un_queue_order(bool required_a, bool required_b);
 
 /* -------------------------------------------------------
    Function implementations
@@ -315,6 +320,32 @@ uint32_t un_continuation(bool has_identifier, bool same_id_installed, bool regis
     return UN_CONT_OK;
 }
 
+uint32_t un_plan_order(bool required_a, bool required_b, bool default_a, bool default_b) {
+    if ((required_a != required_b)) {
+        if (required_a) {
+            return UN_ORDER_FIRST;
+        }
+        return UN_ORDER_SECOND;
+    }
+    if ((default_a != default_b)) {
+        if (default_a) {
+            return UN_ORDER_FIRST;
+        }
+        return UN_ORDER_SECOND;
+    }
+    return UN_ORDER_TIE;
+}
+
+uint32_t un_queue_order(bool required_a, bool required_b) {
+    if ((required_a != required_b)) {
+        if (required_a) {
+            return UN_ORDER_FIRST;
+        }
+        return UN_ORDER_SECOND;
+    }
+    return UN_ORDER_TIE;
+}
+
 /* -------------------------------------------------------
    Invariants (compile-time assertions)
    ------------------------------------------------------- */
@@ -418,6 +449,17 @@ void test_un_an_old_plan_stops_when_any_copy_returns(void) {
     assert((un_continuation(true, false, false, false, false, true) == UN_CONT_RUNNING));
 }
 
+void test_un_orders(void) {
+    assert((un_plan_order(true, false, false, true) == UN_ORDER_FIRST));
+    assert((un_plan_order(false, true, true, false) == UN_ORDER_SECOND));
+    assert((un_plan_order(false, false, true, false) == UN_ORDER_FIRST));
+    assert((un_plan_order(false, false, false, true) == UN_ORDER_SECOND));
+    assert((un_plan_order(true, true, true, true) == UN_ORDER_TIE));
+    assert((un_queue_order(true, false) == UN_ORDER_FIRST));
+    assert((un_queue_order(false, true) == UN_ORDER_SECOND));
+    assert((un_queue_order(false, false) == UN_ORDER_TIE));
+}
+
 
 /* -------------------------------------------------------
    Test runner (compile with -DT27_TEST_MAIN to execute)
@@ -432,7 +474,8 @@ int main(void) {
     test_un_application_checks_in_order();
     test_un_item_checks_in_order();
     test_un_an_old_plan_stops_when_any_copy_returns();
-    printf("All %d tests passed.\n", 6);
+    test_un_orders();
+    printf("All %d tests passed.\n", 7);
     return 0;
 }
 #endif /* T27_TEST_MAIN */

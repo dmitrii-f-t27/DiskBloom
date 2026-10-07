@@ -243,6 +243,33 @@ pub fn un_continuation(has_identifier: bool, same_id_installed: bool, registered
     return UN_CONT_OK;
 }
 
+; --- Plan order ------------------------------------------------------------------------------------
+; The bundle first, then items selected by default; ties fall back to the paths.
+pub const UN_ORDER_FIRST : u32 = 0;
+pub const UN_ORDER_SECOND : u32 = 1;
+pub const UN_ORDER_TIE : u32 = 2;
+
+pub fn un_plan_order(required_a: bool, required_b: bool, default_a: bool, default_b: bool) -> u32 {
+    if (required_a != required_b) {
+        if (required_a) { return UN_ORDER_FIRST; }
+        return UN_ORDER_SECOND;
+    }
+    if (default_a != default_b) {
+        if (default_a) { return UN_ORDER_FIRST; }
+        return UN_ORDER_SECOND;
+    }
+    return UN_ORDER_TIE;
+}
+
+; The move queue: the bundle first; ties fall back to the paths.
+pub fn un_queue_order(required_a: bool, required_b: bool) -> u32 {
+    if (required_a != required_b) {
+        if (required_a) { return UN_ORDER_FIRST; }
+        return UN_ORDER_SECOND;
+    }
+    return UN_ORDER_TIE;
+}
+
 ; --- Laws ------------------------------------------------------------------------------------------------
 invariant un_ok_codes_are_zero { assert UN_APP_OK == 0 and UN_ITEM_OK == 0 and UN_CONT_OK == 0 and UN_BLOCK_NONE == 0; }
 invariant un_rules_are_contiguous { assert UN_RULE_GROUP_APPLICATION_SCRIPTS + 1 == UN_RULE_COUNT; }
@@ -333,4 +360,15 @@ test un_an_old_plan_stops_when_any_copy_returns {
     assert un_continuation(false, true, true, true, true, true) == UN_CONT_SAME_NAME_INSTALLED;
     assert un_continuation(false, true, true, false, true, true) == UN_CONT_REAPPEARED;
     assert un_continuation(true, false, false, false, false, true) == UN_CONT_RUNNING;
+}
+
+test un_orders {
+    assert un_plan_order(true, false, false, true) == UN_ORDER_FIRST;
+    assert un_plan_order(false, true, true, false) == UN_ORDER_SECOND;
+    assert un_plan_order(false, false, true, false) == UN_ORDER_FIRST;
+    assert un_plan_order(false, false, false, true) == UN_ORDER_SECOND;
+    assert un_plan_order(true, true, true, true) == UN_ORDER_TIE;
+    assert un_queue_order(true, false) == UN_ORDER_FIRST;
+    assert un_queue_order(false, true) == UN_ORDER_SECOND;
+    assert un_queue_order(false, false) == UN_ORDER_TIE;
 }

@@ -203,11 +203,11 @@ struct OrphanOwnerIndex: Sendable {
     func claimReason(for identifier: String) -> String? {
         let canonical = OrphanBundleIdentifier.canonical(identifier)
         let related = canonical.flatMap { id in
-            claims.keys.sorted().first { T27Text.identifier($0, extends: id) || T27Text.identifier(id, extends: $0) }
+            claims.keys.sorted(by: T27Text.less).first { T27Text.identifier($0, extends: id) || T27Text.identifier(id, extends: $0) }
         }
         let namespace = canonical.flatMap(OrphanBundleIdentifier.vendorNamespace)
         let sibling = namespace.flatMap { space in
-            claims.keys.sorted().first { OrphanBundleIdentifier.vendorNamespace($0).map { T27Text.same($0, space) } ?? false }
+            claims.keys.sorted(by: T27Text.less).first { OrphanBundleIdentifier.vendorNamespace($0).map { T27Text.same($0, space) } ?? false }
         }
         let claim = lo_claim(
             canonical != nil,
@@ -393,8 +393,7 @@ enum OrphanedAppDataAnalyzer {
             let root = normalizedHome
                 .appendingPathComponent("Library", isDirectory: true)
                 .appendingPathComponent(rule.relativeRoot, isDirectory: true)
-            guard !AppRemovalPathSafety.pathHasSymlinkedComponent(root),
-                  let entries = try? FileManager.default.contentsOfDirectory(
+            let listing = try? FileManager.default.contentsOfDirectory(
                       at: root,
                       includingPropertiesForKeys: [
                           .isDirectoryKey,
@@ -404,7 +403,9 @@ enum OrphanedAppDataAnalyzer {
                           .isUbiquitousItemKey
                       ],
                       options: [.skipsHiddenFiles]
-                  ) else { continue }
+                  )
+            guard md_location_usable(AppRemovalPathSafety.pathHasSymlinkedComponent(root), listing != nil),
+                  let entries = listing else { continue }
             for entry in entries {
                 try checkCancellation()
                 progress.record(entry)
@@ -436,7 +437,7 @@ enum OrphanedAppDataAnalyzer {
         var protectedIdentifiers: Set<String> = []
         var items: [OrphanDataItem] = []
 
-        for spec in specs.sorted(by: { $0.url.path < $1.url.path }) {
+        for spec in specs.sorted(by: { T27Text.less($0.url.path, $1.url.path) }) {
             try checkCancellation()
             if ownerIndex.claimReason(for: spec.canonicalIdentifier) != nil {
                 protectedIdentifiers.insert(spec.canonicalIdentifier)
@@ -462,7 +463,7 @@ enum OrphanedAppDataAnalyzer {
 
         let grouped = Dictionary(grouping: items, by: \.canonicalIdentifier)
         let groups = grouped.map { identifier, values in
-            let sorted = values.sorted { $0.url.path < $1.url.path }
+            let sorted = values.sorted { T27Text.less($0.url.path, $1.url.path) }
             return OrphanDataGroup(
                 id: identifier,
                 identifier: sorted.first?.identifier ?? identifier,
@@ -470,9 +471,13 @@ enum OrphanedAppDataAnalyzer {
                 confidence: OrphanDataConfidence(distinctRules: Set(sorted.map(\.rule)).count)
             )
         }.sorted {
-            if $0.confidence != $1.confidence { return $0.confidence == .probable }
-            if $0.totalSize != $1.totalSize { return $0.totalSize > $1.totalSize }
-            return $0.identifier.localizedCaseInsensitiveCompare($1.identifier) == .orderedAscending
+            let probableA = UInt32($0.confidence == .probable ? LO_PROBABLE : LO_POSSIBLE)
+            let probableB = UInt32($1.confidence == .probable ? LO_PROBABLE : LO_POSSIBLE)
+            switch Int32(lo_group_order(probableA, probableB, $0.totalSize, $1.totalSize)) {
+            case LO_ORDER_FIRST: return true
+            case LO_ORDER_SECOND: return false
+            default: return $0.identifier.localizedCaseInsensitiveCompare($1.identifier) == .orderedAscending
+            }
         }
 
         return OrphanDataAnalysis(
@@ -582,7 +587,7 @@ enum OrphanDataPolicy {
     }
 
     static func overlappingSelectionReason(_ items: [OrphanDataItem]) -> String? {
-        let paths = items.map { $0.url.standardizedFileURL.path }.sorted()
+        let paths = items.map { $0.url.standardizedFileURL.path }.sorted(by: T27Text.less)
         for (index, path) in paths.enumerated() {
             for other in paths.dropFirst(index + 1) where T27Text.inside(other, path) {
                 return "Selected paths overlap: \(path) and \(other)"
@@ -656,7 +661,7 @@ enum OrphanCleanupCoordinator {
         ownerResolver: OwnerResolver,
         mover: TrashMover = systemTrashMover
     ) -> OrphanCleanupOutcome {
-        let ordered = items.sorted { $0.url.path < $1.url.path }
+        let ordered = items.sorted { T27Text.less($0.url.path, $1.url.path) }
         guard !ordered.isEmpty else {
             return OrphanCleanupOutcome(movedPaths: [], uncertainPaths: [], failure: "Nothing selected.", unattemptedPaths: [])
         }
@@ -907,7 +912,7 @@ final class OrphanedAppDataModel: ObservableObject {
             }.value
             guard reviewGeneration == generation, !Task.isCancelled else { return }
             isReviewing = false
-            if failures.isEmpty {
+            if md_review_passes(Int64(failures.count)) {
                 showingReview = true
             } else {
                 notice = AppNotice(
@@ -948,7 +953,7 @@ final class OrphanedAppDataModel: ObservableObject {
         guard let outcome = lastOutcome,
               md_can_recheck_uncertain(!outcome.uncertainPaths.isEmpty, isReviewing, isMovingToTrash) else { return }
         let uncertain = groups.flatMap(\.items).filter { outcome.uncertainPaths.contains($0.url.path) }
-        guard uncertain.count == outcome.uncertainPaths.count else {
+        guard md_disputed_all_known(Int64(uncertain.count), Int64(outcome.uncertainPaths.count)) else {
             notice = AppNotice(
                 title: "Automatic check impossible",
                 message: "One of the disputed paths has no original snapshot. Check the Trash manually."
@@ -965,7 +970,7 @@ final class OrphanedAppDataModel: ObservableObject {
             }.value
             guard reviewGeneration == generation, !Task.isCancelled else { return }
             isReviewing = false
-            if failures.isEmpty {
+            if md_review_passes(Int64(failures.count)) {
                 lastOutcome = nil
                 showingOutcomeReport = false
                 notice = AppNotice(

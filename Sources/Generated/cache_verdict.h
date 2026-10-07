@@ -94,6 +94,9 @@ static const uint32_t CV_WORD_LENGTHS[6] = { 7, 7, 8, 11, 15, 11 };
 #define CV_CHAR_OTHER 0
 #define CV_CHAR_LOWER_LETTER 1
 #define CV_CHAR_DASH 2
+#define CV_ORDER_FIRST 0
+#define CV_ORDER_SECOND 1
+#define CV_ORDER_TIE 2
 
 /* -------------------------------------------------------
    Function prototypes
@@ -117,6 +120,7 @@ uint32_t cv_verdict(uint32_t location, uint32_t kind, bool unreadable, bool appl
 uint32_t cv_category(uint32_t location, uint32_t kind, bool unreadable, bool apple, bool directory, bool bundle_id, bool owner_known, bool owner_running);
 bool cv_selectable(uint32_t verdict);
 uint32_t cv_move_block(uint32_t verdict, bool owner_running_now, bool developer, bool xcode_running_now, bool path_unchanged, bool direct_child, bool symlink_on_path);
+uint32_t cv_list_order(uint32_t verdict_a, uint32_t verdict_b, int64_t size_a, int64_t size_b);
 
 /* -------------------------------------------------------
    Function implementations
@@ -521,6 +525,22 @@ uint32_t cv_move_block(uint32_t verdict, bool owner_running_now, bool developer,
     return CV_MOVE_ALLOWED;
 }
 
+uint32_t cv_list_order(uint32_t verdict_a, uint32_t verdict_b, int64_t size_a, int64_t size_b) {
+    if ((verdict_a < verdict_b)) {
+        return CV_ORDER_FIRST;
+    }
+    if ((verdict_a > verdict_b)) {
+        return CV_ORDER_SECOND;
+    }
+    if ((size_a > size_b)) {
+        return CV_ORDER_FIRST;
+    }
+    if ((size_a < size_b)) {
+        return CV_ORDER_SECOND;
+    }
+    return CV_ORDER_TIE;
+}
+
 /* -------------------------------------------------------
    Invariants (compile-time assertions)
    ------------------------------------------------------- */
@@ -899,6 +919,14 @@ void test_cv_xcode_projects_and_updater_owners(void) {
     assert((out[6] == 32));
 }
 
+void test_cv_list_order_ranks_then_sizes(void) {
+    assert((cv_list_order(CV_SAFE, CV_KEEP, 1, 100) == CV_ORDER_FIRST));
+    assert((cv_list_order(CV_KEEP, CV_SAFE, 100, 1) == CV_ORDER_SECOND));
+    assert((cv_list_order(CV_SAFE, CV_SAFE, 5, 3) == CV_ORDER_FIRST));
+    assert((cv_list_order(CV_SAFE, CV_SAFE, 3, 5) == CV_ORDER_SECOND));
+    assert((cv_list_order(CV_SAFE, CV_SAFE, 3, 3) == CV_ORDER_TIE));
+}
+
 
 /* -------------------------------------------------------
    Test runner (compile with -DT27_TEST_MAIN to execute)
@@ -918,7 +946,8 @@ int main(void) {
     test_cv_only_safe_and_optional_can_be_selected();
     test_cv_names_match_their_tables();
     test_cv_xcode_projects_and_updater_owners();
-    printf("All %d tests passed.\n", 11);
+    test_cv_list_order_ranks_then_sizes();
+    printf("All %d tests passed.\n", 12);
     return 0;
 }
 #endif /* T27_TEST_MAIN */

@@ -83,6 +83,9 @@
 #define UN_CONT_SAME_NAME_INSTALLED 3
 #define UN_CONT_REAPPEARED 4
 #define UN_CONT_RUNNING 5
+#define UN_ORDER_FIRST 0
+#define UN_ORDER_SECOND 1
+#define UN_ORDER_TIE 2
 /* -------------------------------------------------------
    Function prototypes
    ------------------------------------------------------- */
@@ -98,5 +101,7 @@ bool un_selected_by_default(uint32_t rule, bool duplicate, bool signature_backed
 uint32_t un_application_issue(bool app_extension, bool symlinked, bool system_root, bool apple_id, bool is_self, bool protected_user, bool in_trash, bool type_confirmed, bool volume_local, bool volume_read_only, bool ubiquitous);
 uint32_t un_item_issue(bool application_blocked, bool item_blocked, bool key_safe, bool path_unchanged, bool rule_matches, bool symlinked, bool volume_readable, bool volume_local, bool volume_read_only, bool ubiquitous, bool is_application, bool bundle_id_unchanged, bool inside_library);
 uint32_t un_continuation(bool has_identifier, bool same_id_installed, bool registered_copy, bool same_name_installed, bool original_exists, bool running);
+uint32_t un_plan_order(bool required_a, bool required_b, bool default_a, bool default_b);
+uint32_t un_queue_order(bool required_a, bool required_b);
 /* Function bodies: see the full header. */
 #endif

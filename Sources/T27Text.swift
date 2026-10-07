@@ -44,6 +44,15 @@ enum T27Text {
         return String(decoding: out.prefix(Int(length)), as: UTF8.self)
     }
 
+    // MARK: Order
+
+    /// Swift's `<` on strings, decided by Specs/text_rules.t27 on canonically composed bytes.
+    static func less(_ a: String, _ b: String) -> Bool {
+        withBytes(a.precomposedStringWithCanonicalMapping) { ap, al in
+            withBytes(b.precomposedStringWithCanonicalMapping) { bp, bl in tx_compare(ap, al, bp, bl) == UInt32(TX_BEFORE) }
+        }
+    }
+
     // MARK: Paths
 
     static func relation(_ a: String, to b: String) -> UInt32 {
