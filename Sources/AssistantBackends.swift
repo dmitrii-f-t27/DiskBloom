@@ -7,6 +7,36 @@ typealias AssistantToolExecutor = @Sendable (_ name: String, _ argumentsJSON: St
 
 // MARK: - OpenAI-compatible API
 
+/// One entry of a provider's model list.
+struct AssistantModelInfo: Identifiable, Sendable, Hashable {
+    let id: String
+    /// `true`/`false` when the provider says whether the model takes tools; `nil` when it does not say.
+    let declaresTools: Bool?
+
+    /// Embedding, reranking, safety, vision-parsing and speech models cannot hold a chat.
+    var isChatModel: Bool {
+        let lower = id.lowercased()
+        let nonChat = [
+            "embed", "rerank", "reward", "guard", "safety", "content-safety", "topic-control", "nemoretriever",
+            "retriever", "parse", "clip", "vila", "neva", "deplot", "kosmos", "fuyu", "riva", "detector",
+            "calibration", "whisper", "tts", "diffusion", "cosmos", "paligemma", "starcoder", "codegemma"
+        ]
+        return !nonChat.contains { lower.contains($0) }
+    }
+
+    /// Models that are known to handle tool calling well enough for the assistant.
+    var isRecommended: Bool {
+        if let declaresTools { return declaresTools && isChatModel }
+        let lower = id.lowercased()
+        let families = [
+            "kimi-k", "glm-4.5", "glm-4.6", "glm-5", "deepseek-v3", "deepseek-v4", "gpt-oss", "gpt-4", "gpt-5",
+            "nemotron-3-super", "nemotron-3-ultra", "nemotron-ultra", "mistral-large", "qwen3", "qwen2.5",
+            "llama-3.1-70b", "llama-3.3", "llama-4", "gemma-4", "claude", "gemini"
+        ]
+        return isChatModel && families.contains { lower.contains($0) }
+    }
+}
+
 /// Talks to any server that implements `/chat/completions` with function calling
 /// (NVIDIA NIM, Z.ai, OpenRouter, OpenAI, Ollama, LM Studio, …).
 @MainActor
@@ -160,7 +190,7 @@ final class OpenAICompatibleBackend: AssistantBackend {
             let hint: String
             switch status {
             case 401, 403: hint = " Check the API key."
-            case 404: hint = " Check the address and the model name."
+            case 404: hint = " The address is wrong or this provider has no model with that name — pick one from the model list."
             case 429: hint = " The provider's rate limit or balance ran out."
             default: hint = ""
             }
@@ -172,12 +202,19 @@ final class OpenAICompatibleBackend: AssistantBackend {
         return decoded
     }
 
-    /// Model IDs from `/models`, sorted.
-    nonisolated static func availableModels(baseURL: String, apiKey: String?) async throws -> [String] {
+    /// Every model the provider lists at `/models`, sorted by name.
+    nonisolated static func availableModels(baseURL: String, apiKey: String?) async throws -> [AssistantModelInfo] {
         let response = try await request(baseURL: baseURL, path: "/models", apiKey: apiKey, body: nil, timeout: 30)
         let list = response["data"]?.arrayValue ?? response["models"]?.arrayValue ?? []
-        let ids = list.compactMap { $0["id"]?.stringValue ?? $0["name"]?.stringValue }
-        return Array(Set(ids)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        var seen: Set<String> = []
+        var models: [AssistantModelInfo] = []
+        for entry in list {
+            guard let id = entry["id"]?.stringValue ?? entry["name"]?.stringValue, seen.insert(id).inserted else { continue }
+            // OpenRouter and some others declare tool support; most providers do not.
+            let parameters = entry["supported_parameters"]?.arrayValue?.compactMap(\.stringValue)
+            models.append(AssistantModelInfo(id: id, declaresTools: parameters.map { $0.contains("tools") }))
+        }
+        return models.sorted { $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending }
     }
 
     /// One tiny request that proves the address, key and model work, including tool calling.
