@@ -21,6 +21,7 @@ enum WorkspaceSection: String, Sendable {
     case appUninstaller
     case orphanedAppData
     case duplicateFinder
+    case cacheExplorer
 }
 
 enum SnapshotValidator {

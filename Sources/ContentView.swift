@@ -36,6 +36,8 @@ struct ContentView: View {
                     OrphanedAppDataView()
                 case .duplicateFinder:
                     DuplicateFinderView()
+                case .cacheExplorer:
+                    CacheExplorerView()
                 }
             }
         }
@@ -110,6 +112,12 @@ private struct SidebarView: View {
                     subtitle: "byte-for-byte matches",
                     icon: "doc.on.doc.fill"
                 )
+                WorkspaceSectionRow(
+                    section: .cacheExplorer,
+                    title: "Caches",
+                    subtitle: "what is safe to clear",
+                    icon: "archivebox.fill"
+                )
             }
             .padding(.horizontal, 10)
             .padding(.bottom, 18)
@@ -173,6 +181,7 @@ private struct WorkspaceSectionRow: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var uninstaller: AppUninstallerModel
     @EnvironmentObject private var orphanedData: OrphanedAppDataModel
+    @EnvironmentObject private var cacheExplorer: CacheExplorerModel
     let section: WorkspaceSection
     let title: String
     let subtitle: String
@@ -211,6 +220,7 @@ private struct WorkspaceSectionRow: View {
                 || uninstaller.showingReview
                 || uninstaller.showingOutcomeReport
                 || orphanedData.isNavigationLocked
+                || cacheExplorer.isNavigationLocked
         )
     }
 }
