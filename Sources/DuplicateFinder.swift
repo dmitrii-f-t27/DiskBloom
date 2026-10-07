@@ -36,7 +36,7 @@ final class DuplicateScanCounter: @unchecked Sendable {
     func recordExamined(_ url: URL) {
         lock.lock()
         examinedFileCount += 1
-        if examinedFileCount == 1 || examinedFileCount.isMultiple(of: 32) {
+        if fm_duplicate_progress_shows(Int64(examinedFileCount)) {
             currentPath = url.path
         }
         lock.unlock()

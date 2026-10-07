@@ -10,6 +10,7 @@
 		00A06837FE9A3ACAEF208A24 /* AppUninstallerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E621440422CC0990CFA03FE /* AppUninstallerView.swift */; };
 		01E6AD974D0D2F6BB5510A9B /* CacheExplorerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCF3038EDC99783AF1C2E7AB /* CacheExplorerView.swift */; };
 		1E762144578A2A9E3E61F881 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C8E33FF89D5B6199094FA3B4 /* Assets.xcassets */; };
+		473676A33C7A1053B281C6FC /* T27Text.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D8407E4349D774CFB67969 /* T27Text.swift */; };
 		486DF4C793C339DE01020377 /* DuplicateFinderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2F81E51A88472FB9B2FDB62 /* DuplicateFinderView.swift */; };
 		59F4C87F765A3039A51DF864 /* AppRemoval.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1763AD26A69FFA32DB985B /* AppRemoval.swift */; };
 		66AE7B9D5655C0DC3A921A1B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 16C2A45090429D38F356E370 /* PrivacyInfo.xcprivacy */; };
@@ -19,6 +20,7 @@
 		994D584448510F3AF72BC759 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD7792AFE7D2AC7BB14F43E9 /* Models.swift */; };
 		9AB589A277052A161EA5CEF2 /* DuplicateFinderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC0E1CC44D7D0ABFBFC29AA /* DuplicateFinderModel.swift */; };
 		A04A05ED653E841290387D7C /* OrphanedAppDataView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17929A66338DBCE10F47E50B /* OrphanedAppDataView.swift */; };
+		A15FFBA555B3791B6478D4F1 /* MoveSteps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A194BF5E0E06D0D59B6380D /* MoveSteps.swift */; };
 		AA79B7EA2458674E3ADAB836 /* FolderAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47386019A8F91E868D50ACA8 /* FolderAccess.swift */; };
 		B1C20199C34F614DDDA3C0E9 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F40277C6696B048669F8E76F /* ContentView.swift */; };
 		BB9E42C3C1853AF8226D8FBC /* t27_specs.c in Sources */ = {isa = PBXBuildFile; fileRef = B5CB6E6EA43DF72BC06A802C /* t27_specs.c */; };
@@ -35,17 +37,29 @@
 		0A6928612F19E8AE45F487A3 /* DiskBloomApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskBloomApp.swift; sourceTree = "<group>"; };
 		16C2A45090429D38F356E370 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		17929A66338DBCE10F47E50B /* OrphanedAppDataView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrphanedAppDataView.swift; sourceTree = "<group>"; };
+		17D6A5D46B6B10886FBD2147 /* text_rules.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = text_rules.h; sourceTree = "<group>"; };
+		1B8F537E9E0AB544F8C9B85E /* fingerprint.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fingerprint.api.h; sourceTree = "<group>"; };
 		1E0569FD2605614FEBD6F1C7 /* leftovers_policy.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = leftovers_policy.api.h; sourceTree = "<group>"; };
 		27BD011A1A2265E81E27B55D /* leftovers_policy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = leftovers_policy.h; sourceTree = "<group>"; };
+		29FFBB243A44C1ACFA8EFD62 /* sunburst_rules.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = sunburst_rules.api.h; sourceTree = "<group>"; };
 		3363BFBE280717E10EF35FD6 /* deletion_policy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = deletion_policy.h; sourceTree = "<group>"; };
+		3608186B77304F9BACC2B8E0 /* move_rules.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = move_rules.h; sourceTree = "<group>"; };
+		3C9152515269190599D6E01D /* move_rules.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = move_rules.api.h; sourceTree = "<group>"; };
+		42B7F0CAD4C67DFD4BABE6DE /* sunburst_rules.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = sunburst_rules.h; sourceTree = "<group>"; };
 		44C1D3CF8F9A54007DA9A7AC /* CacheExplorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheExplorer.swift; sourceTree = "<group>"; };
 		47386019A8F91E868D50ACA8 /* FolderAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderAccess.swift; sourceTree = "<group>"; };
 		4B5816F3392F37532BD57444 /* DiskBloom-Bridging.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "DiskBloom-Bridging.h"; sourceTree = "<group>"; };
+		54597F78B2E306A7203887C9 /* duplicate_rules.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = duplicate_rules.h; sourceTree = "<group>"; };
+		57DABADCA52D90FFFFFCEDCA /* fingerprint.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fingerprint.h; sourceTree = "<group>"; };
 		5D8C139CECA56C50EC64A219 /* cache_verdict.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cache_verdict.h; sourceTree = "<group>"; };
 		61F29115A6877F8500B13EB1 /* deletion_policy.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = deletion_policy.api.h; sourceTree = "<group>"; };
+		6C3C6A8EDD8FB251DC510B85 /* format_rules.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = format_rules.h; sourceTree = "<group>"; };
 		6FECA0A311AB132F59E4FC81 /* DiskScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskScanner.swift; sourceTree = "<group>"; };
 		7228B4972CD5244AB2F1DC83 /* AssistantBackends.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantBackends.swift; sourceTree = "<group>"; };
+		7A194BF5E0E06D0D59B6380D /* MoveSteps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveSteps.swift; sourceTree = "<group>"; };
 		7E621440422CC0990CFA03FE /* AppUninstallerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUninstallerView.swift; sourceTree = "<group>"; };
+		817780C405E1B9E23E39D7C1 /* scan_rules.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = scan_rules.h; sourceTree = "<group>"; };
+		90D8407E4349D774CFB67969 /* T27Text.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = T27Text.swift; sourceTree = "<group>"; };
 		918E1D2362D57CA9637D7190 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		9A8C840A6B3BFF5E2AB10DE8 /* uninstaller_policy.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = uninstaller_policy.api.h; sourceTree = "<group>"; };
 		A1BA8A47ED47691B4AAF18B9 /* Assistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Assistant.swift; sourceTree = "<group>"; };
@@ -54,8 +68,10 @@
 		B92A6A4CF5AA1A46231B5526 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		BC1763AD26A69FFA32DB985B /* AppRemoval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRemoval.swift; sourceTree = "<group>"; };
 		C0C72EC4FB40E3725A5047B9 /* SunburstView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SunburstView.swift; sourceTree = "<group>"; };
+		C82DCA27D6BCE1324B025DA1 /* duplicate_rules.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = duplicate_rules.api.h; sourceTree = "<group>"; };
 		C8E33FF89D5B6199094FA3B4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		CAECF0452EBCEF172ABF736B /* DiskBloom.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DiskBloom.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CAF5E159F91334101410612B /* format_rules.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = format_rules.api.h; sourceTree = "<group>"; };
 		CBFB294FD41AD5D13C58ECBA /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
 		CCF3038EDC99783AF1C2E7AB /* CacheExplorerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheExplorerView.swift; sourceTree = "<group>"; };
 		CD7792AFE7D2AC7BB14F43E9 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
@@ -63,8 +79,10 @@
 		D4913E770899712A7146B559 /* DuplicateFinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateFinder.swift; sourceTree = "<group>"; };
 		DBC0E1CC44D7D0ABFBFC29AA /* DuplicateFinderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateFinderModel.swift; sourceTree = "<group>"; };
 		E2F81E51A88472FB9B2FDB62 /* DuplicateFinderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateFinderView.swift; sourceTree = "<group>"; };
+		E98F501B78B71810916E7750 /* text_rules.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = text_rules.api.h; sourceTree = "<group>"; };
 		F40277C6696B048669F8E76F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		F5457FDBC257E93B29C585A7 /* cache_verdict.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cache_verdict.api.h; sourceTree = "<group>"; };
+		F58F28BBF8C85AB86EFD2392 /* scan_rules.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = scan_rules.api.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -122,9 +140,11 @@
 				E2F81E51A88472FB9B2FDB62 /* DuplicateFinderView.swift */,
 				47386019A8F91E868D50ACA8 /* FolderAccess.swift */,
 				CD7792AFE7D2AC7BB14F43E9 /* Models.swift */,
+				7A194BF5E0E06D0D59B6380D /* MoveSteps.swift */,
 				D276BAFC103A3D9DC1DC661B /* OrphanedAppData.swift */,
 				17929A66338DBCE10F47E50B /* OrphanedAppDataView.swift */,
 				C0C72EC4FB40E3725A5047B9 /* SunburstView.swift */,
+				90D8407E4349D774CFB67969 /* T27Text.swift */,
 				CFDACE6B408C8B1985CABD0F /* Generated */,
 			);
 			path = Sources;
@@ -138,9 +158,23 @@
 				61F29115A6877F8500B13EB1 /* deletion_policy.api.h */,
 				3363BFBE280717E10EF35FD6 /* deletion_policy.h */,
 				4B5816F3392F37532BD57444 /* DiskBloom-Bridging.h */,
+				C82DCA27D6BCE1324B025DA1 /* duplicate_rules.api.h */,
+				54597F78B2E306A7203887C9 /* duplicate_rules.h */,
+				1B8F537E9E0AB544F8C9B85E /* fingerprint.api.h */,
+				57DABADCA52D90FFFFFCEDCA /* fingerprint.h */,
+				CAF5E159F91334101410612B /* format_rules.api.h */,
+				6C3C6A8EDD8FB251DC510B85 /* format_rules.h */,
 				1E0569FD2605614FEBD6F1C7 /* leftovers_policy.api.h */,
 				27BD011A1A2265E81E27B55D /* leftovers_policy.h */,
+				3C9152515269190599D6E01D /* move_rules.api.h */,
+				3608186B77304F9BACC2B8E0 /* move_rules.h */,
+				F58F28BBF8C85AB86EFD2392 /* scan_rules.api.h */,
+				817780C405E1B9E23E39D7C1 /* scan_rules.h */,
+				29FFBB243A44C1ACFA8EFD62 /* sunburst_rules.api.h */,
+				42B7F0CAD4C67DFD4BABE6DE /* sunburst_rules.h */,
 				B5CB6E6EA43DF72BC06A802C /* t27_specs.c */,
+				E98F501B78B71810916E7750 /* text_rules.api.h */,
+				17D6A5D46B6B10886FBD2147 /* text_rules.h */,
 				9A8C840A6B3BFF5E2AB10DE8 /* uninstaller_policy.api.h */,
 				A68A88B88D9A82F0BCAF7850 /* uninstaller_policy.h */,
 			);
@@ -234,9 +268,11 @@
 				486DF4C793C339DE01020377 /* DuplicateFinderView.swift in Sources */,
 				AA79B7EA2458674E3ADAB836 /* FolderAccess.swift in Sources */,
 				994D584448510F3AF72BC759 /* Models.swift in Sources */,
+				A15FFBA555B3791B6478D4F1 /* MoveSteps.swift in Sources */,
 				D70F59B4273210195C53A716 /* OrphanedAppData.swift in Sources */,
 				A04A05ED653E841290387D7C /* OrphanedAppDataView.swift in Sources */,
 				892F4324D5ECFB6529ECE460 /* SunburstView.swift in Sources */,
+				473676A33C7A1053B281C6FC /* T27Text.swift in Sources */,
 				BB9E42C3C1853AF8226D8FBC /* t27_specs.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -317,7 +353,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				OTHER_CFLAGS = "$(inherited) -Wno-parentheses-equality";
+				OTHER_CFLAGS = "$(inherited) -ffp-contract=off -Wno-parentheses-equality";
 				OTHER_LDFLAGS = "$(inherited) -weak_framework FoundationModels";
 				OTHER_SWIFT_FLAGS = "$(inherited) -Xcc -Wno-parentheses-equality";
 				PRODUCT_NAME = DiskBloom;
@@ -406,7 +442,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				OTHER_CFLAGS = "$(inherited) -Wno-parentheses-equality";
+				OTHER_CFLAGS = "$(inherited) -ffp-contract=off -Wno-parentheses-equality";
 				OTHER_LDFLAGS = "$(inherited) -weak_framework FoundationModels";
 				OTHER_SWIFT_FLAGS = "$(inherited) -Xcc -Wno-parentheses-equality";
 				PRODUCT_NAME = DiskBloom;

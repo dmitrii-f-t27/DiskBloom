@@ -24,7 +24,7 @@ trap cleanup EXIT
 APP_SOURCES=("$ROOT_DIR"/Sources/*.swift)
 APP_SOURCES=(${APP_SOURCES:#*/DiskBloomApp.swift})
 
-xcrun clang -c -O2 -std=c11 -Wall -Wno-parentheses-equality -Werror \
+xcrun clang -c -O2 -std=c11 -ffp-contract=off -Wall -Wno-parentheses-equality -Werror \
   -isysroot "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
   "$ROOT_DIR/Sources/Generated/t27_specs.c" -o "$BUILD_DIR/t27_specs.o"
 
@@ -39,6 +39,7 @@ build_test() {
   [[ "$name" == ScannerDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/ScannerLegacy.swift" "$ROOT_DIR/Tests/Smoke/SnapshotLegacy.swift")
   [[ "$name" == MoveDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/MoveLegacy.swift")
   [[ "$name" == DuplicatesDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/DuplicatesLegacy.swift" "$ROOT_DIR/Tests/Smoke/TestSupport.swift")
+  [[ "$name" == PresentationDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/PresentationLegacy.swift" "$ROOT_DIR/Tests/Smoke/TestSupport.swift")
   [[ "$name" == TextRulesDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/LegacyText.swift" "$ROOT_DIR/Tests/Smoke/TestSupport.swift")
   xcrun swiftc \
     -emit-executable \
@@ -64,7 +65,7 @@ build_test() {
     -o "$BUILD_DIR/$name"
 }
 
-for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke UninstallerDifferentialSmoke LeftoversDifferentialSmoke TextRulesDifferentialSmoke ScannerDifferentialSmoke MoveDifferentialSmoke DuplicatesDifferentialSmoke; do
+for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke UninstallerDifferentialSmoke LeftoversDifferentialSmoke TextRulesDifferentialSmoke ScannerDifferentialSmoke MoveDifferentialSmoke DuplicatesDifferentialSmoke PresentationDifferentialSmoke; do
   print "== building $NAME"
   build_test "$NAME"
 done
@@ -77,7 +78,7 @@ print "== t27 specs"
 for SPEC_HEADER in "$ROOT_DIR"/Sources/Generated/*.api.h(N); do
   SPEC="${SPEC_HEADER:t:r:r}"
   /bin/cp "$ROOT_DIR/Sources/Generated/$SPEC.h" "$BUILD_DIR/$SPEC-spec-test.c"
-  xcrun clang -std=c11 -Wall -Wno-parentheses-equality -Werror -DT27_TEST_MAIN \
+  xcrun clang -std=c11 -ffp-contract=off -Wall -Wno-parentheses-equality -Werror -DT27_TEST_MAIN \
     -isysroot "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
     "$BUILD_DIR/$SPEC-spec-test.c" -o "$BUILD_DIR/$SPEC-spec-test"
   print -n "$SPEC: "
@@ -99,4 +100,5 @@ print "== running ($ARCH)"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/ScannerDifferentialSmoke" "$FIXTURES/scanner-diff"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/MoveDifferentialSmoke" "$FIXTURES/move"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/DuplicatesDifferentialSmoke" "$FIXTURES/duplicates"
+/usr/bin/arch -"$ARCH" "$BUILD_DIR/PresentationDifferentialSmoke"
 print "ALL_SMOKE_TESTS_PASSED ($ARCH)"
