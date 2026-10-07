@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var orphanedData: OrphanedAppDataModel
+    @EnvironmentObject private var assistant: AssistantModel
 
     var body: some View {
         HStack(spacing: 0) {
@@ -40,10 +41,18 @@ struct ContentView: View {
                     CacheExplorerView()
                 }
             }
+            if assistant.isPresented {
+                Rectangle()
+                    .fill(Color.separator.opacity(0.65))
+                    .frame(width: 1)
+                AssistantPanel()
+                    .frame(width: 360)
+                    .transition(.move(edge: .trailing))
+            }
         }
         .background(Color.appBackground)
         .foregroundStyle(Color.primaryText)
-        .frame(minWidth: 1080, minHeight: 700)
+        .frame(minWidth: assistant.isPresented ? 1380 : 1080, minHeight: 700)
         .preferredColorScheme(.dark)
         .onAppear { model.startInitialScan() }
         .sheet(isPresented: $model.showingTrashReview) {
@@ -155,6 +164,10 @@ private struct SidebarView: View {
 
             Spacer(minLength: 12)
 
+            AssistantSidebarButton()
+                .padding(.horizontal, 12)
+                .padding(.bottom, 10)
+
             VolumeUsageCard(stats: model.volumeStats)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
@@ -174,6 +187,42 @@ private struct SidebarView: View {
             .padding(.bottom, 16)
         }
         .background(Color.panel)
+    }
+}
+
+private struct AssistantSidebarButton: View {
+    @EnvironmentObject private var assistant: AssistantModel
+
+    var body: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.18)) { assistant.isPresented.toggle() }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentMint)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Ask DiskBloom")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.primaryText)
+                    Text("assistant · ⌘K")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.secondaryText)
+                }
+                Spacer()
+                if assistant.isPresented {
+                    Circle().fill(Color.accentMint).frame(width: 6, height: 6)
+                }
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .background(
+                assistant.isPresented ? Color.accentMint.opacity(0.12) : Color.accentMint.opacity(0.06),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.accentMint.opacity(0.22), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
 

@@ -433,6 +433,45 @@ final class AppModel: ObservableObject {
         inspectedNode = node
     }
 
+    /// The chain of real nodes from the scan root down to `path`, if the current snapshot holds it.
+    private func nodeChain(toPath path: String) -> [DiskNode]? {
+        guard let root = snapshot?.root, let rootPath = root.url?.standardizedFileURL.path else { return nil }
+        let target = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard target == rootPath || target.hasPrefix(rootPath + "/") else { return nil }
+        var chain = [root]
+        var current = root
+        while current.url?.standardizedFileURL.path != target {
+            guard let next = current.children.first(where: { child in
+                guard !child.isVirtual, let childPath = child.url?.standardizedFileURL.path else { return false }
+                return target == childPath || target.hasPrefix(childPath + "/")
+            }) else { return nil }
+            chain.append(next)
+            current = next
+        }
+        return chain
+    }
+
+    func node(atPath path: String) -> DiskNode? {
+        nodeChain(toPath: path)?.last
+    }
+
+    /// Moves the map to an item that is already in the current snapshot. Returns false if it is not.
+    @discardableResult
+    func focus(onPath path: String) -> Bool {
+        guard !isScanning, var chain = nodeChain(toPath: path), let target = chain.last else { return false }
+        if target.isDirectory, !target.isPackage {
+            // A folder below the scan depth has no children in the snapshot; it needs its own scan.
+            guard !target.children.isEmpty else { return false }
+            focusStack = chain
+            inspectedNode = target.children.first ?? target
+        } else {
+            if chain.count > 1 { chain.removeLast() }
+            focusStack = chain
+            inspectedNode = target
+        }
+        return true
+    }
+
     func revealInFinder(_ node: DiskNode) {
         guard let url = node.url else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])

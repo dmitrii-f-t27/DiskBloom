@@ -49,6 +49,7 @@ xcrun swiftc \
   -framework Foundation \
   -framework Combine \
   -framework Security \
+  -Xlinker -weak_framework -Xlinker FoundationModels \
   "$ROOT_DIR"/Sources/*.swift \
   -o "$APP_PATH/Contents/MacOS/DiskBloom"
 

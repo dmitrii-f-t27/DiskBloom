@@ -1,6 +1,6 @@
 # DiskBloom
 
-DiskBloom is a local, native macOS app that shows where your disk space went, safely uninstalls apps together with their related data, and finds possible app leftovers and byte-for-byte duplicate files. It builds an interactive ring map, shows the largest items, prepares a verified removal plan for an `.app` together with explicitly selected related data, and finds files with identical content. Nothing is ever deleted permanently: after your review, items go to the Trash.
+DiskBloom is a local, native macOS app that shows where your disk space went, safely uninstalls apps together with their related data, finds possible app leftovers and byte-for-byte duplicate files, explains which caches are safe to clear, and has an optional assistant you can chat with. It builds an interactive ring map, shows the largest items, prepares a verified removal plan for an `.app` together with explicitly selected related data, and finds files with identical content. Nothing is ever deleted permanently: after your review, items go to the Trash.
 
 ## Download and install
 
@@ -27,6 +27,25 @@ Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or la
 - re-measurement, a content fingerprint, path and file identity checks before any move;
 - only `FileManager.trashItem` is used — there is no direct permanent deletion;
 - system folders and the root of the home folder are view-only.
+
+## Caches
+
+The Caches section measures `~/Library/Caches`, Xcode `DerivedData` and `~/.cache`, finds the app that owns each cache (bundle ID, running apps, LaunchServices) and gives it a verdict with a plain reason:
+
+- **Safe to clear** — the owner rebuilds it (app caches of idle apps, browser caches of closed browsers, downloaded updates, crash reports, DerivedData while Xcode is closed);
+- **Clear if you need space** — rebuilt when needed but downloaded again (Homebrew, pip, uv, Hugging Face models, …), Apple caches, or an owner that could not be identified;
+- **Quit the app first** — the owner is running; the cache cannot be selected;
+- **Leave it** — iCloud, sign-in, sync and system state, or folders macOS protects in part;
+- **Clear with its tool** — `~/.npm`, Cargo, Gradle, simulator caches: shown with the command that clears them, never moved by DiskBloom.
+
+Selected caches go through the same review sheet; right before each move DiskBloom checks again that the owner is not running and that the folder did not change, using the same path and snapshot checks as the Disk Map.
+
+## Assistant
+
+Press ⌘K or "Ask DiskBloom" to chat with an assistant that looks up real sizes and opens the right place in the app: a folder in the Disk Map, the Caches list, an app in the uninstaller, or Finder. It can select caches or queue items, but it never moves anything: you review the exact paths and confirm.
+
+- **Apple, on this Mac** (default): Apple's on-device model, free and private; needs macOS 26 with Apple Intelligence turned on and understands the languages Apple supports.
+- **API (OpenAI-compatible)**: any `/chat/completions` server with tool calling — presets for NVIDIA NIM, Z.ai, OpenRouter, OpenAI, Ollama and LM Studio, or a custom address. Pick the model from the provider's list. The key is kept in the Keychain.
 
 ## App Uninstaller
 
@@ -137,4 +156,4 @@ Five suites cover the scanner, cleanup safety, app removal, possible leftovers a
 
 ## Privacy
 
-DiskBloom has no network code, no analytics and no telemetry. See [PRIVACY.md](PRIVACY.md).
+DiskBloom has no analytics and no telemetry, and its disk tools never use the network. Only the optional assistant, when you connect an API, sends your questions and the names, paths and sizes it looks up to the provider you chose. See [PRIVACY.md](PRIVACY.md).
