@@ -9,16 +9,16 @@
 module DiskBloomScanRules;
 
 ; --- Limits ----------------------------------------------------------------------------------------
-pub const SR_MIN_DEPTH : u32 = 2;
-pub const SR_MIN_VISIBLE_CHILDREN : u32 = 12;
+pub const SR_MIN_DEPTH : i64 = 2;
+pub const SR_MIN_VISIBLE_CHILDREN : i64 = 12;
 
-pub fn sr_depth_limit(requested: i64) -> u32 {
+pub fn sr_depth_limit(requested: i64) -> i64 {
     if (requested < 2) { return SR_MIN_DEPTH; }
     if (requested > 1000000) { return 1000000; }
     return requested;
 }
 
-pub fn sr_visible_children_limit(requested: i64) -> u32 {
+pub fn sr_visible_children_limit(requested: i64) -> i64 {
     if (requested < 12) { return SR_MIN_VISIBLE_CHILDREN; }
     if (requested > 1000000) { return 1000000; }
     return requested;

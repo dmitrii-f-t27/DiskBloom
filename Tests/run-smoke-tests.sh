@@ -24,7 +24,7 @@ trap cleanup EXIT
 APP_SOURCES=("$ROOT_DIR"/Sources/*.swift)
 APP_SOURCES=(${APP_SOURCES:#*/DiskBloomApp.swift})
 
-xcrun clang -c -O2 -std=c11 -ffp-contract=off -Wall -Wno-parentheses-equality -Werror \
+xcrun clang -c -O2 -std=c11 -ffp-contract=off -Wall -Wshorten-64-to-32 -Wno-parentheses-equality -Werror \
   -isysroot "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
   "$ROOT_DIR/Sources/Generated/t27_specs.c" -o "$BUILD_DIR/t27_specs.o"
 
@@ -79,7 +79,7 @@ print "== t27 specs"
 for SPEC_HEADER in "$ROOT_DIR"/Sources/Generated/*.api.h(N); do
   SPEC="${SPEC_HEADER:t:r:r}"
   /bin/cp "$ROOT_DIR/Sources/Generated/$SPEC.h" "$BUILD_DIR/$SPEC-spec-test.c"
-  xcrun clang -std=c11 -ffp-contract=off -Wall -Wno-parentheses-equality -Werror -DT27_TEST_MAIN \
+  xcrun clang -std=c11 -ffp-contract=off -Wall -Wshorten-64-to-32 -Wno-parentheses-equality -Werror -DT27_TEST_MAIN \
     -isysroot "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
     "$BUILD_DIR/$SPEC-spec-test.c" -o "$BUILD_DIR/$SPEC-spec-test"
   print -n "$SPEC: "

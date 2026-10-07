@@ -44,8 +44,8 @@
 /* -------------------------------------------------------
    Function prototypes
    ------------------------------------------------------- */
-uint32_t sr_depth_limit(int64_t requested);
-uint32_t sr_visible_children_limit(int64_t requested);
+int64_t sr_depth_limit(int64_t requested);
+int64_t sr_visible_children_limit(int64_t requested);
 uint32_t sr_retained_limit(uint32_t visible);
 uint32_t sr_map_action(bool readable, bool symlink, bool volume, bool directory, bool package, uint32_t depth, uint32_t max_depth, bool link_seen, bool has_identity, bool folder_seen);
 uint32_t sr_measure_action(bool readable, bool symlink, bool volume, bool directory, bool link_seen, bool has_identity, bool folder_seen);
