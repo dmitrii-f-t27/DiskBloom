@@ -113,8 +113,7 @@ enum OrphanDataRule: String, CaseIterable, Sendable {
         let name = entry.lastPathComponent
         switch self {
         case .savedState:
-            guard name.hasSuffix(".savedState") else { return nil }
-            return String(name.dropLast(".savedState".count))
+            return T27Text.savedStateStem(name)
         default:
             return name
         }
@@ -134,36 +133,13 @@ enum OrphanDataRule: String, CaseIterable, Sendable {
 }
 
 enum OrphanBundleIdentifier {
+    /// The lowercase bundle ID, or nil when the text is not one; decided by Specs/text_rules.t27.
     static func canonical(_ value: String?) -> String? {
-        guard let value,
-              value.count >= 3,
-              value.count <= 255,
-              value.contains("."),
-              !value.hasPrefix("."),
-              !value.hasSuffix("."),
-              !value.contains(".."),
-              value.unicodeScalars.allSatisfy({ scalar in
-                  (scalar.value >= 48 && scalar.value <= 57)
-                      || (scalar.value >= 65 && scalar.value <= 90)
-                      || (scalar.value >= 97 && scalar.value <= 122)
-                      || scalar == "."
-                      || scalar == "-"
-              }) else { return nil }
-        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count >= 2,
-              parts.allSatisfy({ part in
-                  guard let first = part.unicodeScalars.first else { return false }
-                  return (first.value >= 48 && first.value <= 57)
-                      || (first.value >= 65 && first.value <= 90)
-                      || (first.value >= 97 && first.value <= 122)
-              }) else { return nil }
-        return value.lowercased()
+        value.flatMap(T27Text.canonicalIdentifier)
     }
 
     static func vendorNamespace(_ canonicalIdentifier: String) -> String? {
-        let components = canonicalIdentifier.split(separator: ".")
-        guard components.count >= 2 else { return nil }
-        return components.prefix(2).joined(separator: ".")
+        T27Text.vendorNamespace(canonicalIdentifier)
     }
 }
 
@@ -227,11 +203,11 @@ struct OrphanOwnerIndex: Sendable {
     func claimReason(for identifier: String) -> String? {
         let canonical = OrphanBundleIdentifier.canonical(identifier)
         let related = canonical.flatMap { id in
-            claims.keys.sorted().first { $0.hasPrefix(id + ".") || id.hasPrefix($0 + ".") }
+            claims.keys.sorted().first { T27Text.identifier($0, extends: id) || T27Text.identifier(id, extends: $0) }
         }
         let namespace = canonical.flatMap(OrphanBundleIdentifier.vendorNamespace)
         let sibling = namespace.flatMap { space in
-            claims.keys.sorted().first { OrphanBundleIdentifier.vendorNamespace($0) == space }
+            claims.keys.sorted().first { OrphanBundleIdentifier.vendorNamespace($0).map { T27Text.same($0, space) } ?? false }
         }
         let claim = lo_claim(
             canonical != nil,
@@ -294,7 +270,7 @@ struct OrphanOwnerIndex: Sendable {
             "Contents/Library/LaunchServices",
             "Contents/Library/SystemExtensions"
         ]
-        let bundleExtensions: Set<String> = ["app", "appex", "xpc", "framework", "bundle", "systemextension"]
+        let bundleExtensionKinds = Set([TX_EXT_APP, TX_EXT_APPEX, TX_EXT_XPC, TX_EXT_FRAMEWORK, TX_EXT_BUNDLE, TX_EXT_SYSTEMEXTENSION].map(UInt32.init))
         for relativeRoot in relativeRoots {
             let root = applicationURL.appendingPathComponent(relativeRoot, isDirectory: true)
             guard let enumerator = FileManager.default.enumerator(
@@ -303,7 +279,7 @@ struct OrphanOwnerIndex: Sendable {
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) else { continue }
             for case let url as URL in enumerator {
-                guard bundleExtensions.contains(url.pathExtension.lowercased()),
+                guard bundleExtensionKinds.contains(T27Text.extensionKind(url.path)),
                       let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
                       values.isDirectory == true,
                       values.isSymbolicLink != true,
@@ -323,10 +299,7 @@ struct OrphanOwnerIndex: Sendable {
             let urls = NSWorkspace.shared.urlsForApplications(withBundleIdentifier: identifier)
             if let existing = urls.first(where: { url in
                 let path = url.standardizedFileURL.path
-                let components = (path as NSString).pathComponents
-                return !components.contains(".Trash")
-                    && !components.contains(".Trashes")
-                    && FileManager.default.fileExists(atPath: path)
+                return !T27Text.hasTrashComponent(path) && FileManager.default.fileExists(atPath: path)
             }), let canonical = OrphanBundleIdentifier.canonical(identifier) {
                 claims[canonical] = "LaunchServices registered an existing application: \(existing.path)"
             }
@@ -347,7 +320,7 @@ struct OrphanOwnerIndex: Sendable {
                 includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
                 options: [.skipsHiddenFiles]
             ) else { continue }
-            for url in entries where url.pathExtension.lowercased() == "plist" {
+            for url in entries where T27Text.extensionKind(url.path) == UInt32(TX_EXT_PLIST) {
                 guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
                       values.isRegularFile == true,
                       values.isSymbolicLink != true,
@@ -530,9 +503,9 @@ enum OrphanedAppDataAnalyzer {
         let accepted = lo_is_candidate(
             rawIdentifier != nil,
             canonical != nil,
-            canonical?.hasPrefix("com.apple.") == true,
-            canonical?.hasPrefix("group.") == true,
-            rawIdentifier.map { rule.expectedURL(homeURL: homeURL, identifier: $0).standardizedFileURL.path == entry.standardizedFileURL.path } ?? false,
+            canonical.map(T27Text.hasApplePrefix) ?? false,
+            canonical.map(T27Text.hasGroupPrefix) ?? false,
+            rawIdentifier.map { T27Text.same(rule.expectedURL(homeURL: homeURL, identifier: $0).standardizedFileURL.path, entry.standardizedFileURL.path) } ?? false,
             values != nil,
             values?.isDirectory == true,
             values?.isSymbolicLink == true,
@@ -565,9 +538,9 @@ enum OrphanDataPolicy {
         let treeIssue = treeEligibilityIssue(for: item.node, homeURL: homeURL)
         let issue = lo_move_issue(
             item.eligibilityIssue != nil,
-            OrphanBundleIdentifier.canonical(item.identifier) == item.canonicalIdentifier,
-            candidate.path == original.path,
-            expected.path == original.path,
+            OrphanBundleIdentifier.canonical(item.identifier).map { T27Text.same($0, item.canonicalIdentifier) } ?? false,
+            T27Text.same(candidate.path, original.path),
+            T27Text.same(expected.path, original.path),
             AppRemovalPathSafety.pathHasSymlinkedComponent(candidate),
             values?.isDirectory == true && values?.isSymbolicLink != true,
             values?.volumeIsLocal == true,
@@ -592,7 +565,7 @@ enum OrphanDataPolicy {
 
     static func treeEligibilityIssue(for node: DiskNode, homeURL: URL) -> String? {
         let library = homeURL.appendingPathComponent("Library", isDirectory: true).standardizedFileURL.path
-        let insideLibrary = node.url.map { $0.standardizedFileURL.path.hasPrefix(library + "/") } ?? false
+        let insideLibrary = node.url.map { T27Text.inside($0.standardizedFileURL.path, library) } ?? false
         let complete = node.resourceIdentifier != nil && node.fingerprint != nil
         // The walk is the expensive fact: it runs only when every cheaper fact already passed.
         let contentsIssue = node.url != nil && complete && node.unreadableCount == 0 && insideLibrary
@@ -611,7 +584,7 @@ enum OrphanDataPolicy {
     static func overlappingSelectionReason(_ items: [OrphanDataItem]) -> String? {
         let paths = items.map { $0.url.standardizedFileURL.path }.sorted()
         for (index, path) in paths.enumerated() {
-            for other in paths.dropFirst(index + 1) where other.hasPrefix(path + "/") {
+            for other in paths.dropFirst(index + 1) where T27Text.inside(other, path) {
                 return "Selected paths overlap: \(path) and \(other)"
             }
         }
@@ -637,7 +610,7 @@ enum OrphanDataPolicy {
         }
         if let enumerationIssue { return enumerationIssue }
 
-        let executableBundleExtensions: Set<String> = ["app", "appex", "xpc", "systemextension"]
+        let executableBundleKinds = Set([TX_EXT_APP, TX_EXT_APPEX, TX_EXT_XPC, TX_EXT_SYSTEMEXTENSION].map(UInt32.init))
         let immutableFlags = UInt32(UF_IMMUTABLE | UF_APPEND | SF_IMMUTABLE | SF_APPEND)
         let executableBits = mode_t(S_IXUSR | S_IXGRP | S_IXOTH)
         for url in urls {
@@ -653,7 +626,7 @@ enum OrphanDataPolicy {
                 info.st_flags & immutableFlags != 0,
                 FileIdentity.deviceID(for: url) == rootDevice,
                 fileType == S_IFLNK,
-                executableBundleExtensions.contains(url.pathExtension.lowercased()),
+                executableBundleKinds.contains(T27Text.extensionKind(url.path)),
                 fileType == S_IFREG && info.st_mode & executableBits != 0
             )
             switch issue {

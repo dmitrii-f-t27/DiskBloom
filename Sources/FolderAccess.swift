@@ -48,7 +48,7 @@ final class FolderAccess {
         guard AppSandbox.isActive else { return true }
         let path = url.standardizedFileURL.path
         return grantedPaths.contains { root in
-            root == "/" || path == root || path.hasPrefix(root + "/")
+            T27Text.same(root, "/") || T27Text.within(path, root)
         }
     }
 

@@ -100,17 +100,17 @@ enum DeletionPolicy {
         let resolved = original.resolvingSymlinksInPath()
         let scanRoot = scanRootURL.standardizedFileURL.resolvingSymlinksInPath()
         let home = UserHome.path
-        let isInsideHome = original.path.hasPrefix(home + "/")
-        let components = original.pathComponents
+        let isInsideHome = T27Text.inside(original.path, home)
         let relativePath = isInsideHome ? String(original.path.dropFirst(home.count + 1)) : ""
 
         var library = UInt32(DP_LIB_NONE)
-        if isInsideHome, relativePath == "Library" || relativePath.hasPrefix("Library/") {
-            let allowedLibraryPaths = ["Library/Caches", "Library/Developer/Xcode/DerivedData"]
-            let isAllowed = allowedLibraryPaths.contains { relativePath == $0 || relativePath.hasPrefix($0 + "/") }
-            library = UInt32(isAllowed ? DP_LIB_ALLOWED_CACHE : DP_LIB_OTHER)
+        if isInsideHome {
+            switch T27Text.libraryArea(relative: relativePath) {
+            case UInt32(TX_LIB_ALLOWED_CACHE): library = UInt32(DP_LIB_ALLOWED_CACHE)
+            case UInt32(TX_LIB_OTHER): library = UInt32(DP_LIB_OTHER)
+            default: break
+            }
         }
-        let firstComponent = relativePath.split(separator: "/").first.map(String.init) ?? ""
         let protectedHomePaths = ["mlx/profiles", "My Drive"].map { home + "/" + $0 }
         let activePath = activeScanURL?.standardizedFileURL.resolvingSymlinksInPath().path
         let appPath = appURL.standardizedFileURL.path
@@ -118,23 +118,25 @@ enum DeletionPolicy {
 
         let reason = dp_rejection(
             node.isVirtual || originalNodeURL == nil,
-            candidateURL.map { $0.standardizedFileURL.path != originalNodeURL?.standardizedFileURL.path } ?? false,
-            original.path != resolved.path,
-            original.path == home,
-            scanRoot.path == "/",
-            original.path == scanRoot.path,
-            original.path.hasPrefix(scanRoot.path + "/"),
-            activePath.map { original.path == $0 || $0.hasPrefix(original.path + "/") } ?? false,
+            candidateURL.map { candidate in
+                originalNodeURL.map { !T27Text.same(candidate.standardizedFileURL.path, $0.standardizedFileURL.path) } ?? true
+            } ?? false,
+            !T27Text.same(original.path, resolved.path),
+            T27Text.same(original.path, home),
+            T27Text.same(scanRoot.path, "/"),
+            T27Text.same(original.path, scanRoot.path),
+            T27Text.inside(original.path, scanRoot.path),
+            activePath.map { T27Text.within($0, original.path) } ?? false,
             isInsideHome,
-            components.count >= 4 && components[1] == "Volumes",
+            T27Text.onExternalVolume(original.path),
             library,
-            firstComponent.hasPrefix(".") && firstComponent != ".cache",
-            protectedHomePaths.contains { original.path == $0 || original.path.hasPrefix($0 + "/") },
-            components.contains { $0 == ".Trash" || $0 == ".Trashes" },
+            isInsideHome && T27Text.hiddenFirstComponent(relative: relativePath),
+            protectedHomePaths.contains { T27Text.within(original.path, $0) },
+            T27Text.hasTrashComponent(original.path),
             volumeValues?.volumeIsLocal == true,
             volumeValues?.volumeIsReadOnly == true,
             FileIdentity.deviceID(for: original) == FileIdentity.deviceID(for: scanRoot),
-            original.path == appPath || appPath.hasPrefix(original.path + "/"),
+            T27Text.within(appPath, original.path),
             node.resourceIdentifier != nil
         )
         return message(for: reason)
@@ -377,7 +379,7 @@ final class AppModel: ObservableObject {
             let previousCount = collection.count
             collection.removeAll { selected in
                 guard let selectedPath = selected.url?.standardizedFileURL.path else { return false }
-                return targetPath == selectedPath || targetPath.hasPrefix(selectedPath + "/")
+                return T27Text.within(targetPath, selectedPath)
             }
             if collection.count != previousCount {
                 invalidatePendingReview()
@@ -424,13 +426,13 @@ final class AppModel: ObservableObject {
     private func nodeChain(toPath path: String) -> [DiskNode]? {
         guard let root = snapshot?.root, let rootPath = root.url?.standardizedFileURL.path else { return nil }
         let target = URL(fileURLWithPath: path).standardizedFileURL.path
-        guard target == rootPath || target.hasPrefix(rootPath + "/") else { return nil }
+        guard T27Text.within(target, rootPath) else { return nil }
         var chain = [root]
         var current = root
         while current.url?.standardizedFileURL.path != target {
             guard let next = current.children.first(where: { child in
                 guard !child.isVirtual, let childPath = child.url?.standardizedFileURL.path else { return false }
-                return target == childPath || target.hasPrefix(childPath + "/")
+                return T27Text.within(target, childPath)
             }) else { return nil }
             chain.append(next)
             current = next
@@ -490,7 +492,7 @@ final class AppModel: ObservableObject {
         let path = url.standardizedFileURL.path
         if let parent = collection.first(where: { selected in
             guard let selectedPath = selected.url?.standardizedFileURL.path else { return false }
-            return path.hasPrefix(selectedPath + "/")
+            return T27Text.inside(path, selectedPath)
         }) {
             notice = AppNotice(
                 title: "Already included",
@@ -500,7 +502,7 @@ final class AppModel: ObservableObject {
         }
         collection.removeAll { selected in
             guard let selectedPath = selected.url?.standardizedFileURL.path else { return false }
-            return selectedPath.hasPrefix(path + "/")
+            return T27Text.inside(selectedPath, path)
         }
         collection.append(node)
     }
@@ -632,7 +634,7 @@ final class AppModel: ObservableObject {
               let right = rhs.url?.standardizedFileURL.path else {
             return lhs.id == rhs.id
         }
-        return left == right
+        return T27Text.same(left, right)
     }
 
     private func invalidatePendingReview() {

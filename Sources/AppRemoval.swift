@@ -298,7 +298,7 @@ enum ApplicationCatalog {
             guard let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .isSymbolicLinkKey]),
                   values.isDirectory == true,
                   values.isSymbolicLink != true else { continue }
-            if entry.pathExtension.lowercased() == "app" {
+            if T27Text.hasAppExtension(entry.path) {
                 let profile = profile(for: entry, sourceLabel: sourceLabel)
                 if seen.insert(profile.id).inserted { found.append(profile) }
             } else if remainingDepth > 0, values.isPackage != true {
@@ -320,11 +320,12 @@ enum AppRunningDetector {
         let matchingProcess = NSWorkspace.shared.runningApplications.first { running in
             if let targetIdentifier = application.bundleIdentifier,
                !targetIdentifier.isEmpty,
-               running.bundleIdentifier == targetIdentifier {
+               let runningIdentifier = running.bundleIdentifier,
+               T27Text.same(runningIdentifier, targetIdentifier) {
                 return true
             }
             if let bundleURL = running.bundleURL?.standardizedFileURL.resolvingSymlinksInPath() {
-                return bundleURL.path == targetURL.path || bundleURL.path.hasPrefix(targetURL.path + "/")
+                return T27Text.within(bundleURL.path, targetURL.path)
             }
             return false
         }
@@ -379,36 +380,19 @@ enum CodeSignatureReader {
 }
 
 enum AppRemovalPathSafety {
+    /// Safe to build a path from, decided by Specs/text_rules.t27.
     static func safeIdentifier(_ value: String?) -> String? {
-        guard let value,
-              value.count >= 3,
-              value.count <= 255,
-              value.contains("."),
-              !value.hasPrefix("."),
-              !value.hasSuffix("."),
-              !value.contains(".."),
-              value.unicodeScalars.allSatisfy({ scalar in
-                  CharacterSet.alphanumerics.contains(scalar) || scalar == "." || scalar == "-" || scalar == "_"
-              }) else { return nil }
-        let components = value.split(separator: ".", omittingEmptySubsequences: false)
-        guard components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { return nil }
+        guard let value, T27Text.safeIdentifier(value) else { return nil }
         return value
     }
 
     static func safeDisplayName(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              trimmed.count <= 200,
-              trimmed != ".",
-              trimmed != "..",
-              !trimmed.contains("/"),
-              !trimmed.contains(":"),
-              !trimmed.contains("\0") else { return nil }
-        return trimmed
+        return T27Text.safeDisplayName(trimmed: trimmed) ? trimmed : nil
     }
 
     static func pathHasSymlinkedComponent(_ url: URL) -> Bool {
-        url.standardizedFileURL.resolvingSymlinksInPath().path != url.standardizedFileURL.path
+        !T27Text.same(url.standardizedFileURL.resolvingSymlinksInPath().path, url.standardizedFileURL.path)
     }
 }
 
@@ -438,7 +422,7 @@ enum ApplicationRemovalAnalyzer {
         let duplicateIdentifier: Bool
         if let safeIdentifier {
             duplicateIdentifier = knownApplications.contains {
-                $0.id != application.id && $0.bundleIdentifier == safeIdentifier
+                !T27Text.same($0.id, application.id) && $0.bundleIdentifier.map { T27Text.same($0, safeIdentifier) } == true
             }
         } else {
             duplicateIdentifier = false
@@ -690,13 +674,13 @@ enum AppRemovalPolicy {
             .isUbiquitousItemKey
         ])
         let issue = un_application_issue(
-            url.pathExtension.lowercased() == "app",
+            T27Text.hasAppExtension(path),
             AppRemovalPathSafety.pathHasSymlinkedComponent(url),
-            protectedRoots.contains { path == $0 || path.hasPrefix($0 + "/") },
-            application.bundleIdentifier?.hasPrefix("com.apple.") == true,
-            path == selfPath || selfPath.hasPrefix(path + "/"),
-            blockedUserRoots.contains { path == $0 || path.hasPrefix($0 + "/") },
-            (path as NSString).pathComponents.contains { $0 == ".Trash" || $0 == ".Trashes" },
+            protectedRoots.contains { T27Text.within(path, $0) },
+            application.bundleIdentifier.map(T27Text.hasApplePrefix) ?? false,
+            T27Text.within(selfPath, path),
+            blockedUserRoots.contains { T27Text.within(path, $0) },
+            T27Text.hasTrashComponent(path),
             values?.isDirectory == true && values?.isPackage == true && values?.isSymbolicLink != true,
             values?.volumeIsLocal == true,
             values?.volumeIsReadOnly == true,
@@ -750,12 +734,10 @@ enum AppRemovalPolicy {
         let registeredApplications = identifier.map { NSWorkspace.shared.urlsForApplications(withBundleIdentifier: $0) } ?? []
         let reason = un_continuation(
             identifier != nil,
-            identifier.map { id in installedApplications.contains { $0.bundleIdentifier == id } } ?? false,
+            identifier.map { id in installedApplications.contains { $0.bundleIdentifier.map { T27Text.same($0, id) } ?? false } } ?? false,
             registeredApplications.contains { url in
                 let path = url.standardizedFileURL.path
-                let components = (path as NSString).pathComponents
-                let isInTrash = components.contains(".Trash") || components.contains(".Trashes")
-                return !isInTrash && FileManager.default.fileExists(atPath: path)
+                return !T27Text.hasTrashComponent(path) && FileManager.default.fileExists(atPath: path)
             },
             installedApplications.contains { $0.name.localizedCaseInsensitiveCompare(plan.application.name) == .orderedSame },
             FileManager.default.fileExists(atPath: originalPath),
@@ -800,16 +782,16 @@ enum AppRemovalPolicy {
             applicationIssue != nil,
             item.eligibilityIssue != nil,
             keySafe,
-            candidate.path == original.path,
-            expected?.path == original.path,
+            T27Text.same(candidate.path, original.path),
+            expected.map { T27Text.same($0.path, original.path) } ?? false,
             AppRemovalPathSafety.pathHasSymlinkedComponent(original),
             values != nil,
             values?.volumeIsLocal == true,
             values?.volumeIsReadOnly == true,
             values?.isUbiquitousItem == true,
             isApplication,
-            isApplication && ApplicationCatalog.profile(for: original).bundleIdentifier == application.bundleIdentifier,
-            original.path.hasPrefix(library + "/")
+            isApplication && sameIdentifier(ApplicationCatalog.profile(for: original).bundleIdentifier, application.bundleIdentifier),
+            T27Text.inside(original.path, library)
         )
         switch issue {
         case UInt32(UN_ITEM_OK): return SnapshotValidator.validate(item.node, candidateURL: candidate)
@@ -829,10 +811,19 @@ enum AppRemovalPolicy {
         }
     }
 
+    /// Two optional bundle IDs name the same app (both absent counts as the same).
+    static func sameIdentifier(_ a: String?, _ b: String?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): true
+        case let (a?, b?): T27Text.same(a, b)
+        default: false
+        }
+    }
+
     static func overlappingSelectionReason(_ items: [AppRemovalItem]) -> String? {
         let paths = items.map { $0.url.standardizedFileURL.path }.sorted()
         for (index, path) in paths.enumerated() {
-            for other in paths.dropFirst(index + 1) where other.hasPrefix(path + "/") {
+            for other in paths.dropFirst(index + 1) where T27Text.inside(other, path) {
                 return "Selected paths overlap: \(path) and \(other)"
             }
         }

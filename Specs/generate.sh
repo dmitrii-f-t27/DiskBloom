@@ -31,4 +31,16 @@ for SPEC in "$ROOT_DIR"/Specs/*.t27; do
   ' "$WORK/$NAME.h" > "$WORK/$NAME.api.h"
   /usr/bin/cmp -s "$WORK/$NAME.api.h" "$OUT/$NAME.api.h" || /bin/cp "$WORK/$NAME.api.h" "$OUT/$NAME.api.h"
 done
+# The Swift bridging header and the single C file that compiles the bodies list every spec.
+{
+  print "// Decisions written in t27 (Specs/*.t27), compiled to C by t27c. Regenerate with Specs/generate.sh."
+  for SPEC in "$ROOT_DIR"/Specs/*.t27; do print "#include \"${SPEC:t:r}.api.h\""; done
+} > "$WORK/DiskBloom-Bridging.h"
+{
+  print "// Emits the function bodies of the generated t27 headers once, for Swift to link against."
+  for SPEC in "$ROOT_DIR"/Specs/*.t27; do print "#include \"${SPEC:t:r}.h\""; done
+} > "$WORK/t27_specs.c"
+for FILE in DiskBloom-Bridging.h t27_specs.c; do
+  /usr/bin/cmp -s "$WORK/$FILE" "$OUT/$FILE" || /bin/cp "$WORK/$FILE" "$OUT/$FILE"
+done
 print "generated into $OUT"

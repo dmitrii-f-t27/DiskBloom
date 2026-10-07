@@ -245,10 +245,10 @@ struct CacheOwnerContext: Sendable {
     func owner(forIdentifier identifier: String) -> Owner? {
         let key = identifier.lowercased()
         if let exact = ownersByIdentifier[key] { return exact }
-        var components = key.split(separator: ".").map(String.init)
-        while components.count > 2 {
-            components.removeLast()
-            if let parent = ownersByIdentifier[components.joined(separator: ".")] { return parent }
+        var drop = 1
+        while let parent = T27Text.identifierPrefix(key, dropping: drop) {
+            if let owner = ownersByIdentifier[parent] { return owner }
+            drop += 1
         }
         return nil
     }
@@ -376,7 +376,7 @@ enum CacheClassifier {
         context: CacheOwnerContext
     ) -> Result {
         let lower = name.lowercased()
-        let isApple = lower.hasPrefix("com.apple.")
+        let isApple = T27Text.hasApplePrefix(lower)
         let looksLikeBundleIdentifier = OrphanBundleIdentifier.canonical(name) != nil
         var kind = UInt32(CV_KIND_OTHER)
         var owner: CacheOwnerContext.Owner?
@@ -662,8 +662,8 @@ enum CachePolicy {
             item.ownerBundleIdentifier.map { runningIdentifiers.contains($0.lowercased()) } ?? false,
             item.category == .developer,
             runningIdentifiers.contains("com.apple.dt.xcode"),
-            candidate.path == item.url.standardizedFileURL.path,
-            candidate.deletingLastPathComponent().standardizedFileURL.path == item.locationRoot.path,
+            T27Text.same(candidate.path, item.url.standardizedFileURL.path),
+            T27Text.same(candidate.deletingLastPathComponent().standardizedFileURL.path, item.locationRoot.path),
             AppRemovalPathSafety.pathHasSymlinkedComponent(candidate)
         )
         switch block {
