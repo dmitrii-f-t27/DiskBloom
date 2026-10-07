@@ -36,6 +36,7 @@ build_test() {
   [[ "$name" == DeletionPolicyDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/DeletionPolicyLegacy.swift")
   [[ "$name" == UninstallerDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/UninstallerLegacy.swift")
   [[ "$name" == LeftoversDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/LeftoversLegacy.swift")
+  [[ "$name" == TextRulesDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/LegacyText.swift")
   xcrun swiftc \
     -emit-executable \
     -parse-as-library \
@@ -60,12 +61,12 @@ build_test() {
     -o "$BUILD_DIR/$name"
 }
 
-for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke UninstallerDifferentialSmoke LeftoversDifferentialSmoke; do
+for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke UninstallerDifferentialSmoke LeftoversDifferentialSmoke TextRulesDifferentialSmoke; do
   print "== building $NAME"
   build_test "$NAME"
 done
 
-/bin/mkdir -p "$FIXTURES/scanner" "$FIXTURES/safety-root" "$FIXTURES/safety-mutation/Candidate" "$FIXTURES/app-removal" "$FIXTURES/orphans" "$FIXTURES/caches" "$FIXTURES/deletion-policy" "$FIXTURES/uninstaller" "$FIXTURES/leftovers"
+/bin/mkdir -p "$FIXTURES/scanner" "$FIXTURES/safety-root" "$FIXTURES/safety-mutation/Candidate" "$FIXTURES/app-removal" "$FIXTURES/orphans" "$FIXTURES/caches" "$FIXTURES/deletion-policy" "$FIXTURES/uninstaller" "$FIXTURES/leftovers" "$FIXTURES/text"
 print "child fixture" > "$FIXTURES/safety-root/child.txt"
 print "candidate state" > "$FIXTURES/safety-mutation/Candidate/state.txt"
 
@@ -91,4 +92,5 @@ print "== running ($ARCH)"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/DeletionPolicyDifferentialSmoke" "$FIXTURES/deletion-policy"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/UninstallerDifferentialSmoke" "$FIXTURES/uninstaller"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/LeftoversDifferentialSmoke" "$FIXTURES/leftovers"
+/usr/bin/arch -"$ARCH" "$BUILD_DIR/TextRulesDifferentialSmoke" "$FIXTURES/text"
 print "ALL_SMOKE_TESTS_PASSED ($ARCH)"

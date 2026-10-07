@@ -589,8 +589,7 @@ struct DuplicateFinderScanner: Sendable {
     private static func isStrictDescendant(_ candidate: URL, of root: URL) -> Bool {
         let rootPath = root.standardizedFileURL.path
         let candidatePath = candidate.standardizedFileURL.path
-        if rootPath == "/" { return candidatePath != "/" && candidatePath.hasPrefix("/") }
-        return candidatePath.hasPrefix(rootPath + "/")
+        return T27Text.strictDescendant(candidatePath, of: rootPath)
     }
 
     private static func checkCancellation() throws {
