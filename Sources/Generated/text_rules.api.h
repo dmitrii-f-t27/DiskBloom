@@ -72,6 +72,7 @@ bool tx_starts_with_dir(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 
 bool tx_same(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
 uint32_t tx_path_relation(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
 bool tx_strict_descendant(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
+bool tx_contains(uint8_t hay[static 4096], uint32_t hlen, uint8_t needle[static 4096], uint32_t nlen);
 bool tx_within(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
 bool tx_matches_dir(uint8_t text[static 4096], uint32_t len, uint32_t word_kind);
 uint32_t tx_library_area(uint8_t relative[static 4096], uint32_t len);

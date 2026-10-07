@@ -360,7 +360,7 @@ struct OrphanOwnerIndex: Sendable {
                   let commands = String(data: data, encoding: .utf8)?.lowercased() else { return false }
             for identifier in candidateIdentifiers {
                 guard let canonical = OrphanBundleIdentifier.canonical(identifier),
-                      commands.contains(canonical) else { continue }
+                      T27Text.contains(commands, canonical) else { continue }
                 claims[canonical] = "This bundle ID was found in the command line of a running process."
             }
             return true

@@ -78,6 +78,7 @@ bool tx_starts_with_dir(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 
 bool tx_same(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
 uint32_t tx_path_relation(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
 bool tx_strict_descendant(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
+bool tx_contains(uint8_t hay[static 4096], uint32_t hlen, uint8_t needle[static 4096], uint32_t nlen);
 bool tx_within(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen);
 bool tx_matches_dir(uint8_t text[static 4096], uint32_t len, uint32_t word_kind);
 uint32_t tx_library_area(uint8_t relative[static 4096], uint32_t len);
@@ -342,6 +343,34 @@ bool tx_strict_descendant(uint8_t a[static 4096], uint32_t alen, uint8_t b[stati
         return (alen > 1);
     }
     return tx_starts_with_dir(a, alen, b, blen);
+}
+
+bool tx_contains(uint8_t hay[static 4096], uint32_t hlen, uint8_t needle[static 4096], uint32_t nlen) {
+    if (((hlen > TX_MAX) || (nlen > TX_MAX))) {
+        return false;
+    }
+    if ((nlen == 0)) {
+        return true;
+    }
+    if ((nlen > hlen)) {
+        return false;
+    }
+    uint32_t at = 0;
+    while (((at + nlen) <= hlen)) {
+        bool same = true;
+        uint32_t i = 0;
+        while (((i < nlen) && same)) {
+            if ((hay[(at + i)] != needle[i])) {
+                same = false;
+            }
+            i = (i + 1);
+        }
+        if (same) {
+            return true;
+        }
+        at = (at + 1);
+    }
+    return false;
 }
 
 bool tx_within(uint8_t a[static 4096], uint32_t alen, uint8_t b[static 4096], uint32_t blen) {
@@ -710,6 +739,10 @@ void test_tx_paths(void) {
     assert((tx_strict_descendant(b, 1, b, 1) == false));
     assert((tx_strict_descendant(a, 4, b, 2) == true));
     assert((tx_strict_descendant(b, 2, a, 4) == false));
+    assert((tx_contains(a, 4, b, 2) == true));
+    assert((tx_contains(b, 2, a, 4) == false));
+    assert((tx_contains(a, 4, b, 0) == true));
+    assert((tx_contains(a, 4097, b, 1) == false));
 }
 
 void test_tx_home_places(void) {

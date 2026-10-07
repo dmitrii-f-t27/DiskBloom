@@ -68,7 +68,7 @@ enum JSONValue: Sendable, Equatable, Codable {
     var boolValue: Bool? {
         switch self {
         case .bool(let value): value
-        case .string(let value): ["true", "yes", "1"].contains(value.lowercased())
+        case .string(let value): T27Text.withBytes(value.lowercased()) { as_yes_word($0, $1) }
         case .number(let value): value != 0
         default: nil
         }
@@ -399,13 +399,18 @@ final class AssistantSettings: ObservableObject {
 
     var preset: AssistantEndpointPreset { AssistantEndpointPreset.preset(id: presetID) }
 
-    var normalizedBaseURL: String {
-        var value = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        while value.hasSuffix("/") { value.removeLast() }
-        for suffix in ["/chat/completions", "/models"] where value.hasSuffix(suffix) {
-            value.removeLast(suffix.count)
-        }
-        return value
+    var normalizedBaseURL: String { Self.normalize(baseURL) }
+
+    /// The address without trailing slashes or an endpoint path (Specs/assistant_rules.t27).
+    nonisolated static func normalize(_ raw: String) -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let length = T27Text.withBytes(value) { as_base_url_length($0, $1) }
+        return String(decoding: Array(value.utf8).prefix(Int(length)), as: UTF8.self)
+    }
+
+    nonisolated static func isLocal(_ baseURL: String) -> Bool {
+        guard let host = URL(string: baseURL)?.host?.lowercased() else { return false }
+        return T27Text.withBytes(host) { as_local_host($0, $1) }
     }
 
     var apiKey: String? { AssistantKeychain.read(baseURL: normalizedBaseURL) }
@@ -413,14 +418,14 @@ final class AssistantSettings: ObservableObject {
     var hasAPIKey: Bool { !(apiKey ?? "").isEmpty }
 
     var isLocalEndpoint: Bool {
-        guard let host = URL(string: normalizedBaseURL)?.host?.lowercased() else { return false }
-        return host == "localhost" || host == "127.0.0.1" || host == "::1" || host.hasSuffix(".local")
+        Self.isLocal(normalizedBaseURL)
     }
 
     func apply(_ preset: AssistantEndpointPreset) {
         presetID = preset.id
         if !preset.baseURL.isEmpty { baseURL = preset.baseURL }
-        if let first = preset.suggestedModels.first, model.isEmpty || !preset.suggestedModels.contains(model) {
+        if let first = preset.suggestedModels.first,
+           as_replace_model(true, model.isEmpty, preset.suggestedModels.contains(model)) {
             model = first
         }
     }
@@ -707,45 +712,37 @@ final class AssistantToolbox {
 
     static func resolve(_ raw: String) -> URL? {
         var path = raw.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"'`")))
-        guard !path.isEmpty else { return nil }
-        if path == "~" {
-            path = UserHome.path
-        } else if path.hasPrefix("~/") {
-            path = UserHome.path + String(path.dropFirst(1))
-        } else if !path.hasPrefix("/") {
-            path = UserHome.path + "/" + path
+        switch Int32(T27Text.withBytes(path) { as_path_form($0, $1) }) {
+        case AS_PATH_EMPTY: return nil
+        case AS_PATH_HOME: path = UserHome.path
+        case AS_PATH_UNDER_HOME: path = UserHome.path + String(path.dropFirst(1))
+        case AS_PATH_RELATIVE: path = UserHome.path + "/" + path
+        default: break
         }
         let url = URL(fileURLWithPath: path).standardizedFileURL
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    private static func displayPath(_ url: URL) -> String {
+    static func displayPath(_ url: URL) -> String {
         let path = url.path
-        if path == UserHome.path { return "Home" }
-        if path.hasPrefix(UserHome.path + "/") { return "~" + path.dropFirst(UserHome.path.count) }
-        return path
-    }
-
-    private static func section(named name: String) -> WorkspaceSection? {
-        switch name.lowercased().replacingOccurrences(of: " ", with: "_") {
-        case "disk_map", "diskmap", "map": .diskMap
-        case "caches", "cache": .cacheExplorer
-        case "app_uninstaller", "uninstaller", "apps": .appUninstaller
-        case "leftovers", "possible_leftovers": .orphanedAppData
-        case "duplicates", "duplicate_files": .duplicateFinder
-        default: nil
+        switch Int32(as_display_form(T27Text.same(path, UserHome.path), T27Text.inside(path, UserHome.path))) {
+        case AS_SHOW_HOME: return "Home"
+        case AS_SHOW_TILDE: return "~" + path.dropFirst(UserHome.path.count)
+        default: return path
         }
     }
 
-    private static func verdict(named name: String?) -> CacheVerdict? {
-        switch name?.lowercased() {
-        case "safe": .safe
-        case "optional": .optional
-        case "in_use", "quitfirst", "quit_first": .quitFirst
-        case "keep": .keep
-        case "tool", "use_tool": .useTool
-        default: nil
-        }
+    /// Which section a tool argument names, read by Specs/assistant_rules.t27.
+    static func section(named name: String) -> WorkspaceSection? {
+        let code = T27Text.withBytes(name.lowercased()) { as_section($0, $1) }
+        let sections: [WorkspaceSection] = [.diskMap, .appUninstaller, .orphanedAppData, .duplicateFinder, .cacheExplorer]
+        return code == UInt32(AS_NONE) ? nil : sections[Int(code)]
+    }
+
+    static func verdict(named name: String?) -> CacheVerdict? {
+        guard let name else { return nil }
+        let code = T27Text.withBytes(name.lowercased()) { as_verdict($0, $1) }
+        return code == UInt32(AS_NONE) ? nil : CacheVerdict(t27: code)
     }
 
     static func title(of section: WorkspaceSection) -> String {

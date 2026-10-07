@@ -107,6 +107,31 @@ enum T27Text {
         return String(decoding: Array(name.utf8).prefix(Int(length)), as: UTF8.self)
     }
 
+    /// `needle` occurs in `haystack`; long text is searched in overlapping chunks of TX_MAX bytes.
+    static func contains(_ haystack: String, _ needle: String) -> Bool {
+        let hay = Array(haystack.utf8)
+        var pattern = Array(needle.utf8)
+        let patternLength = pattern.count
+        guard patternLength <= capacity else { return false }
+        pattern += repeatElement(0, count: capacity - patternLength)
+        let step = max(1, capacity - max(patternLength - 1, 0))
+        var chunk = [UInt8](repeating: 0, count: capacity)
+        var start = 0
+        repeat {
+            let end = min(hay.count, start + capacity)
+            chunk.replaceSubrange(0..<(end - start), with: hay[start..<end])
+            let found = chunk.withUnsafeMutableBufferPointer { h in
+                pattern.withUnsafeMutableBufferPointer { n in
+                    tx_contains(h.baseAddress!, UInt32(end - start), n.baseAddress!, UInt32(patternLength))
+                }
+            }
+            if found { return true }
+            if end == hay.count { return false }
+            start += step
+        } while start < hay.count
+        return false
+    }
+
     // MARK: Identifiers and names
 
     static func hasApplePrefix(_ text: String) -> Bool {

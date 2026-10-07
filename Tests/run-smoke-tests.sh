@@ -40,6 +40,7 @@ build_test() {
   [[ "$name" == MoveDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/MoveLegacy.swift")
   [[ "$name" == DuplicatesDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/DuplicatesLegacy.swift" "$ROOT_DIR/Tests/Smoke/TestSupport.swift")
   [[ "$name" == PresentationDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/PresentationLegacy.swift" "$ROOT_DIR/Tests/Smoke/TestSupport.swift")
+  [[ "$name" == AssistantDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/AssistantLegacy.swift" "$ROOT_DIR/Tests/Smoke/CapturedModelIDs.swift" "$ROOT_DIR/Tests/Smoke/TestSupport.swift")
   [[ "$name" == TextRulesDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/LegacyText.swift" "$ROOT_DIR/Tests/Smoke/TestSupport.swift")
   xcrun swiftc \
     -emit-executable \
@@ -65,7 +66,7 @@ build_test() {
     -o "$BUILD_DIR/$name"
 }
 
-for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke UninstallerDifferentialSmoke LeftoversDifferentialSmoke TextRulesDifferentialSmoke ScannerDifferentialSmoke MoveDifferentialSmoke DuplicatesDifferentialSmoke PresentationDifferentialSmoke ModelRulesDifferentialSmoke; do
+for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke UninstallerDifferentialSmoke LeftoversDifferentialSmoke TextRulesDifferentialSmoke ScannerDifferentialSmoke MoveDifferentialSmoke DuplicatesDifferentialSmoke PresentationDifferentialSmoke ModelRulesDifferentialSmoke AssistantDifferentialSmoke; do
   print "== building $NAME"
   build_test "$NAME"
 done
@@ -102,4 +103,5 @@ print "== running ($ARCH)"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/DuplicatesDifferentialSmoke" "$FIXTURES/duplicates"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/PresentationDifferentialSmoke"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/ModelRulesDifferentialSmoke"
+/usr/bin/arch -"$ARCH" "$BUILD_DIR/AssistantDifferentialSmoke"
 print "ALL_SMOKE_TESTS_PASSED ($ARCH)"

@@ -295,13 +295,19 @@ enum ApplicationCatalog {
             options: [.skipsHiddenFiles]
         ) else { return }
         for entry in entries {
-            guard let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .isSymbolicLinkKey]),
-                  values.isDirectory == true,
-                  values.isSymbolicLink != true else { continue }
-            if T27Text.hasAppExtension(entry.path) {
+            let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .isSymbolicLinkKey])
+            let action = Int32(as_catalog_entry(
+                values != nil,
+                values?.isDirectory == true,
+                values?.isSymbolicLink == true,
+                T27Text.hasAppExtension(entry.path),
+                Int64(remainingDepth),
+                values?.isPackage == true
+            ))
+            if action == AS_CATALOG_ADD {
                 let profile = profile(for: entry, sourceLabel: sourceLabel)
                 if seen.insert(profile.id).inserted { found.append(profile) }
-            } else if remainingDepth > 0, values.isPackage != true {
+            } else if action == AS_CATALOG_DESCEND {
                 collectApplications(
                     at: entry,
                     sourceLabel: sourceLabel,
