@@ -13,27 +13,14 @@ struct AssistantModelInfo: Identifiable, Sendable, Hashable {
     /// `true`/`false` when the provider says whether the model takes tools; `nil` when it does not say.
     let declaresTools: Bool?
 
-    /// Embedding, reranking, safety, vision-parsing and speech models cannot hold a chat.
+    /// Embedding, reranking, safety, vision-parsing and speech models cannot hold a chat (Specs/assistant_rules.t27).
     var isChatModel: Bool {
-        let lower = id.lowercased()
-        let nonChat = [
-            "embed", "rerank", "reward", "guard", "safety", "content-safety", "topic-control", "nemoretriever",
-            "retriever", "parse", "clip", "vila", "neva", "deplot", "kosmos", "fuyu", "riva", "detector",
-            "calibration", "whisper", "tts", "diffusion", "cosmos", "paligemma", "starcoder", "codegemma"
-        ]
-        return !nonChat.contains { lower.contains($0) }
+        T27Text.withBytes(id.lowercased()) { as_chat_model($0, $1) }
     }
 
-    /// Models that are known to handle tool calling well enough for the assistant.
+    /// Models that handle the assistant's tool calling well enough.
     var isRecommended: Bool {
-        if let declaresTools { return declaresTools && isChatModel }
-        let lower = id.lowercased()
-        let families = [
-            "kimi-k", "glm-4.5", "glm-4.6", "glm-5", "deepseek-v3", "deepseek-v4", "gpt-oss", "gpt-4", "gpt-5",
-            "nemotron-3-super", "nemotron-3-ultra", "nemotron-ultra", "mistral-large", "qwen3", "qwen2.5",
-            "llama-3.1-70b", "llama-3.3", "llama-4", "gemma-4", "claude", "gemini"
-        ]
-        return isChatModel && families.contains { lower.contains($0) }
+        T27Text.withBytes(id.lowercased()) { as_recommended_model($0, $1, declaresTools != nil, declaresTools == true) }
     }
 }
 
@@ -128,23 +115,30 @@ final class OpenAICompatibleBackend: AssistantBackend {
 
     /// Drops old turns, cutting only at a user message so tool calls keep their results.
     private func trimHistory() {
-        guard history.count > Self.maxHistory else { return }
-        var index = history.count - Self.maxHistory
-        while index < history.count, history[index]["role"]?.stringValue != "user" { index += 1 }
-        guard index < history.count else { return }
-        history = [history[0]] + history[index...]
+        guard let cut = Self.historyCut(roles: history.map { $0["role"]?.stringValue ?? "" }, keep: Self.maxHistory) else { return }
+        history = [history[0]] + history[cut...]
+    }
+
+    /// The first turn to keep when the conversation is too long (Specs/assistant_rules.t27), or nil.
+    nonisolated static func historyCut(roles: [String], keep: Int) -> Int? {
+        var flags = roles.map { $0 == "user" ? UInt8(1) : UInt8(0) }
+        let count = flags.count
+        if flags.count < T27Text.capacity { flags += repeatElement(0, count: T27Text.capacity - flags.count) }
+        let cut = flags.withUnsafeMutableBufferPointer { as_history_cut($0.baseAddress!, UInt32(count), UInt32(keep)) }
+        return cut > 0 ? Int(cut) : nil
     }
 
     /// Removes the reasoning some models put inline in <think> tags.
     nonisolated static func visibleText(_ text: String) -> String {
-        var result = text
-        while let start = result.range(of: "<think>") {
-            if let end = result.range(of: "</think>", range: start.upperBound..<result.endIndex) {
-                result.removeSubrange(start.lowerBound..<end.upperBound)
-            } else {
-                result.removeSubrange(start.lowerBound..<result.endIndex)
-            }
+        let capacity = Int(AS_REPLY_MAX)
+        var bytes = Array(text.utf8)
+        let length = bytes.count
+        if bytes.count < capacity { bytes += repeatElement(0, count: capacity - bytes.count) }
+        var out = [UInt8](repeating: 0, count: max(capacity, length))
+        let kept = bytes.withUnsafeMutableBufferPointer { input in
+            out.withUnsafeMutableBufferPointer { as_strip_thinking(input.baseAddress!, UInt32(length), $0.baseAddress!) }
         }
+        let result = length > capacity ? text : String(decoding: out.prefix(Int(kept)), as: UTF8.self)
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -182,18 +176,13 @@ final class OpenAICompatibleBackend: AssistantBackend {
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let decoded = try? JSONDecoder().decode(JSONValue.self, from: data)
-        guard (200..<300).contains(status) else {
+        guard as_http_ok(Int64(status)) else {
             let detail = decoded?["error"]?["message"]?.stringValue
                 ?? decoded?["error"]?.stringValue
                 ?? decoded?["message"]?.stringValue
                 ?? String(decoding: data.prefix(300), as: UTF8.self)
-            let hint: String
-            switch status {
-            case 401, 403: hint = " Check the API key."
-            case 404: hint = " The address is wrong or this provider has no model with that name — pick one from the model list."
-            case 429: hint = " The provider's rate limit or balance ran out."
-            default: hint = ""
-            }
+            let hintRow = as_http_hint_row(UInt32(clamping: status))
+            let hint = T27Text.output { as_row_text(hintRow, 1, $0) } ?? ""
             throw AssistantFailure(message: "API error \(status): \(detail)\(hint)")
         }
         guard let decoded else {

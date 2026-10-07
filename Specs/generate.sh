@@ -12,6 +12,8 @@ WORK="$(/usr/bin/mktemp -d)"
 trap '/bin/rm -rf -- "$WORK"' EXIT
 [[ -x "$T27C" ]] || { print -u2 "t27c not found: set T27C"; exit 2; }
 /bin/mkdir -p "$OUT"
+# Byte tables are written into their specs from readable lists first.
+for TABLES in "$ROOT_DIR"/Specs/tables/*.py; do /usr/bin/python3 "$TABLES" >/dev/null; done
 
 for SPEC in "$ROOT_DIR"/Specs/*.t27; do
   NAME="${SPEC:t:r}"

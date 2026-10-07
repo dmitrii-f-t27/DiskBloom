@@ -271,6 +271,26 @@ pub fn tx_strict_descendant(a: [4096]u8, alen: u32, b: [4096]u8, blen: u32) -> b
     return tx_starts_with_dir(a, alen, b, blen);
 }
 
+; The needle occurs somewhere in the haystack (both at most TX_MAX bytes; Swift searches longer text in
+; overlapping chunks).
+pub fn tx_contains(hay: [4096]u8, hlen: u32, needle: [4096]u8, nlen: u32) -> bool {
+    if (hlen > TX_MAX or nlen > TX_MAX) { return false; }
+    if (nlen == 0) { return true; }
+    if (nlen > hlen) { return false; }
+    var at: u32 = 0;
+    while (at + nlen <= hlen) {
+        var same: bool = true;
+        var i: u32 = 0;
+        while (i < nlen and same) {
+            if (hay[at + i] != needle[i]) { same = false; }
+            i = i + 1;
+        }
+        if (same) { return true; }
+        at = at + 1;
+    }
+    return false;
+}
+
 ; True when A is B or inside it.
 pub fn tx_within(a: [4096]u8, alen: u32, b: [4096]u8, blen: u32) -> bool {
     var r: u32 = tx_path_relation(a, alen, b, blen);
@@ -544,6 +564,10 @@ test tx_paths {
     assert tx_strict_descendant(b, 1, b, 1) == false;
     assert tx_strict_descendant(a, 4, b, 2) == true;
     assert tx_strict_descendant(b, 2, a, 4) == false;
+    assert tx_contains(a, 4, b, 2) == true;
+    assert tx_contains(b, 2, a, 4) == false;
+    assert tx_contains(a, 4, b, 0) == true;
+    assert tx_contains(a, 4097, b, 1) == false;
 }
 
 test tx_home_places {
