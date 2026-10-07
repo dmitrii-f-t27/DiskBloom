@@ -717,10 +717,10 @@ final class CacheExplorerModel: ObservableObject {
 
     var selectedItems: [CacheItem] { items.filter { selectedIDs.contains($0.id) } }
     var selectedSize: Int64 { selectedItems.reduce(0) { $0 + $1.size } }
-    var isNavigationLocked: Bool { isReviewing || isMovingToTrash || showingReview }
+    var isNavigationLocked: Bool { md_cache_locked(isReviewing, isMovingToTrash, showingReview) }
 
     func startAnalysis() {
-        guard !isReviewing, !isMovingToTrash else { return }
+        guard md_cache_can_measure(isReviewing, isMovingToTrash) else { return }
         guard FolderAccess.shared.ensureHomeAccess(
             message: "DiskBloom measures the caches in your Library and ~/.cache. Select your home folder and click Grant Access."
         ) else {
@@ -790,7 +790,7 @@ final class CacheExplorerModel: ObservableObject {
     }
 
     func toggle(_ item: CacheItem) {
-        guard item.isSelectable, !isNavigationLocked else { return }
+        guard md_cache_can_toggle(item.isSelectable, isNavigationLocked) else { return }
         if selectedIDs.contains(item.id) {
             selectedIDs.remove(item.id)
         } else {
@@ -803,14 +803,14 @@ final class CacheExplorerModel: ObservableObject {
     func select(ids: [String]) -> [CacheItem] {
         guard !isNavigationLocked else { return [] }
         let wanted = Set(ids)
-        let chosen = items.filter { wanted.contains($0.id) && $0.isSelectable }
+        let chosen = items.filter { wanted.contains($0.id) && md_cache_can_toggle($0.isSelectable, false) }
         selectedIDs.formUnion(chosen.map(\.id))
         highlightedIDs = Set(chosen.map(\.id))
         return chosen
     }
 
     func selectAll(verdict: CacheVerdict) {
-        guard verdict.isSelectable, !isNavigationLocked else { return }
+        guard md_cache_can_toggle(verdict.isSelectable, isNavigationLocked) else { return }
         let ids = items.filter { $0.verdict == verdict }.map(\.id)
         selectedIDs.formUnion(ids)
         highlightedIDs = Set(ids)
@@ -833,7 +833,7 @@ final class CacheExplorerModel: ObservableObject {
 
     func requestReview() {
         let chosen = selectedItems
-        guard !chosen.isEmpty, !isScanning, !isMovingToTrash, !isReviewing else { return }
+        guard md_cache_can_review(Int64(chosen.count), isScanning, isMovingToTrash, isReviewing) else { return }
         reviewTask?.cancel()
         isReviewing = true
         reviewTask = Task {
@@ -856,7 +856,7 @@ final class CacheExplorerModel: ObservableObject {
 
     func moveReviewedItemsToTrash() {
         let chosen = selectedItems
-        guard showingReview, !chosen.isEmpty, !isMovingToTrash else { return }
+        guard md_cache_can_move(showingReview, Int64(chosen.count), isMovingToTrash) else { return }
         showingReview = false
         isMovingToTrash = true
         Task {

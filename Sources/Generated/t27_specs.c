@@ -5,6 +5,7 @@
 #include "fingerprint.h"
 #include "format_rules.h"
 #include "leftovers_policy.h"
+#include "model_rules.h"
 #include "move_rules.h"
 #include "scan_rules.h"
 #include "sunburst_rules.h"

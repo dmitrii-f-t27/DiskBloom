@@ -772,21 +772,21 @@ final class OrphanedAppDataModel: ObservableObject {
 
     var selectedItems: [OrphanDataItem] {
         groups.flatMap(\.items).filter {
-            selectedItemIDs.contains($0.id) && !confirmedMovedItemIDs.contains($0.id)
+            md_counts_as_selected(selectedItemIDs.contains($0.id), confirmedMovedItemIDs.contains($0.id))
         }
     }
 
     var selectedSize: Int64 { selectedItems.reduce(0) { $0 + $1.node.size } }
     var processCheckUnavailable: Bool { analysis?.processCheckAvailable == false }
     var needsExtraAcknowledgement: Bool {
-        processCheckUnavailable || selectedItems.contains { $0.risk.needsExtraAcknowledgement }
+        md_needs_acknowledgement(processCheckUnavailable, selectedItems.contains { $0.risk.needsExtraAcknowledgement })
     }
     var hasUncertainOutcome: Bool {
-        guard let uncertainPaths = lastOutcome?.uncertainPaths else { return false }
-        return !Set(uncertainPaths).isSubset(of: manuallyAcknowledgedUncertainPaths)
+        let uncertainPaths = lastOutcome?.uncertainPaths ?? []
+        return md_uncertain_open(!uncertainPaths.isEmpty, Set(uncertainPaths).isSubset(of: manuallyAcknowledgedUncertainPaths))
     }
     var isNavigationLocked: Bool {
-        isReviewing || isMovingToTrash || showingReview || showingOutcomeReport
+        md_leftovers_locked(isReviewing, isMovingToTrash, showingReview, showingOutcomeReport)
     }
 
     func startAnalysis() {
@@ -799,7 +799,7 @@ final class OrphanedAppDataModel: ObservableObject {
             )
             return
         }
-        guard !isReviewing, !isMovingToTrash, !hasUncertainOutcome else {
+        guard md_leftovers_can_analyse(isReviewing, isMovingToTrash, hasUncertainOutcome) else {
             notice = AppNotice(
                 title: "Re-analysis blocked",
                 message: "Check the disputed result of the previous move first."
@@ -865,11 +865,13 @@ final class OrphanedAppDataModel: ObservableObject {
     }
 
     func toggle(_ item: OrphanDataItem) {
-        guard item.isSelectable,
-              !confirmedMovedItemIDs.contains(item.id),
-              !isReviewing,
-              !isMovingToTrash,
-              !hasUncertainOutcome else { return }
+        guard md_leftovers_can_toggle(
+            item.isSelectable,
+            confirmedMovedItemIDs.contains(item.id),
+            isReviewing,
+            isMovingToTrash,
+            hasUncertainOutcome
+        ) else { return }
         if selectedItemIDs.contains(item.id) {
             selectedItemIDs.remove(item.id)
         } else {
@@ -883,7 +885,7 @@ final class OrphanedAppDataModel: ObservableObject {
 
     func requestReview() {
         let items = selectedItems
-        guard !items.isEmpty, !isScanning, !isMovingToTrash, !hasUncertainOutcome else { return }
+        guard md_leftovers_can_review(Int64(items.count), isScanning, isMovingToTrash, hasUncertainOutcome) else { return }
         let generation = UUID()
         reviewGeneration = generation
         reviewTask?.cancel()
@@ -918,7 +920,7 @@ final class OrphanedAppDataModel: ObservableObject {
 
     func moveReviewedItemsToTrash() {
         let items = selectedItems
-        guard showingReview, !items.isEmpty, !isMovingToTrash, !hasUncertainOutcome else { return }
+        guard md_leftovers_can_move(showingReview, Int64(items.count), isMovingToTrash, hasUncertainOutcome) else { return }
         showingReview = false
         isMovingToTrash = true
         let localHome = homeURL
@@ -944,9 +946,7 @@ final class OrphanedAppDataModel: ObservableObject {
 
     func recheckUncertainOutcome() {
         guard let outcome = lastOutcome,
-              !outcome.uncertainPaths.isEmpty,
-              !isReviewing,
-              !isMovingToTrash else { return }
+              md_can_recheck_uncertain(!outcome.uncertainPaths.isEmpty, isReviewing, isMovingToTrash) else { return }
         let uncertain = groups.flatMap(\.items).filter { outcome.uncertainPaths.contains($0.url.path) }
         guard uncertain.count == outcome.uncertainPaths.count else {
             notice = AppNotice(
@@ -987,9 +987,7 @@ final class OrphanedAppDataModel: ObservableObject {
 
     func acknowledgeUncertainOutcomeAfterManualCheck() {
         guard let outcome = lastOutcome,
-              !outcome.uncertainPaths.isEmpty,
-              !isReviewing,
-              !isMovingToTrash else { return }
+              md_can_recheck_uncertain(!outcome.uncertainPaths.isEmpty, isReviewing, isMovingToTrash) else { return }
         manuallyAcknowledgedUncertainPaths.formUnion(outcome.uncertainPaths)
         showingOutcomeReport = false
         notice = AppNotice(
@@ -999,7 +997,7 @@ final class OrphanedAppDataModel: ObservableObject {
     }
 
     func clearLastOutcome() {
-        guard !isMovingToTrash, !hasUncertainOutcome else { return }
+        guard md_can_clear_outcome(isMovingToTrash, hasUncertainOutcome) else { return }
         lastOutcome = nil
         manuallyAcknowledgedUncertainPaths = []
         showingOutcomeReport = false

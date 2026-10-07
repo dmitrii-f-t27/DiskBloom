@@ -467,14 +467,16 @@ final class AssistantToolbox {
 
     private var isBusy: Bool {
         guard let app, let caches, let uninstaller, let orphans else { return true }
-        return app.isMovingToTrash
-            || app.showingTrashReview
-            || uninstaller.isMovingToTrash
-            || uninstaller.isReviewing
-            || uninstaller.showingReview
-            || uninstaller.showingOutcomeReport
-            || orphans.isNavigationLocked
-            || caches.isNavigationLocked
+        return md_assistant_busy(
+            app.isMovingToTrash,
+            app.showingTrashReview,
+            uninstaller.isMovingToTrash,
+            uninstaller.isReviewing,
+            uninstaller.showingReview,
+            uninstaller.showingOutcomeReport,
+            orphans.isNavigationLocked,
+            caches.isNavigationLocked
+        )
     }
 
     private static let busyMessage = "DiskBloom is in the middle of a review or a move to the Trash. Ask the user to finish it first."
@@ -538,7 +540,7 @@ final class AssistantToolbox {
     private func largestItems(path: String?, limit: Int?) async -> String {
         guard let app else { return "Not ready." }
         guard !isBusy else { return Self.busyMessage }
-        let count = min(15, max(1, limit ?? 8))
+        let count = Int(md_tool_limit(Int64(limit ?? 0), limit != nil, 8, 15))
         app.selectWorkspaceSection(.diskMap)
 
         if let path, !path.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -584,7 +586,7 @@ final class AssistantToolbox {
         cacheRefs = [:]
         for (index, item) in analysis.items.enumerated() { cacheRefs["c\(index + 1)"] = item.id }
         let refByID = Dictionary(uniqueKeysWithValues: cacheRefs.map { ($0.value, $0.key) })
-        let shown = analysis.items.filter { verdict == nil || $0.verdict == verdict }.prefix(min(20, max(1, limit ?? 10)))
+        let shown = analysis.items.filter { verdict == nil || $0.verdict == verdict }.prefix(Int(md_tool_limit(Int64(limit ?? 0), limit != nil, 10, 20)))
         var lines = [
             "Caches: \(ByteFormat.string(analysis.totalSize)) in \(analysis.items.count). Safe \(ByteFormat.string(analysis.size(of: .safe))) (\(analysis.count(of: .safe))), optional \(ByteFormat.string(analysis.size(of: .optional))) (\(analysis.count(of: .optional))), in use \(analysis.count(of: .quitFirst)), keep \(analysis.count(of: .keep)), tool-only \(analysis.count(of: .useTool))."
         ]
@@ -806,10 +808,17 @@ final class AssistantModel: ObservableObject {
         case .apple:
             return AppleAssistantSupport.status()
         case .api:
-            guard URL(string: settings.normalizedBaseURL)?.host != nil else { return (false, "Set the API address in Settings") }
-            guard !settings.model.trimmingCharacters(in: .whitespaces).isEmpty else { return (false, "Choose a model in Settings") }
-            guard settings.isLocalEndpoint || settings.hasAPIKey else { return (false, "Add the API key in Settings") }
-            return (true, settings.model)
+            switch Int32(md_api_status(
+                URL(string: settings.normalizedBaseURL)?.host != nil,
+                !settings.model.trimmingCharacters(in: .whitespaces).isEmpty,
+                settings.isLocalEndpoint,
+                settings.hasAPIKey
+            )) {
+            case MD_API_NO_ADDRESS: return (false, "Set the API address in Settings")
+            case MD_API_NO_MODEL: return (false, "Choose a model in Settings")
+            case MD_API_NO_KEY: return (false, "Add the API key in Settings")
+            default: return (true, settings.model)
+            }
         }
     }
 
