@@ -4,9 +4,9 @@ DiskBloom is a local, native macOS app that shows where your disk space went, sa
 
 ## Download and install
 
-**[Download DiskBloom 1.4 for macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.4.0/DiskBloom-1.4.0-macOS-arm64.dmg)**
+**[Download DiskBloom 1.5 for macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.5.0/DiskBloom-1.5.0-macOS-arm64.dmg)**
 
-[ZIP archive](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.4.0/DiskBloom-1.4.0-macOS-arm64.zip) · [All releases](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.4.0/SHA256SUMS)
+[ZIP archive](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.5.0/DiskBloom-1.5.0-macOS-arm64.zip) · [All releases](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.5.0/SHA256SUMS)
 
 Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later.** The direct download does not support Intel Macs. The interface is in English.
 
@@ -14,7 +14,7 @@ Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or la
 2. Open DiskBloom from Applications. The prebuilt app does not need Xcode.
 3. Choose a tool and a folder to analyze. The duplicate finder is read-only; cleanup actions in the other tools need a separate confirmation.
 
-**Signature status:** version 1.4 (build 5) from GitHub has a local ad-hoc signature, without a Developer ID and without Apple notarization. macOS may block the first launch. If you trust this release, try to open the app once, then use the per-app permission in System Settings → Privacy & Security. Do not turn off Gatekeeper for the whole system. [Apple's instructions](https://support.apple.com/102445).
+**Signature status:** version 1.5 (build 6) from GitHub has a local ad-hoc signature, without a Developer ID and without Apple notarization. macOS may block the first launch. If you trust this release, try to open the app once, then use the per-app permission in System Settings → Privacy & Security. Do not turn off Gatekeeper for the whole system. [Apple's instructions](https://support.apple.com/102445).
 
 ## Features
 
@@ -141,7 +141,7 @@ The Mac App Store build is produced by `DiskBloom.xcodeproj`, which is generated
 ARCH=x86_64 ./Tests/run-smoke-tests.sh   # Intel slice, runs under Rosetta
 ```
 
-Five suites cover the scanner, cleanup safety, app removal, possible leftovers and the duplicate finder. They build their own fixtures inside `.build/` and never call the real Trash: the leftovers coordinator test uses an injected mover.
+Six smoke suites cover the scanner, cleanup safety, app removal, possible leftovers, the duplicate finder and the cache explorer. The script also runs every t27 spec's own tests and eleven differential tests that compare the t27 rules with the Swift rules they replaced. Tests build their own fixtures inside `.build/` and never call the real Trash: the move coordinators use an injected mover.
 
 ## Important limitations
 
@@ -156,7 +156,7 @@ Five suites cover the scanner, cleanup safety, app removal, possible leftovers a
 
 ## Decisions written in t27
 
-The safety decisions — which caches may be cleared and whether an item may go to the Trash — are written in t27, the spec language of the Trinity stack, and compiled to C that Swift calls. See [Specs/README.md](Specs/README.md).
+Every decision the app makes — cache verdicts, what may go to the Trash, the uninstaller and leftovers rules, the scanner, the order of checks around a move, the duplicate finder and SHA-256, size formatting, the ring map, what each screen allows and the assistant's rules — is written in t27, the spec language of the Trinity stack, and compiled to C that Swift calls. Swift collects the facts and carries out the answer. See [Specs/README.md](Specs/README.md).
 
 ## Privacy
 
