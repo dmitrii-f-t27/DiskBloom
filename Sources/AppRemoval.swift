@@ -702,29 +702,35 @@ enum AppRemovalPolicy {
         }
     }
 
+    /// Re-reads the application's signature around two snapshot comparisons, in the order
+    /// Specs/move_rules.t27 gives for the signature phase.
     static func validateTrustedSignature(
         for plan: AppRemovalPlan,
         candidateURL: URL? = nil
     ) -> String? {
-        guard let expectedSignature = plan.validatedSignature else { return nil }
         let expectedURL = plan.application.url.standardizedFileURL
         let currentURL = (candidateURL ?? expectedURL).standardizedFileURL
-        guard currentURL.path == expectedURL.path else {
-            return "The coordinated application path changed: \(expectedURL.path)"
+        let applicationItem = plan.items.first(where: \.isRequired)
+        return MoveSteps.run(MV_UNINSTALLER, MV_PHASE_SIGNATURE, hasSignature: plan.validatedSignature != nil) { step, occurrence in
+            switch step {
+            case MV_STEP_PATH_UNCHANGED:
+                return T27Text.same(currentURL.path, expectedURL.path) ? nil : "The coordinated application path changed: \(expectedURL.path)"
+            case MV_STEP_HAS_BUNDLE_SNAPSHOT:
+                return applicationItem == nil ? "The plan is missing the required application snapshot." : nil
+            case MV_STEP_SNAPSHOT:
+                guard let applicationItem,
+                      let reason = SnapshotValidator.validate(applicationItem.node, candidateURL: currentURL) else { return nil }
+                return occurrence == 0
+                    ? "The application bundle changed after analysis: \(reason)"
+                    : "The application bundle changed during signature verification: \(reason)"
+            case MV_STEP_SIGNATURE_UNCHANGED:
+                return CodeSignatureReader.validatedMetadata(at: currentURL) == plan.validatedSignature
+                    ? nil
+                    : "The application’s signature, Team ID or signing identifier changed after analysis: \(currentURL.path)"
+            default:
+                return nil
+            }
         }
-        guard let applicationItem = plan.items.first(where: \.isRequired) else {
-            return "The plan is missing the required application snapshot."
-        }
-        if let reason = SnapshotValidator.validate(applicationItem.node, candidateURL: currentURL) {
-            return "The application bundle changed after analysis: \(reason)"
-        }
-        guard CodeSignatureReader.validatedMetadata(at: currentURL) == expectedSignature else {
-            return "The application’s signature, Team ID or signing identifier changed after analysis: \(currentURL.path)"
-        }
-        if let reason = SnapshotValidator.validate(applicationItem.node, candidateURL: currentURL) {
-            return "The application bundle changed during signature verification: \(reason)"
-        }
-        return nil
     }
 
     static func continuationEligibilityReason(for plan: AppRemovalPlan) -> String? {
@@ -835,60 +841,38 @@ enum AppRemovalCoordinator {
     static func moveToTrash(
         items: [AppRemovalItem],
         plan: AppRemovalPlan,
-        applicationAlreadyMoved: Bool
+        applicationAlreadyMoved: Bool,
+        mover: MoveSteps.Mover = MoveSteps.systemTrashMover
     ) -> AppRemovalOutcome {
         let ordered = items.sorted {
             if $0.isRequired != $1.isRequired { return $0.isRequired }
             return $0.url.path < $1.url.path
         }
-        if let overlap = AppRemovalPolicy.overlappingSelectionReason(ordered) {
-            return AppRemovalOutcome(
-                movedPaths: [],
-                uncertainPaths: [],
-                failure: overlap,
-                unattemptedPaths: ordered.map { $0.url.path }
-            )
-        }
-        if !applicationAlreadyMoved,
-           let running = AppRunningDetector.reason(for: plan.application) {
-            return AppRemovalOutcome(
-                movedPaths: [],
-                uncertainPaths: [],
-                failure: running,
-                unattemptedPaths: ordered.map { $0.url.path }
-            )
-        }
-        if !applicationAlreadyMoved,
-           let signatureFailure = AppRemovalPolicy.validateTrustedSignature(for: plan) {
-            return AppRemovalOutcome(
-                movedPaths: [],
-                uncertainPaths: [],
-                failure: signatureFailure,
-                unattemptedPaths: ordered.map { $0.url.path }
-            )
-        }
-        if applicationAlreadyMoved,
-           let continuationFailure = AppRemovalPolicy.continuationEligibilityReason(for: plan) {
-            return AppRemovalOutcome(
-                movedPaths: [],
-                uncertainPaths: [],
-                failure: continuationFailure,
-                unattemptedPaths: ordered.map { $0.url.path }
-            )
-        }
-        for item in ordered {
-            if let reason = AppRemovalPolicy.validate(
-                item,
-                application: plan.application,
-                requireApplicationPresence: !applicationAlreadyMoved
-            ) {
-                return AppRemovalOutcome(
-                    movedPaths: [],
-                    uncertainPaths: [],
-                    failure: reason,
-                    unattemptedPaths: ordered.map { $0.url.path }
-                )
+        let queueFailure = MoveSteps.run(MV_UNINSTALLER, MV_PHASE_QUEUE, appMoved: applicationAlreadyMoved) { step, _ in
+            switch step {
+            case MV_STEP_OVERLAP:
+                return AppRemovalPolicy.overlappingSelectionReason(ordered)
+            case MV_STEP_RUNNING:
+                return AppRunningDetector.reason(for: plan.application)
+            case MV_STEP_SIGNATURE:
+                return AppRemovalPolicy.validateTrustedSignature(for: plan)
+            case MV_STEP_CONTINUATION:
+                return AppRemovalPolicy.continuationEligibilityReason(for: plan)
+            case MV_STEP_VALIDATE_ALL:
+                for item in ordered {
+                    if let reason = AppRemovalPolicy.validate(
+                        item,
+                        application: plan.application,
+                        requireApplicationPresence: !applicationAlreadyMoved
+                    ) { return reason }
+                }
+                return nil
+            default:
+                return nil
             }
+        }
+        if let queueFailure {
+            return AppRemovalOutcome(movedPaths: [], uncertainPaths: [], failure: queueFailure, unattemptedPaths: ordered.map { $0.url.path })
         }
 
         var moved: [String] = []
@@ -900,80 +884,69 @@ enum AppRemovalCoordinator {
             var localFailure: String?
             var didMove = false
             var moveResultIsUncertain = false
+            let applicationMovedBefore = appHasMoved
             coordinator.coordinate(writingItemAt: url, options: .forMoving, error: &coordinationError) { coordinatedURL in
-                if item.isRequired,
-                   let running = AppRunningDetector.reason(for: plan.application) {
-                    localFailure = running
-                    return
+                var expectedIdentity: String?
+                localFailure = MoveSteps.run(MV_UNINSTALLER, MV_PHASE_ITEM, required: item.isRequired, appMoved: applicationMovedBefore) { step, _ in
+                    switch step {
+                    case MV_STEP_RUNNING:
+                        return AppRunningDetector.reason(for: plan.application)
+                    case MV_STEP_SIGNATURE:
+                        return AppRemovalPolicy.validateTrustedSignature(for: plan, candidateURL: coordinatedURL)
+                    case MV_STEP_VALIDATE:
+                        return AppRemovalPolicy.validate(
+                            item,
+                            application: plan.application,
+                            candidateURL: coordinatedURL,
+                            requireApplicationPresence: !applicationMovedBefore
+                        )
+                    case MV_STEP_CAPTURE_IDENTITY:
+                        expectedIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL)
+                        return expectedIdentity == nil ? "Could not capture the identity before moving: \(url.path)" : nil
+                    case MV_STEP_CONTINUATION:
+                        return AppRemovalPolicy.continuationEligibilityReason(for: plan)
+                    default:
+                        return nil
+                    }
                 }
-                if item.isRequired,
-                   let signatureFailure = AppRemovalPolicy.validateTrustedSignature(
-                       for: plan,
-                       candidateURL: coordinatedURL
-                   ) {
-                    localFailure = signatureFailure
-                    return
-                }
-                if let reason = AppRemovalPolicy.validate(
-                    item,
-                    application: plan.application,
-                    candidateURL: coordinatedURL,
-                    requireApplicationPresence: !appHasMoved
-                ) {
-                    localFailure = reason
-                    return
-                }
-                guard let expectedRelocationIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL) else {
-                    localFailure = "Could not capture the identity before moving: \(url.path)"
-                    return
-                }
-                if item.isRequired,
-                   let running = AppRunningDetector.reason(for: plan.application) {
-                    localFailure = running
-                    return
-                }
-                if !item.isRequired,
-                   appHasMoved,
-                   let continuationFailure = AppRemovalPolicy.continuationEligibilityReason(for: plan) {
-                    localFailure = continuationFailure
-                    return
-                }
+                guard localFailure == nil, let expectedIdentity else { return }
                 do {
-                    var resultingURL: NSURL?
-                    try FileManager.default.trashItem(at: coordinatedURL, resultingItemURL: &resultingURL)
-                    guard let movedURL = resultingURL as URL?,
-                          FileIdentity.relocationIdentifier(for: movedURL) == expectedRelocationIdentity,
-                          (try? movedURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == item.node.isDirectory else {
-                        let resultPath = (resultingURL as URL?)?.path ?? "no Trash path was returned"
+                    let movedURL = try mover(coordinatedURL)
+                    guard MoveSteps.confirmed(MV_UNINSTALLER, movedURL: movedURL, expectedIdentity: expectedIdentity, expectedDirectory: item.node.isDirectory) else {
+                        let resultPath = movedURL?.path ?? "no Trash path was returned"
                         localFailure = "Could not confirm the item after moving: \(url.path). Result: \(resultPath). No automatic restore of an unknown item was attempted."
-                        moveResultIsUncertain = true
+                        moveResultIsUncertain = MoveSteps.uncertain(MV_UNINSTALLER, MV_FAILED_UNCONFIRMED, sourcePath: coordinatedURL.path)
                         return
                     }
                     didMove = true
                 } catch {
                     let sourceStillExists = FileManager.default.fileExists(atPath: coordinatedURL.path)
-                    moveResultIsUncertain = !sourceStillExists
+                    moveResultIsUncertain = MoveSteps.uncertain(MV_UNINSTALLER, MV_FAILED_THREW, sourcePath: coordinatedURL.path)
                     let uncertainty = sourceStillExists
                         ? ""
                         : " The original path disappeared, so the move result is unconfirmed and automatic retry is blocked."
                     localFailure = "\(url.path): \(error.localizedDescription)\(uncertainty)"
                 }
             }
-            if coordinationError != nil, !FileManager.default.fileExists(atPath: url.path) {
+            if coordinationError != nil, MoveSteps.uncertain(MV_UNINSTALLER, MV_FAILED_COORDINATOR, sourcePath: url.path) {
                 moveResultIsUncertain = true
             }
-            let failure = coordinationError.map { "\(url.path): \($0.localizedDescription)" } ?? localFailure
-            if let failure {
-                return AppRemovalOutcome(
-                    movedPaths: moved,
-                    uncertainPaths: moveResultIsUncertain ? [url.path] : [],
-                    failure: failure,
-                    unattemptedPaths: ordered.dropFirst(index + 1).map { $0.url.path }
-                )
-            }
-            if didMove {
+            switch MoveSteps.result(coordinationError: coordinationError != nil, failure: localFailure != nil, moved: didMove) {
+            case MV_FAILED:
+                let failure = coordinationError.map { "\(url.path): \($0.localizedDescription)" } ?? localFailure ?? ""
+                if MoveSteps.stopsAfterFailure(MV_UNINSTALLER) {
+                    return AppRemovalOutcome(
+                        movedPaths: moved,
+                        uncertainPaths: moveResultIsUncertain ? [url.path] : [],
+                        failure: failure,
+                        unattemptedPaths: ordered.dropFirst(index + 1).map { $0.url.path }
+                    )
+                }
+            case MV_MOVED:
                 moved.append(url.path)
                 if item.isRequired { appHasMoved = true }
+            default:
+                break
             }
         }
         return AppRemovalOutcome(movedPaths: moved, uncertainPaths: [], failure: nil, unattemptedPaths: [])

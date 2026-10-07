@@ -631,16 +631,12 @@ enum CachePolicy {
 }
 
 enum CacheCleanupCoordinator {
-    typealias TrashMover = @Sendable (URL) throws -> URL?
+    typealias TrashMover = MoveSteps.Mover
     typealias RunningResolver = @Sendable () -> Set<String>
 
-    static let systemTrashMover: TrashMover = { url in
-        var resultingURL: NSURL?
-        try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
-        return resultingURL as URL?
-    }
+    static let systemTrashMover: TrashMover = MoveSteps.systemTrashMover
 
-    /// Items are independent caches, so one failure does not stop the rest.
+    /// Items are independent caches; whether one failure stops the rest is Specs/move_rules.t27's call.
     static func moveToTrash(
         items: [CacheItem],
         runningResolver: RunningResolver,
@@ -655,22 +651,22 @@ enum CacheCleanupCoordinator {
             var localFailure: String?
             var didMove = false
             coordinator.coordinate(writingItemAt: url, options: .forMoving, error: &coordinationError) { coordinatedURL in
-                if let reason = CachePolicy.validate(
-                    item,
-                    runningIdentifiers: runningResolver(),
-                    candidateURL: coordinatedURL
-                ) {
-                    localFailure = reason
-                    return
+                var expectedIdentity: String?
+                localFailure = MoveSteps.run(MV_CACHES, MV_PHASE_ITEM) { step, _ in
+                    switch step {
+                    case MV_STEP_VALIDATE:
+                        return CachePolicy.validate(item, runningIdentifiers: runningResolver(), candidateURL: coordinatedURL)
+                    case MV_STEP_CAPTURE_IDENTITY:
+                        expectedIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL)
+                        return expectedIdentity == nil ? "Could not capture the identity before moving: \(url.path)" : nil
+                    default:
+                        return nil
+                    }
                 }
-                guard let expectedIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL) else {
-                    localFailure = "Could not capture the identity before moving: \(url.path)"
-                    return
-                }
+                guard localFailure == nil, let expectedIdentity else { return }
                 do {
                     let movedURL = try mover(coordinatedURL)
-                    guard let movedURL,
-                          FileIdentity.relocationIdentifier(for: movedURL) == expectedIdentity else {
+                    guard MoveSteps.confirmed(MV_CACHES, movedURL: movedURL, expectedIdentity: expectedIdentity, expectedDirectory: item.node.isDirectory) else {
                         let result = movedURL?.path ?? "no Trash path was returned"
                         localFailure = "Could not confirm the item after moving: \(url.path). Result: \(result). Check the Trash."
                         return
@@ -680,12 +676,14 @@ enum CacheCleanupCoordinator {
                     localFailure = "\(url.path): \(error.localizedDescription)"
                 }
             }
-            if let coordinationError {
-                failures.append("\(url.path): \(coordinationError.localizedDescription)")
-            } else if let localFailure {
-                failures.append(localFailure)
-            } else if didMove {
+            switch MoveSteps.result(coordinationError: coordinationError != nil, failure: localFailure != nil, moved: didMove) {
+            case MV_FAILED:
+                failures.append(coordinationError.map { "\(url.path): \($0.localizedDescription)" } ?? localFailure ?? "")
+                if MoveSteps.stopsAfterFailure(MV_CACHES) { return CacheCleanupOutcome(movedPaths: moved, failures: failures) }
+            case MV_MOVED:
                 moved.append(url.path)
+            default:
+                break
             }
         }
         return CacheCleanupOutcome(movedPaths: moved, failures: failures)

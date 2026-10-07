@@ -3,6 +3,7 @@
 #include "deletion_policy.api.h"
 #include "fingerprint.api.h"
 #include "leftovers_policy.api.h"
+#include "move_rules.api.h"
 #include "scan_rules.api.h"
 #include "text_rules.api.h"
 #include "uninstaller_policy.api.h"

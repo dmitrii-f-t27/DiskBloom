@@ -645,14 +645,10 @@ enum OrphanDataPolicy {
 }
 
 enum OrphanCleanupCoordinator {
-    typealias TrashMover = @Sendable (URL) throws -> URL?
+    typealias TrashMover = MoveSteps.Mover
     typealias OwnerResolver = @Sendable (Set<String>) -> OrphanOwnerIndex
 
-    static let systemTrashMover: TrashMover = { url in
-        var resultingURL: NSURL?
-        try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
-        return resultingURL as URL?
-    }
+    static let systemTrashMover: TrashMover = MoveSteps.systemTrashMover
 
     static func moveToTrash(
         items: [OrphanDataItem],
@@ -664,29 +660,23 @@ enum OrphanCleanupCoordinator {
         guard !ordered.isEmpty else {
             return OrphanCleanupOutcome(movedPaths: [], uncertainPaths: [], failure: "Nothing selected.", unattemptedPaths: [])
         }
-        if let overlap = OrphanDataPolicy.overlappingSelectionReason(ordered) {
-            return OrphanCleanupOutcome(
-                movedPaths: [], uncertainPaths: [], failure: overlap,
-                unattemptedPaths: ordered.map { $0.url.path }
-            )
+        let queueFailure = MoveSteps.run(MV_LEFTOVERS, MV_PHASE_QUEUE) { step, _ in
+            switch step {
+            case MV_STEP_OVERLAP:
+                return OrphanDataPolicy.overlappingSelectionReason(ordered)
+            case MV_STEP_OWNERS_AND_VALIDATE_EACH:
+                let owners = ownerResolver(Set(ordered.map(\.canonicalIdentifier)))
+                for item in ordered {
+                    if let reason = owners.claimReason(for: item.canonicalIdentifier) { return "Cleanup blocked: \(reason)" }
+                    if let reason = OrphanDataPolicy.validate(item, homeURL: homeURL) { return reason }
+                }
+                return nil
+            default:
+                return nil
+            }
         }
-        let identifiers = Set(ordered.map(\.canonicalIdentifier))
-        let initialOwners = ownerResolver(identifiers)
-        for item in ordered {
-            if let reason = initialOwners.claimReason(for: item.canonicalIdentifier) {
-                return OrphanCleanupOutcome(
-                    movedPaths: [],
-                    uncertainPaths: [],
-                    failure: "Cleanup blocked: \(reason)",
-                    unattemptedPaths: ordered.map { $0.url.path }
-                )
-            }
-            if let reason = OrphanDataPolicy.validate(item, homeURL: homeURL) {
-                return OrphanCleanupOutcome(
-                    movedPaths: [], uncertainPaths: [], failure: reason,
-                    unattemptedPaths: ordered.map { $0.url.path }
-                )
-            }
+        if let queueFailure {
+            return OrphanCleanupOutcome(movedPaths: [], uncertainPaths: [], failure: queueFailure, unattemptedPaths: ordered.map { $0.url.path })
         }
 
         var moved: [String] = []
@@ -698,69 +688,60 @@ enum OrphanCleanupCoordinator {
             var didMove = false
             var uncertain = false
             coordinator.coordinate(writingItemAt: url, options: .forMoving, error: &coordinationError) { coordinatedURL in
-                let freshOwners = ownerResolver(Set([item.canonicalIdentifier]))
-                if let reason = freshOwners.claimReason(for: item.canonicalIdentifier) {
-                    localFailure = "Cleanup blocked: \(reason)"
-                    return
+                var expectedIdentity: String?
+                localFailure = MoveSteps.run(MV_LEFTOVERS, MV_PHASE_ITEM) { step, occurrence in
+                    switch step {
+                    case MV_STEP_OWNERS:
+                        let owners = ownerResolver(Set([item.canonicalIdentifier]))
+                        guard let reason = owners.claimReason(for: item.canonicalIdentifier) else { return nil }
+                        return occurrence == 0 ? "Cleanup blocked: \(reason)" : "Cleanup blocked immediately before moving: \(reason)"
+                    case MV_STEP_VALIDATE:
+                        return OrphanDataPolicy.validate(item, homeURL: homeURL, candidateURL: coordinatedURL)
+                    case MV_STEP_CAPTURE_IDENTITY:
+                        expectedIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL)
+                        return expectedIdentity == nil ? "Could not capture the identity immediately before moving: \(url.path)" : nil
+                    default:
+                        return nil
+                    }
                 }
-                if let reason = OrphanDataPolicy.validate(
-                    item,
-                    homeURL: homeURL,
-                    candidateURL: coordinatedURL
-                ) {
-                    localFailure = reason
-                    return
-                }
-                let ownersImmediatelyBeforeMove = ownerResolver(Set([item.canonicalIdentifier]))
-                if let reason = ownersImmediatelyBeforeMove.claimReason(for: item.canonicalIdentifier) {
-                    localFailure = "Cleanup blocked immediately before moving: \(reason)"
-                    return
-                }
-                if let reason = OrphanDataPolicy.validate(
-                    item,
-                    homeURL: homeURL,
-                    candidateURL: coordinatedURL
-                ) {
-                    localFailure = reason
-                    return
-                }
-                guard let expectedIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL) else {
-                    localFailure = "Could not capture the identity immediately before moving: \(url.path)"
-                    return
-                }
+                guard localFailure == nil, let expectedIdentity else { return }
                 do {
                     let movedURL = try mover(coordinatedURL)
-                    guard let movedURL,
-                          FileIdentity.relocationIdentifier(for: movedURL) == expectedIdentity,
-                          (try? movedURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+                    guard MoveSteps.confirmed(MV_LEFTOVERS, movedURL: movedURL, expectedIdentity: expectedIdentity, expectedDirectory: true) else {
                         let result = movedURL?.path ?? "no Trash path was returned"
                         localFailure = "Could not confirm the item after moving: \(url.path). Result: \(result)."
-                        uncertain = !FileManager.default.fileExists(atPath: coordinatedURL.path)
+                        uncertain = MoveSteps.uncertain(MV_LEFTOVERS, MV_FAILED_UNCONFIRMED, sourcePath: coordinatedURL.path)
                         return
                     }
                     didMove = true
                 } catch {
                     let sourceExists = FileManager.default.fileExists(atPath: coordinatedURL.path)
-                    uncertain = !sourceExists
+                    uncertain = MoveSteps.uncertain(MV_LEFTOVERS, MV_FAILED_THREW, sourcePath: coordinatedURL.path)
                     let suffix = sourceExists
                         ? ""
                         : " The original path disappeared; automatic retry is blocked."
                     localFailure = "\(url.path): \(error.localizedDescription)\(suffix)"
                 }
             }
-            if coordinationError != nil, !FileManager.default.fileExists(atPath: url.path) {
+            if coordinationError != nil, MoveSteps.uncertain(MV_LEFTOVERS, MV_FAILED_COORDINATOR, sourcePath: url.path) {
                 uncertain = true
             }
-            let failure = coordinationError.map { "\(url.path): \($0.localizedDescription)" } ?? localFailure
-            if let failure {
-                return OrphanCleanupOutcome(
-                    movedPaths: moved,
-                    uncertainPaths: uncertain ? [url.path] : [],
-                    failure: failure,
-                    unattemptedPaths: ordered.dropFirst(index + 1).map { $0.url.path }
-                )
+            switch MoveSteps.result(coordinationError: coordinationError != nil, failure: localFailure != nil, moved: didMove) {
+            case MV_FAILED:
+                let failure = coordinationError.map { "\(url.path): \($0.localizedDescription)" } ?? localFailure ?? ""
+                if MoveSteps.stopsAfterFailure(MV_LEFTOVERS) {
+                    return OrphanCleanupOutcome(
+                        movedPaths: moved,
+                        uncertainPaths: uncertain ? [url.path] : [],
+                        failure: failure,
+                        unattemptedPaths: ordered.dropFirst(index + 1).map { $0.url.path }
+                    )
+                }
+            case MV_MOVED:
+                moved.append(url.path)
+            default:
+                break
             }
-            if didMove { moved.append(url.path) }
         }
         return OrphanCleanupOutcome(movedPaths: moved, uncertainPaths: [], failure: nil, unattemptedPaths: [])
     }
