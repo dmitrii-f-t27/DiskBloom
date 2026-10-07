@@ -182,7 +182,7 @@ final class ScanCounter: @unchecked Sendable {
     func record(_ url: URL) {
         lock.lock()
         itemCount += 1
-        if itemCount % 32 == 0 || currentPath.isEmpty {
+        if fm_scan_progress_shows(Int64(itemCount), !currentPath.isEmpty) {
             currentPath = url.path
         }
         lock.unlock()
@@ -200,11 +200,8 @@ struct VolumeStats: Sendable {
     let total: Int64
     let available: Int64
 
-    var used: Int64 { max(0, total - available) }
-    var usedFraction: Double {
-        guard total > 0 else { return 0 }
-        return min(1, max(0, Double(used) / Double(total)))
-    }
+    var used: Int64 { fm_used(total, available) }
+    var usedFraction: Double { fm_used_fraction(total, available) }
 }
 
 enum ByteFormat {
@@ -217,18 +214,14 @@ enum ByteFormat {
         return formatter.string(fromByteCount: max(0, bytes))
     }
 
+    /// Decimal units; the unit and the digits are chosen by Specs/format_rules.t27.
     static func compact(_ bytes: Int64) -> String {
-        let amount = Double(max(0, bytes))
-        let units = ["B", "KB", "MB", "GB", "TB"]
-        var value = amount
-        var index = 0
-        while value >= 1000, index < units.count - 1 {
-            value /= 1000
-            index += 1
-        }
-        if index == 0 { return "\(Int(value)) \(units[index])" }
-        let digits = value >= 100 ? 0 : (value >= 10 ? 1 : 2)
-        return String(format: "%.*f %@", digits, value, units[index])
+        let unit = fm_unit(bytes)
+        let value = fm_scaled(bytes)
+        let unitText = T27Text.output { fm_unit_text(unit, $0) } ?? ""
+        if unit == 0 { return "\(Int(value)) \(unitText)" }
+        let digits = Int32(fm_fraction_digits(value, unit))
+        return String(format: "%.*f %@", digits, value, unitText)
     }
 }
 
@@ -242,6 +235,6 @@ enum Plural {
     }
 
     private static func form(_ count: Int, one: String, many: String) -> String {
-        abs(count) == 1 ? one : many
+        fm_singular(Int64(count)) ? one : many
     }
 }

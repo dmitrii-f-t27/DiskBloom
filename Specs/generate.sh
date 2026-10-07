@@ -18,7 +18,7 @@ for SPEC in "$ROOT_DIR"/Specs/*.t27; do
   "$T27C" check "$SPEC" >/dev/null
   "$T27C" gen-c "$SPEC" > "$WORK/$NAME.h"
   /bin/cp "$WORK/$NAME.h" "$WORK/$NAME-test.c"
-  xcrun clang -std=c11 -Wall -Wno-parentheses-equality -Werror -DT27_TEST_MAIN \
+  xcrun clang -std=c11 -ffp-contract=off -Wall -Wno-parentheses-equality -Werror -DT27_TEST_MAIN \
     "$WORK/$NAME-test.c" -o "$WORK/$NAME-test"
   print -n "$NAME: "
   "$WORK/$NAME-test"

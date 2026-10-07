@@ -41,7 +41,7 @@ targets:
         OTHER_LDFLAGS: "$(inherited) -weak_framework FoundationModels"
         # Decisions written in t27 (Specs/*.t27) arrive as generated C.
         SWIFT_OBJC_BRIDGING_HEADER: Sources/Generated/DiskBloom-Bridging.h
-        OTHER_CFLAGS: "$(inherited) -Wno-parentheses-equality"
+        OTHER_CFLAGS: "$(inherited) -ffp-contract=off -Wno-parentheses-equality"
         OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -Wno-parentheses-equality"
 schemes:
   DiskBloom:
