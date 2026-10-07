@@ -1,8 +1,38 @@
-# Unreleased
+# DiskBloom 1.5.0
+
+Caches, an assistant you can chat with, and every decision of the app rewritten in t27. App version: 1.5, build 6.
+
+## Download
+
+- **DiskBloom-1.5.0-macOS-arm64.dmg** — open the image and drag DiskBloom to Applications.
+- **DiskBloom-1.5.0-macOS-arm64.zip** — the same app as a ZIP archive.
+- **SHA256SUMS** — SHA-256 of both files to verify your download.
+
+Requirements: a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later. The prebuilt app does not need Xcode. Intel Macs are not supported by this download.
+
+## What's new
 
 - **Caches**: a new section that measures app caches, Xcode DerivedData and `~/.cache`, names the owning app and marks each cache safe to clear, optional, in use, keep, or clear with its own tool. Selected caches go through the usual review sheet and re-checks.
-- **Assistant** (⌘K): chat with DiskBloom. It looks up real sizes and opens folders, caches and apps in the app; it can select items but never moves anything. Uses Apple's on-device model by default or any OpenAI-compatible API (NVIDIA, Z.ai, OpenRouter, OpenAI, Ollama, LM Studio, custom) with a model you pick.
+- **Assistant** (⌘K): chat with DiskBloom. It looks up real sizes and opens folders, caches and apps in the app; it can select items and add them to the cleanup queue but never moves anything — you review and confirm. Uses Apple's on-device model by default (macOS 26 with Apple Intelligence) or any OpenAI-compatible API (NVIDIA, Z.ai, OpenRouter, OpenAI, Ollama, LM Studio, custom) with a model you pick from the provider's list. The key stays in the Keychain.
+- **Decisions in t27**: every rule of the app is now written in [t27](https://github.com/gHashTag/t27) specs (13 of them, see `Specs/README.md`) and compiled to C. Differential tests compared each spec with the Swift it replaced on real data from a Mac and on exhaustive synthetic inputs, and found no difference in behaviour.
 - The Mac App Store edition adds the `network.client` entitlement for the assistant.
+
+Small differences you might notice:
+
+- Duplicate checks of large files are slower: SHA-256 now runs in the t27 code (about 400 MB/s on an M4) instead of CryptoKit.
+- Lists that tie on size are ordered consistently by path bytes.
+
+## Privacy
+
+The disk tools still never use the network. Only the optional assistant, when you connect an API, sends your questions and the names, paths and sizes it looks up to the provider you chose. Apple's on-device model keeps everything on the Mac.
+
+## Signature and first launch
+
+**This release is ad-hoc signed, without a Developer ID and without Apple notarization.** macOS may block the first launch. If you trust this release, try to open the app once, then check the permission for DiskBloom in System Settings → Privacy & Security. Do not turn off protection for the whole system. [Apple's instructions](https://support.apple.com/102445).
+
+## Verification before release
+
+The strict Swift 6 build, the signature integrity check, all six smoke suites, the 64 spec tests and the eleven differential tests passed on Apple silicon and, under Rosetta, on the Intel slice. The Mac App Store project was built as a universal Release binary. The ZIP and DMG were checked again after packaging.
 
 # DiskBloom 1.4.0
 
