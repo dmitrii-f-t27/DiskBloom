@@ -13,12 +13,17 @@ enum T27Text {
         path: Bool = false,
         _ body: (UnsafeMutablePointer<UInt8>, UInt32) -> R
     ) -> R {
-        var bytes = Array((path ? text.decomposedStringWithCanonicalMapping : text).utf8)
-        let length = bytes.count
-        if bytes.count < capacity {
-            bytes.append(contentsOf: repeatElement(0, count: capacity - bytes.count))
+        var source = path ? text.decomposedStringWithCanonicalMapping : text
+        let length = source.utf8.count
+        let size = max(capacity, length)
+        return withUnsafeTemporaryAllocation(of: UInt8.self, capacity: size) { buffer in
+            let base = buffer.baseAddress!
+            source.withUTF8 { utf8 in
+                if let start = utf8.baseAddress { base.update(from: start, count: length) }
+            }
+            (base + length).initialize(repeating: 0, count: size - length)
+            return body(base, UInt32(length))
         }
-        return bytes.withUnsafeMutableBufferPointer { body($0.baseAddress!, UInt32(length)) }
     }
 
     static func withPaths<R>(
