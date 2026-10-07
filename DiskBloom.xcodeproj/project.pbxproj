@@ -35,6 +35,8 @@
 		0A6928612F19E8AE45F487A3 /* DiskBloomApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskBloomApp.swift; sourceTree = "<group>"; };
 		16C2A45090429D38F356E370 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		17929A66338DBCE10F47E50B /* OrphanedAppDataView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrphanedAppDataView.swift; sourceTree = "<group>"; };
+		1E0569FD2605614FEBD6F1C7 /* leftovers_policy.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = leftovers_policy.api.h; sourceTree = "<group>"; };
+		27BD011A1A2265E81E27B55D /* leftovers_policy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = leftovers_policy.h; sourceTree = "<group>"; };
 		3363BFBE280717E10EF35FD6 /* deletion_policy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = deletion_policy.h; sourceTree = "<group>"; };
 		44C1D3CF8F9A54007DA9A7AC /* CacheExplorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheExplorer.swift; sourceTree = "<group>"; };
 		47386019A8F91E868D50ACA8 /* FolderAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderAccess.swift; sourceTree = "<group>"; };
@@ -45,7 +47,9 @@
 		7228B4972CD5244AB2F1DC83 /* AssistantBackends.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantBackends.swift; sourceTree = "<group>"; };
 		7E621440422CC0990CFA03FE /* AppUninstallerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUninstallerView.swift; sourceTree = "<group>"; };
 		918E1D2362D57CA9637D7190 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		9A8C840A6B3BFF5E2AB10DE8 /* uninstaller_policy.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = uninstaller_policy.api.h; sourceTree = "<group>"; };
 		A1BA8A47ED47691B4AAF18B9 /* Assistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Assistant.swift; sourceTree = "<group>"; };
+		A68A88B88D9A82F0BCAF7850 /* uninstaller_policy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = uninstaller_policy.h; sourceTree = "<group>"; };
 		B5CB6E6EA43DF72BC06A802C /* t27_specs.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = t27_specs.c; sourceTree = "<group>"; };
 		B92A6A4CF5AA1A46231B5526 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		BC1763AD26A69FFA32DB985B /* AppRemoval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRemoval.swift; sourceTree = "<group>"; };
@@ -134,7 +138,11 @@
 				61F29115A6877F8500B13EB1 /* deletion_policy.api.h */,
 				3363BFBE280717E10EF35FD6 /* deletion_policy.h */,
 				4B5816F3392F37532BD57444 /* DiskBloom-Bridging.h */,
+				1E0569FD2605614FEBD6F1C7 /* leftovers_policy.api.h */,
+				27BD011A1A2265E81E27B55D /* leftovers_policy.h */,
 				B5CB6E6EA43DF72BC06A802C /* t27_specs.c */,
+				9A8C840A6B3BFF5E2AB10DE8 /* uninstaller_policy.api.h */,
+				A68A88B88D9A82F0BCAF7850 /* uninstaller_policy.h */,
 			);
 			path = Generated;
 			sourceTree = "<group>";

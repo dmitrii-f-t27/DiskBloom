@@ -12,7 +12,11 @@ SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
 # Fixtures live inside the checkout (and therefore inside the home folder): the cleanup policy
 # deliberately refuses to treat anything under /private, /tmp or other system roots as removable.
 FIXTURES="$BUILD_DIR/fixtures-$$"
-cleanup() { [[ -d "$FIXTURES" && "$FIXTURES" == "$BUILD_DIR"/fixtures-* ]] && /bin/rm -r -- "$FIXTURES"; }
+cleanup() {
+  [[ -d "$FIXTURES" && "$FIXTURES" == "$BUILD_DIR"/fixtures-* ]] || return 0
+  /usr/bin/chflags -R nouchg "$FIXTURES" 2>/dev/null; /bin/chmod -R u+rwx "$FIXTURES" 2>/dev/null
+  /bin/rm -r -- "$FIXTURES"
+}
 trap cleanup EXIT
 
 /bin/mkdir -p "$BUILD_DIR"
@@ -30,6 +34,8 @@ build_test() {
   # Each differential test also compiles the pre-t27 Swift rules it compares against.
   [[ "$name" == CacheVerdictDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/CacheVerdictLegacy.swift")
   [[ "$name" == DeletionPolicyDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/DeletionPolicyLegacy.swift")
+  [[ "$name" == UninstallerDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/UninstallerLegacy.swift")
+  [[ "$name" == LeftoversDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/LeftoversLegacy.swift")
   xcrun swiftc \
     -emit-executable \
     -parse-as-library \
@@ -54,12 +60,12 @@ build_test() {
     -o "$BUILD_DIR/$name"
 }
 
-for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke; do
+for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke UninstallerDifferentialSmoke LeftoversDifferentialSmoke; do
   print "== building $NAME"
   build_test "$NAME"
 done
 
-/bin/mkdir -p "$FIXTURES/scanner" "$FIXTURES/safety-root" "$FIXTURES/safety-mutation/Candidate" "$FIXTURES/app-removal" "$FIXTURES/orphans" "$FIXTURES/caches" "$FIXTURES/deletion-policy"
+/bin/mkdir -p "$FIXTURES/scanner" "$FIXTURES/safety-root" "$FIXTURES/safety-mutation/Candidate" "$FIXTURES/app-removal" "$FIXTURES/orphans" "$FIXTURES/caches" "$FIXTURES/deletion-policy" "$FIXTURES/uninstaller" "$FIXTURES/leftovers"
 print "child fixture" > "$FIXTURES/safety-root/child.txt"
 print "candidate state" > "$FIXTURES/safety-mutation/Candidate/state.txt"
 
@@ -83,4 +89,6 @@ print "== running ($ARCH)"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/CacheExplorerSmoke" "$FIXTURES/caches"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/CacheVerdictDifferentialSmoke"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/DeletionPolicyDifferentialSmoke" "$FIXTURES/deletion-policy"
+/usr/bin/arch -"$ARCH" "$BUILD_DIR/UninstallerDifferentialSmoke" "$FIXTURES/uninstaller"
+/usr/bin/arch -"$ARCH" "$BUILD_DIR/LeftoversDifferentialSmoke" "$FIXTURES/leftovers"
 print "ALL_SMOKE_TESTS_PASSED ($ARCH)"
