@@ -5,6 +5,7 @@
 #include "fingerprint.api.h"
 #include "format_rules.api.h"
 #include "leftovers_policy.api.h"
+#include "model_rules.api.h"
 #include "move_rules.api.h"
 #include "scan_rules.api.h"
 #include "sunburst_rules.api.h"

@@ -223,12 +223,11 @@ final class AppModel: ObservableObject {
 
     var focusNode: DiskNode? { focusStack.last ?? snapshot?.root }
     var collectionSize: Int64 { collection.reduce(0) { $0 + $1.size } }
-    var canGoBack: Bool { focusStack.count > 1 || !navigationHistory.isEmpty }
+    var canGoBack: Bool { md_can_go_back(Int64(focusStack.count), Int64(navigationHistory.count)) }
 
     func startInitialScan() {
-        guard snapshot == nil, !isScanning else { return }
         // The sandboxed build waits on the welcome screen until the person grants a folder.
-        guard FolderAccess.shared.hasAccess(to: currentURL) else { return }
+        guard md_starts_initial_scan(snapshot != nil, isScanning, FolderAccess.shared.hasAccess(to: currentURL)) else { return }
         startScan(at: currentURL)
     }
 
@@ -255,10 +254,10 @@ final class AppModel: ObservableObject {
 
     func selectWorkspaceSection(_ section: WorkspaceSection) {
         workspaceSection = section
-        if section != .diskMap, isScanning {
-            cancelScan()
-        } else if section == .diskMap, snapshot == nil {
-            startInitialScan()
+        switch Int32(md_section_change(section == .diskMap, isScanning, snapshot != nil)) {
+        case MD_SECTION_CANCEL_SCAN: cancelScan()
+        case MD_SECTION_START_INITIAL: startInitialScan()
+        default: break
         }
     }
 
@@ -287,19 +286,22 @@ final class AppModel: ObservableObject {
         let generation = UUID()
         scanGeneration = generation
 
-        if rememberCurrent,
-           let snapshot,
-           !focusStack.isEmpty {
-            navigationHistory.append(
-                NavigationState(
-                    snapshot: snapshot,
-                    focusStack: focusStack,
-                    inspectedNode: inspectedNode,
-                    currentURL: currentURL
+        switch Int32(md_scan_history(rememberCurrent, snapshot != nil, !focusStack.isEmpty, resetNavigation)) {
+        case MD_HISTORY_PUSH:
+            if let snapshot {
+                navigationHistory.append(
+                    NavigationState(
+                        snapshot: snapshot,
+                        focusStack: focusStack,
+                        inspectedNode: inspectedNode,
+                        currentURL: currentURL
+                    )
                 )
-            )
-        } else if resetNavigation {
+            }
+        case MD_HISTORY_CLEAR:
             navigationHistory = []
+        default:
+            break
         }
         if resetNavigation {
             analysisRootURL = normalized
@@ -375,12 +377,10 @@ final class AppModel: ObservableObject {
     }
 
     func enter(_ node: DiskNode) {
-        guard node.isDirectory, !node.isVirtual else {
-            inspectedNode = node
-            return
-        }
+        let action = Int32(md_enter(node.isDirectory, node.isVirtual, node.children.isEmpty, node.url != nil))
         inspectedNode = node
-        if node.children.isEmpty, let url = node.url {
+        guard action != MD_ENTER_INSPECT else { return }
+        if action == MD_ENTER_RESCAN, let url = node.url {
             let targetPath = url.standardizedFileURL.path
             let previousCount = collection.count
             collection.removeAll { selected in
@@ -401,9 +401,14 @@ final class AppModel: ObservableObject {
     }
 
     func goBack() {
-        if focusStack.count > 1 {
+        switch Int32(md_back(Int64(focusStack.count), Int64(navigationHistory.count))) {
+        case MD_BACK_POP_FOCUS:
             focusStack.removeLast()
             inspectedNode = focusStack.last
+            return
+        case MD_BACK_RESTORE_SCAN:
+            break
+        default:
             return
         }
         guard let previous = navigationHistory.popLast() else { return }
@@ -454,13 +459,18 @@ final class AppModel: ObservableObject {
     @discardableResult
     func focus(onPath path: String) -> Bool {
         guard !isScanning, var chain = nodeChain(toPath: path), let target = chain.last else { return false }
-        if target.isDirectory, !target.isPackage {
-            // A folder below the scan depth has no children in the snapshot; it needs its own scan.
-            guard !target.children.isEmpty else { return false }
+        // A folder below the scan depth has no children in the snapshot; it needs its own scan.
+        switch Int32(md_focus(target.isDirectory, target.isPackage, target.children.isEmpty, Int64(chain.count))) {
+        case MD_FOCUS_FAIL:
+            return false
+        case MD_FOCUS_FOLDER:
             focusStack = chain
             inspectedNode = target.children.first ?? target
-        } else {
-            if chain.count > 1 { chain.removeLast() }
+        case MD_FOCUS_PARENT:
+            chain.removeLast()
+            focusStack = chain
+            inspectedNode = target
+        default:
             focusStack = chain
             inspectedNode = target
         }
@@ -486,25 +496,30 @@ final class AppModel: ObservableObject {
 
     func toggleCollection(_ node: DiskNode) {
         invalidatePendingReview()
-        if let index = collection.firstIndex(where: { samePath($0, node) }) {
-            collection.remove(at: index)
-            return
-        }
-        if let reason = rejectionReason(for: node) {
-            notice = AppNotice(title: "View only", message: reason)
-            return
-        }
-        guard let url = node.url else { return }
-        let path = url.standardizedFileURL.path
-        if let parent = collection.first(where: { selected in
+        let index = collection.firstIndex(where: { samePath($0, node) })
+        let reason = index == nil ? rejectionReason(for: node) : nil
+        let path = node.url?.standardizedFileURL.path ?? ""
+        let parent = node.url == nil ? nil : collection.first(where: { selected in
             guard let selectedPath = selected.url?.standardizedFileURL.path else { return false }
             return T27Text.inside(path, selectedPath)
-        }) {
+        })
+        switch Int32(md_queue_toggle(index != nil, reason != nil, node.url != nil, parent != nil)) {
+        case MD_QUEUE_REMOVE:
+            if let index { collection.remove(at: index) }
+            return
+        case MD_QUEUE_REFUSE:
+            notice = AppNotice(title: "View only", message: reason ?? "")
+            return
+        case MD_QUEUE_IGNORE:
+            return
+        case MD_QUEUE_ALREADY_INCLUDED:
             notice = AppNotice(
                 title: "Already included",
-                message: "The item is already part of the selected folder “\(parent.name)”."
+                message: "The item is already part of the selected folder “\(parent?.name ?? "")”."
             )
             return
+        default:
+            break
         }
         collection.removeAll { selected in
             guard let selectedPath = selected.url?.standardizedFileURL.path else { return false }
@@ -519,7 +534,7 @@ final class AppModel: ObservableObject {
     }
 
     func requestTrashReview() {
-        guard !collection.isEmpty, !isReviewingSelection else { return }
+        guard md_queue_can_review(Int64(collection.count), isReviewingSelection) else { return }
         reviewTask?.cancel()
         let generation = UUID()
         reviewGeneration = generation
@@ -557,7 +572,7 @@ final class AppModel: ObservableObject {
     }
 
     func moveReviewedItemsToTrash() {
-        guard !collection.isEmpty, !isMovingToTrash else { return }
+        guard md_queue_can_move(Int64(collection.count), isMovingToTrash) else { return }
         showingTrashReview = false
         isMovingToTrash = true
         let candidates = collection
@@ -634,29 +649,20 @@ final class AppModel: ObservableObject {
         for volume in volumes {
             let values = try? volume.resourceValues(forKeys: Set(keys))
             let name = values?.volumeName ?? volume.lastPathComponent
-            let subtitle: String
-            let icon: String
-            if values?.volumeIsLocal == false {
-                subtitle = "Network volume"
-                icon = "network"
-            } else if values?.volumeIsInternal == true {
-                subtitle = "Internal disk"
-                icon = "internaldrive.fill"
-            } else if values?.volumeIsRemovable == true {
-                subtitle = "Removable volume"
-                icon = "externaldrive.badge.plus"
-            } else if values?.volumeIsInternal == false {
-                subtitle = "External disk"
-                icon = "externaldrive.fill"
-            } else {
-                subtitle = "Other volume"
-                icon = "externaldrive"
-            }
-            let labeledSubtitle = values?.volumeIsReadOnly == true ? subtitle + " · read-only" : subtitle
+            let kind = md_volume_kind(
+                values?.volumeIsLocal != nil, values?.volumeIsLocal == true,
+                values?.volumeIsInternal != nil, values?.volumeIsInternal == true,
+                values?.volumeIsRemovable != nil, values?.volumeIsRemovable == true
+            )
+            let subtitle = T27Text.output { md_text(md_volume_subtitle(kind), $0) } ?? ""
+            let icon = T27Text.output { md_text(md_volume_icon(kind), $0) } ?? ""
+            let readOnly = T27Text.output { md_text(UInt32(MD_TEXT_READ_ONLY), $0) } ?? ""
+            let labeledSubtitle = values?.volumeIsReadOnly == true ? subtitle + readOnly : subtitle
+            let unnamed = T27Text.output { md_text(UInt32(MD_TEXT_UNNAMED_DISK), $0) } ?? ""
             result.append(
                 ScanSource(
                     id: volume.standardizedFileURL.path,
-                    name: name.isEmpty ? "Disk" : name,
+                    name: name.isEmpty ? unnamed : name,
                     subtitle: labeledSubtitle,
                     url: volume,
                     icon: icon

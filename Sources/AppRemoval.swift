@@ -991,9 +991,7 @@ final class AppUninstallerModel: ObservableObject {
 
     var selectedItems: [AppRemovalItem] {
         plan?.items.filter {
-            $0.isRequired
-                ? !applicationWasMoved
-                : selectedItemIDs.contains($0.id) && !confirmedMovedItemIDs.contains($0.id)
+            md_uninstall_selected($0.isRequired, applicationWasMoved, selectedItemIDs.contains($0.id), confirmedMovedItemIDs.contains($0.id))
         } ?? []
     }
 
@@ -1006,7 +1004,7 @@ final class AppUninstallerModel: ObservableObject {
     }
 
     var hasUncertainOutcome: Bool {
-        !(lastOutcome?.uncertainPaths.isEmpty ?? true)
+        md_uncertain_open(!(lastOutcome?.uncertainPaths.isEmpty ?? true), false)
     }
 
     func loadApplicationsIfNeeded() {
@@ -1134,19 +1132,18 @@ final class AppUninstallerModel: ObservableObject {
     }
 
     func reanalyzeSelectedApplication() {
-        guard let selectedApplication,
-              !isMovingToTrash,
-              !applicationWasMoved,
-              confirmedMovedItemIDs.isEmpty,
-              !hasUncertainOutcome else { return }
+        guard md_uninstall_can_reanalyse(
+            selectedApplication != nil,
+            isMovingToTrash,
+            applicationWasMoved,
+            confirmedMovedItemIDs.isEmpty,
+            hasUncertainOutcome
+        ), let selectedApplication else { return }
         inspect(selectedApplication, force: true)
     }
 
     func toggle(_ item: AppRemovalItem) {
-        guard !isMovingToTrash,
-              !item.isRequired,
-              item.isSelectable,
-              !confirmedMovedItemIDs.contains(item.id) else { return }
+        guard md_uninstall_can_toggle(isMovingToTrash, item.isRequired, item.isSelectable, confirmedMovedItemIDs.contains(item.id)) else { return }
         invalidateReview()
         if selectedItemIDs.contains(item.id) {
             selectedItemIDs.remove(item.id)
@@ -1156,59 +1153,70 @@ final class AppUninstallerModel: ObservableObject {
     }
 
     func reveal(_ item: AppRemovalItem) {
-        guard !isMovingToTrash, !confirmedMovedItemIDs.contains(item.id) else { return }
+        guard md_uninstall_can_reveal(isMovingToTrash, confirmedMovedItemIDs.contains(item.id)) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([item.url])
     }
 
     func runningReason() -> String? {
-        if applicationWasMoved { return nil }
-        guard let application = plan?.application ?? selectedApplication else { return nil }
+        let application = plan?.application ?? selectedApplication
+        guard md_running_check_applies(applicationWasMoved, application != nil), let application else { return nil }
         return AppRunningDetector.reason(for: application)
     }
 
     func requestRemovalReview() {
-        guard let plan, !isReviewing, !isMovingToTrash else { return }
+        guard let plan, md_can_open_uninstall_review(true, isReviewing, isMovingToTrash) else { return }
         invalidateReview()
-        if let uncertainPaths = lastOutcome?.uncertainPaths, !uncertainPaths.isEmpty {
-            notice = AppNotice(
-                title: "Retry blocked",
-                message: "Could not confirm the result of the previous move:\n\(uncertainPaths.joined(separator: "\n"))\n\nRe-check the original paths first. If the item is already in the Trash, restore it or choose the application again after a manual check."
-            )
-            return
-        }
-        if !applicationWasMoved,
-           let reason = plan.applicationEligibilityIssue ?? runningReason() {
-            notice = AppNotice(title: "Uninstall blocked", message: reason)
-            return
-        }
-        if !applicationWasMoved, FolderAccess.shared.isRestricted {
-            let container = plan.application.url.deletingLastPathComponent().standardizedFileURL
-            guard FolderAccess.shared.ensureAccess(
-                to: container,
-                title: "Allow DiskBloom to move \(plan.application.name)",
-                message: "To move \(plan.application.name) to the Trash, DiskBloom needs permission to change the folder that contains it. Keep “\(container.lastPathComponent)” selected and click Grant Access."
-            ) else {
-                notice = AppNotice(
-                    title: "Uninstall blocked",
-                    message: "DiskBloom has no permission to change \(container.path). Grant access to this folder to move the application to the Trash."
-                )
-                return
+        // The checks before the review, in the order of Specs/model_rules.t27 (md_review_step).
+        var step: UInt32 = 0
+        while true {
+            let check = Int32(md_review_step(step, applicationWasMoved, FolderAccess.shared.isRestricted))
+            if check == MD_REVIEW_END { break }
+            switch check {
+            case MD_REVIEW_UNCERTAIN:
+                if let uncertainPaths = lastOutcome?.uncertainPaths, !uncertainPaths.isEmpty {
+                    notice = AppNotice(
+                        title: "Retry blocked",
+                        message: "Could not confirm the result of the previous move:\n\(uncertainPaths.joined(separator: "\n"))\n\nRe-check the original paths first. If the item is already in the Trash, restore it or choose the application again after a manual check."
+                    )
+                    return
+                }
+            case MD_REVIEW_APPLICATION:
+                if let reason = plan.applicationEligibilityIssue ?? runningReason() {
+                    notice = AppNotice(title: "Uninstall blocked", message: reason)
+                    return
+                }
+            case MD_REVIEW_FOLDER_ACCESS:
+                let container = plan.application.url.deletingLastPathComponent().standardizedFileURL
+                guard FolderAccess.shared.ensureAccess(
+                    to: container,
+                    title: "Allow DiskBloom to move \(plan.application.name)",
+                    message: "To move \(plan.application.name) to the Trash, DiskBloom needs permission to change the folder that contains it. Keep “\(container.lastPathComponent)” selected and click Grant Access."
+                ) else {
+                    notice = AppNotice(
+                        title: "Uninstall blocked",
+                        message: "DiskBloom has no permission to change \(container.path). Grant access to this folder to move the application to the Trash."
+                    )
+                    return
+                }
+            case MD_REVIEW_SOMETHING_SELECTED:
+                guard !selectedItems.isEmpty else {
+                    notice = AppNotice(title: "Nothing to move", message: "Select at least one remaining related item.")
+                    return
+                }
+            case MD_REVIEW_BUNDLE_CHECKED:
+                if !(selectedItems.first(where: \.isRequired)?.isSelectable == true) {
+                    notice = AppNotice(title: "Uninstall blocked", message: "The application bundle did not pass the full check.")
+                    return
+                }
+            default:
+                if let overlap = AppRemovalPolicy.overlappingSelectionReason(selectedItems) {
+                    notice = AppNotice(title: "Paths overlap", message: overlap)
+                    return
+                }
             }
+            step += 1
         }
         let candidates = selectedItems
-        guard !candidates.isEmpty else {
-            notice = AppNotice(title: "Nothing to move", message: "Select at least one remaining related item.")
-            return
-        }
-        if !applicationWasMoved,
-           !(candidates.first(where: \.isRequired)?.isSelectable == true) {
-            notice = AppNotice(title: "Uninstall blocked", message: "The application bundle did not pass the full check.")
-            return
-        }
-        if let overlap = AppRemovalPolicy.overlappingSelectionReason(candidates) {
-            notice = AppNotice(title: "Paths overlap", message: overlap)
-            return
-        }
         let generation = UUID()
         let appAlreadyMoved = applicationWasMoved
         reviewGeneration = generation
@@ -1246,7 +1254,7 @@ final class AppUninstallerModel: ObservableObject {
     }
 
     func moveReviewedItemsToTrash() {
-        guard let plan, !isMovingToTrash, !hasUncertainOutcome else { return }
+        guard md_uninstall_can_move(plan != nil, isMovingToTrash, hasUncertainOutcome), let plan else { return }
         showingReview = false
         if !applicationWasMoved, let running = runningReason() {
             notice = AppNotice(title: "Application is running", message: running)
@@ -1294,11 +1302,9 @@ final class AppUninstallerModel: ObservableObject {
     }
 
     func recheckUncertainPaths() {
-        guard !isMovingToTrash,
-              !isReviewing,
-              let plan,
+        guard let plan,
               let outcome = lastOutcome,
-              !outcome.uncertainPaths.isEmpty else { return }
+              md_can_recheck_uncertain(!outcome.uncertainPaths.isEmpty, isReviewing, isMovingToTrash) else { return }
         let uncertainSet = Set(outcome.uncertainPaths)
         let uncertainItems = plan.items.filter { uncertainSet.contains($0.url.path) }
         guard uncertainItems.count == uncertainSet.count else {
@@ -1348,7 +1354,7 @@ final class AppUninstallerModel: ObservableObject {
     }
 
     func clearLastOutcome() {
-        guard !isMovingToTrash, !hasUncertainOutcome else { return }
+        guard md_can_clear_outcome(isMovingToTrash, hasUncertainOutcome) else { return }
         lastOutcome = nil
         lastApplicationName = nil
         showingOutcomeReport = false
