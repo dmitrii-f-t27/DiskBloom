@@ -33,7 +33,7 @@ Expensive checks stay lazy: a spec returns the id of the next step (`mv_step`, `
 T27C=/path/to/t27c ./Specs/generate.sh
 ```
 
-The script runs the table generators in `Specs/tables/`, type-checks each spec, generates C with `t27c gen-c`, runs the spec's own tests (`clang -std=c11 -ffp-contract=off -Werror`) and writes:
+The script runs the table generators in `Specs/tables/`, type-checks each spec, generates C with `t27c gen-c`, runs the spec's own tests (`clang -std=c11 -ffp-contract=off -Wshorten-64-to-32 -Werror`, the warnings Xcode turns on) and writes:
 
 - `Sources/Generated/<spec>.h` — the full generated C (compiled once by `Sources/Generated/t27_specs.c`);
 - `Sources/Generated/<spec>.api.h` — its constants and prototypes, read by Swift through `DiskBloom-Bridging.h`.

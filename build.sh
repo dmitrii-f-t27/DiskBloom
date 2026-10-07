@@ -36,7 +36,7 @@ PRODUCT_BUNDLE_IDENTIFIER="$(config_value PRODUCT_BUNDLE_IDENTIFIER)"
 /bin/mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$BUILD_DIR"
 
 # The decisions written in t27 (Specs/*.t27) arrive as generated C in Sources/Generated.
-xcrun clang -c -O2 -std=c11 -ffp-contract=off -Wall -Wno-parentheses-equality -Werror \
+xcrun clang -c -O2 -std=c11 -ffp-contract=off -Wall -Wshorten-64-to-32 -Wno-parentheses-equality -Werror \
   -isysroot "$SDK_PATH" -target arm64-apple-macosx14.0 \
   "$ROOT_DIR/Sources/Generated/t27_specs.c" -o "$BUILD_DIR/t27_specs.o"
 

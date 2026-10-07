@@ -42,6 +42,7 @@
 		1E0569FD2605614FEBD6F1C7 /* leftovers_policy.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = leftovers_policy.api.h; sourceTree = "<group>"; };
 		27BD011A1A2265E81E27B55D /* leftovers_policy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = leftovers_policy.h; sourceTree = "<group>"; };
 		29FFBB243A44C1ACFA8EFD62 /* sunburst_rules.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = sunburst_rules.api.h; sourceTree = "<group>"; };
+		31BB5A415B32375743954E81 /* model_rules.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = model_rules.api.h; sourceTree = "<group>"; };
 		3363BFBE280717E10EF35FD6 /* deletion_policy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = deletion_policy.h; sourceTree = "<group>"; };
 		3608186B77304F9BACC2B8E0 /* move_rules.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = move_rules.h; sourceTree = "<group>"; };
 		3C9152515269190599D6E01D /* move_rules.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = move_rules.api.h; sourceTree = "<group>"; };
@@ -59,11 +60,14 @@
 		7A194BF5E0E06D0D59B6380D /* MoveSteps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveSteps.swift; sourceTree = "<group>"; };
 		7E621440422CC0990CFA03FE /* AppUninstallerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUninstallerView.swift; sourceTree = "<group>"; };
 		817780C405E1B9E23E39D7C1 /* scan_rules.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = scan_rules.h; sourceTree = "<group>"; };
+		81E4AACE5AA02FD4EFC0D325 /* assistant_rules.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = assistant_rules.api.h; sourceTree = "<group>"; };
 		90D8407E4349D774CFB67969 /* T27Text.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = T27Text.swift; sourceTree = "<group>"; };
 		918E1D2362D57CA9637D7190 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		9A8C840A6B3BFF5E2AB10DE8 /* uninstaller_policy.api.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = uninstaller_policy.api.h; sourceTree = "<group>"; };
 		A1BA8A47ED47691B4AAF18B9 /* Assistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Assistant.swift; sourceTree = "<group>"; };
+		A29617487EB771D1D0310DAC /* model_rules.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = model_rules.h; sourceTree = "<group>"; };
 		A68A88B88D9A82F0BCAF7850 /* uninstaller_policy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = uninstaller_policy.h; sourceTree = "<group>"; };
+		B516BB7347E933F736C75416 /* assistant_rules.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = assistant_rules.h; sourceTree = "<group>"; };
 		B5CB6E6EA43DF72BC06A802C /* t27_specs.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = t27_specs.c; sourceTree = "<group>"; };
 		B92A6A4CF5AA1A46231B5526 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		BC1763AD26A69FFA32DB985B /* AppRemoval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRemoval.swift; sourceTree = "<group>"; };
@@ -153,6 +157,8 @@
 		CFDACE6B408C8B1985CABD0F /* Generated */ = {
 			isa = PBXGroup;
 			children = (
+				81E4AACE5AA02FD4EFC0D325 /* assistant_rules.api.h */,
+				B516BB7347E933F736C75416 /* assistant_rules.h */,
 				F5457FDBC257E93B29C585A7 /* cache_verdict.api.h */,
 				5D8C139CECA56C50EC64A219 /* cache_verdict.h */,
 				61F29115A6877F8500B13EB1 /* deletion_policy.api.h */,
@@ -166,6 +172,8 @@
 				6C3C6A8EDD8FB251DC510B85 /* format_rules.h */,
 				1E0569FD2605614FEBD6F1C7 /* leftovers_policy.api.h */,
 				27BD011A1A2265E81E27B55D /* leftovers_policy.h */,
+				31BB5A415B32375743954E81 /* model_rules.api.h */,
+				A29617487EB771D1D0310DAC /* model_rules.h */,
 				3C9152515269190599D6E01D /* move_rules.api.h */,
 				3608186B77304F9BACC2B8E0 /* move_rules.h */,
 				F58F28BBF8C85AB86EFD2392 /* scan_rules.api.h */,
