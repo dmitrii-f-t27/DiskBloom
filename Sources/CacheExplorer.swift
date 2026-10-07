@@ -292,80 +292,15 @@ enum CacheClassifier {
         let cleanupHint: String?
     }
 
-    /// Sign-in, sync and system state that lives in Caches but must not be cleared casually.
-    static let keepNames: Set<String> = [
-        "cloudkit",
-        "familycircle",
-        "passkit",
-        "com.apple.bird",
-        "com.apple.cloudd",
-        "com.apple.akd",
-        "com.apple.accountsd",
-        "com.apple.appleaccountd",
-        "com.apple.amsaccountsd",
-        "com.apple.containermanagerd",
-        "com.apple.nsurlsessiond",
-        "com.apple.cache_delete",
-        "com.apple.homekit",
-        "com.apple.passd",
-        "com.apple.trustd",
-        "com.apple.screentimeagent",
-        "com.apple.icloud.fmfd",
-        "com.apple.findmy.fmipcore"
-    ]
+    /// A text field of a row of the name tables in Specs/cache_verdict.t27, or nil when empty.
+    static func rowText(_ row: UInt32, _ field: UInt32) -> String? {
+        T27Text.output { cv_row_text(row, field, $0) }
+    }
 
-    static let keepPrefixes = [
-        "com.apple.fileprovider",
-        "com.apple.security",
-        "com.apple.keychain",
-        "com.apple.icloud",
-        "com.apple.cloudphotos"
-    ]
-
-    /// Package managers and model downloaders: safe to clear, but the next install downloads again.
-    static let packageManagers: [String: (title: String, hint: String?)] = [
-        "homebrew": ("Homebrew downloads", "brew cleanup --prune=all"),
-        "pip": ("pip downloads", "pip cache purge"),
-        "pypoetry": ("Poetry cache", "poetry cache clear --all ."),
-        "yarn": ("Yarn cache", "yarn cache clean"),
-        "go-build": ("Go build cache", "go clean -cache"),
-        "cocoapods": ("CocoaPods cache", "pod cache clean --all"),
-        "ms-playwright": ("Playwright browsers", "npx playwright install (to download again)"),
-        "bun": ("Bun cache", "bun pm cache rm"),
-        "uv": ("uv cache", "uv cache clean"),
-        "pnpm": ("pnpm cache", "pnpm store prune"),
-        "deno": ("Deno cache", nil),
-        "node-gyp": ("node-gyp headers", nil),
-        "electron": ("Electron downloads", nil),
-        "electron-builder": ("electron-builder downloads", nil),
-        "zig": ("Zig cache", nil),
-        "huggingface": ("Hugging Face models", "huggingface-cli delete-cache"),
-        "torch": ("PyTorch downloads", nil),
-        "prisma": ("Prisma engines", nil),
-        "typescript": ("TypeScript type cache", nil),
-        "puppeteer": ("Puppeteer browsers", nil),
-        "jna": ("JNA native libraries", nil),
-        "gradle": ("Gradle cache", nil),
-        "composer": ("Composer cache", "composer clear-cache"),
-        "codex-runtimes": ("Codex runtimes", nil),
-        "gh": ("GitHub CLI cache", nil),
-        "opencode": ("opencode cache", nil),
-        "scapy": ("Scapy cache", nil)
-    ]
-
-    /// Cache folder names that belong to a browser, mapped to the browser's bundle ID.
-    static let browsers: [String: (title: String, identifier: String)] = [
-        "google": ("Google Chrome", "com.google.chrome"),
-        "com.google.chrome": ("Google Chrome", "com.google.chrome"),
-        "mozilla": ("Firefox", "org.mozilla.firefox"),
-        "firefox": ("Firefox", "org.mozilla.firefox"),
-        "com.apple.safari": ("Safari", "com.apple.safari"),
-        "com.brave.browser": ("Brave", "com.brave.browser"),
-        "com.microsoft.edgemac": ("Microsoft Edge", "com.microsoft.edgemac"),
-        "company.thebrowser.browser": ("Arc", "company.thebrowser.browser"),
-        "com.operasoftware.opera": ("Opera", "com.operasoftware.opera"),
-        "com.vivaldi.vivaldi": ("Vivaldi", "com.vivaldi.vivaldi")
-    ]
+    static func find(_ table: Int32, _ name: String) -> UInt32? {
+        let row = T27Text.withBytes(name) { cv_find(UInt32(table), $0, $1) }
+        return row == UInt32(CV_NO_ROW) ? nil : row
+    }
 
     /// Collects the facts about one cache entry and lets Specs/cache_verdict.t27 decide.
     static func classify(
@@ -390,33 +325,34 @@ enum CacheClassifier {
                 ?? CacheOwnerContext.Owner(name: "Xcode", bundleIdentifier: "com.apple.dt.Xcode")
             ownerRunning = context.isRunning(identifier: "com.apple.dt.Xcode")
         case .dotCache:
-            if let known = packageManagers[lower] {
-                kind = UInt32(lower == "huggingface" ? CV_KIND_MODELS : CV_KIND_PACKAGE)
-                knownTitle = known.title
-                hint = known.hint
+            kind = T27Text.withBytes(lower) { cv_dot_cache_kind($0, $1) }
+            if let row = find(CV_TABLE_PACKAGE, lower) {
+                knownTitle = rowText(row, 1)
+                hint = rowText(row, 2)
             }
         case .userCaches:
-            if keepNames.contains(lower) || keepPrefixes.contains(where: { lower.hasPrefix($0) }) {
-                kind = UInt32(CV_KIND_KEEP)
-            } else if let known = packageManagers[lower] {
-                kind = UInt32(lower == "huggingface" ? CV_KIND_MODELS : CV_KIND_PACKAGE)
-                knownTitle = known.title
-                hint = known.hint
-            } else if let browser = browsers[lower] {
-                kind = UInt32(CV_KIND_BROWSER)
-                owner = context.owner(forIdentifier: browser.identifier)
-                    ?? CacheOwnerContext.Owner(name: browser.title, bundleIdentifier: browser.identifier)
-                ownerRunning = context.isRunning(owner)
-                knownTitle = "\(browser.title) web cache"
-            } else if lower.hasSuffix(".shipit") || lower.contains("updater") {
-                kind = UInt32(CV_KIND_UPDATE_DOWNLOAD)
+            kind = T27Text.withBytes(lower) { cv_name_kind($0, $1) }
+            switch kind {
+            case UInt32(CV_KIND_PACKAGE), UInt32(CV_KIND_MODELS):
+                if let row = find(CV_TABLE_PACKAGE, lower) {
+                    knownTitle = rowText(row, 1)
+                    hint = rowText(row, 2)
+                }
+            case UInt32(CV_KIND_BROWSER):
+                if let row = find(CV_TABLE_BROWSER, lower),
+                   let title = rowText(row, 1),
+                   let identifier = rowText(row, 2) {
+                    owner = context.owner(forIdentifier: identifier)
+                        ?? CacheOwnerContext.Owner(name: title, bundleIdentifier: identifier)
+                    ownerRunning = context.isRunning(owner)
+                    knownTitle = "\(title) web cache"
+                }
+            case UInt32(CV_KIND_UPDATE_DOWNLOAD), UInt32(CV_KIND_CRASH_REPORTS):
                 owner = updaterOwner(name, context: context)
                 ownerRunning = context.isRunning(owner)
-            } else if lower.contains("crashpad") || lower == "sentrycrash" || lower.hasPrefix("com.crashlytics") {
-                kind = UInt32(CV_KIND_CRASH_REPORTS)
-                owner = updaterOwner(name, context: context)
-                ownerRunning = context.isRunning(owner)
-            } else {
+            case UInt32(CV_KIND_KEEP):
+                break
+            default:
                 owner = looksLikeBundleIdentifier ? context.owner(forIdentifier: name) : context.owner(forName: name)
                 ownerRunning = context.isRunning(owner)
             }
@@ -497,31 +433,34 @@ enum CacheClassifier {
 
     /// Updater folders are named after the app (`com.vendor.app.ShipIt`, `vendor_app-updater`).
     private static func updaterOwner(_ name: String, context: CacheOwnerContext) -> CacheOwnerContext.Owner? {
-        let strippedName = name
-            .replacingOccurrences(of: "@", with: "")
-            .replacingOccurrences(of: "-updater", with: "", options: .caseInsensitive)
-            .replacingOccurrences(of: "_", with: " ")
+        let strippedName = T27Text.withBytes(name) { text, length in
+            T27Text.output { cv_updater_owner_name(text, length, $0) }
+        } ?? ""
         return context.owner(forIdentifier: name) ?? context.owner(forName: strippedName)
     }
 
     static func friendlyTitle(for name: String, location: CacheLocationKind) -> String {
-        if location == .derivedData {
-            switch name {
-            case "ModuleCache.noindex": return "Module cache"
-            case "CompilationCache.noindex": return "Compilation cache"
-            case "SymbolCache.noindex": return "Symbol cache"
-            default: break
-            }
-            // Xcode names project folders "<Project>-<28 lowercase letters>".
-            if let dash = name.lastIndex(of: "-") {
-                let suffix = name[name.index(after: dash)...]
-                if suffix.count == 28, suffix.allSatisfy({ $0.isLowercase && $0.isLetter }) {
-                    return String(name[..<dash])
-                }
-            }
-            return name
+        guard location == .derivedData else { return name }
+        if let row = find(CV_TABLE_DERIVED, name), let title = rowText(row, 1) { return title }
+        // Xcode names project folders "<Project>-<28 lowercase letters>"; the spec reads the Characters.
+        let characters = Array(name)
+        var classes = characters.map { character -> UInt8 in
+            if character == "-" { return UInt8(CV_CHAR_DASH) }
+            return character.isLowercase && character.isLetter ? UInt8(CV_CHAR_LOWER_LETTER) : UInt8(CV_CHAR_OTHER)
         }
-        return name
+        var lengths = characters.map { UInt8(clamping: String($0).utf8.count) }
+        let count = classes.count
+        if count < T27Text.capacity {
+            classes += repeatElement(0, count: T27Text.capacity - count)
+            lengths += repeatElement(0, count: T27Text.capacity - count)
+        }
+        let projectBytes = classes.withUnsafeMutableBufferPointer { classPointer in
+            lengths.withUnsafeMutableBufferPointer { lengthPointer in
+                cv_xcode_project_length(classPointer.baseAddress!, lengthPointer.baseAddress!, UInt32(count))
+            }
+        }
+        guard projectBytes > 0 else { return name }
+        return String(decoding: Array(name.utf8).prefix(Int(projectBytes)), as: UTF8.self)
     }
 }
 
@@ -532,13 +471,14 @@ struct CacheToolHint: Sendable {
     let hint: String
     let category: CacheCategory
 
-    static let all: [CacheToolHint] = [
-        CacheToolHint(relativePath: ".npm/_cacache", title: "npm cache", hint: "npm cache clean --force", category: .packageManager),
-        CacheToolHint(relativePath: ".cargo/registry/cache", title: "Cargo downloads", hint: "cargo install cargo-cache && cargo cache --autoclean", category: .packageManager),
-        CacheToolHint(relativePath: ".gradle/caches", title: "Gradle cache", hint: "gradle --stop, then remove ~/.gradle/caches", category: .packageManager),
-        CacheToolHint(relativePath: "Library/Developer/CoreSimulator/Caches", title: "Simulator caches", hint: "xcrun simctl delete unavailable", category: .developer),
-        CacheToolHint(relativePath: "Library/Developer/Xcode/iOS DeviceSupport", title: "iOS device support", hint: "Remove versions you no longer debug in Finder (Xcode downloads them again)", category: .developer)
-    ]
+    /// The TOOL rows of the name tables in Specs/cache_verdict.t27.
+    static let all: [CacheToolHint] = (0..<UInt32(CV_ROWS)).compactMap { row in
+        guard cv_row_table(row) == UInt32(CV_TABLE_TOOL),
+              let path = CacheClassifier.rowText(row, 0),
+              let title = CacheClassifier.rowText(row, 1),
+              let hint = CacheClassifier.rowText(row, 2) else { return nil }
+        return CacheToolHint(relativePath: path, title: title, hint: hint, category: CacheCategory(t27: cv_row_code(row)))
+    }
 }
 
 enum CacheAnalyzer {

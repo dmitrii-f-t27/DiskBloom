@@ -32,11 +32,11 @@ build_test() {
   local name="$1"
   local extra=()
   # Each differential test also compiles the pre-t27 Swift rules it compares against.
-  [[ "$name" == CacheVerdictDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/CacheVerdictLegacy.swift")
+  [[ "$name" == CacheVerdictDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/CacheVerdictLegacy.swift" "$ROOT_DIR/Tests/Smoke/CacheTablesLegacy.swift" "$ROOT_DIR/Tests/Smoke/TestSupport.swift")
   [[ "$name" == DeletionPolicyDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/DeletionPolicyLegacy.swift")
   [[ "$name" == UninstallerDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/UninstallerLegacy.swift")
   [[ "$name" == LeftoversDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/LeftoversLegacy.swift")
-  [[ "$name" == TextRulesDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/LegacyText.swift")
+  [[ "$name" == TextRulesDifferentialSmoke ]] && extra=("$ROOT_DIR/Tests/Smoke/LegacyText.swift" "$ROOT_DIR/Tests/Smoke/TestSupport.swift")
   xcrun swiftc \
     -emit-executable \
     -parse-as-library \

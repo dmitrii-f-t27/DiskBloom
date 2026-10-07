@@ -14,7 +14,7 @@ enum LegacyCacheClassifier {
 
         if unreadableCount > 0 {
             return CacheClassifier.Result(
-                title: CacheClassifier.friendlyTitle(for: name, location: location),
+                title: LegacyCacheTables.friendlyTitle(for: name, location: location),
                 owner: nil,
                 category: lower.hasPrefix("com.apple.") ? .system : .unknown,
                 verdict: .keep,
@@ -28,7 +28,7 @@ enum LegacyCacheClassifier {
             let xcode = context.owner(forIdentifier: "com.apple.dt.Xcode")
             let running = context.isRunning(identifier: "com.apple.dt.Xcode")
             return CacheClassifier.Result(
-                title: CacheClassifier.friendlyTitle(for: name, location: location),
+                title: LegacyCacheTables.friendlyTitle(for: name, location: location),
                 owner: xcode ?? CacheOwnerContext.Owner(name: "Xcode", bundleIdentifier: "com.apple.dt.Xcode"),
                 category: .developer,
                 verdict: running ? .quitFirst : .safe,
@@ -38,7 +38,7 @@ enum LegacyCacheClassifier {
                 cleanupHint: nil
             )
         case .dotCache:
-            if let known = CacheClassifier.packageManagers[lower] {
+            if let known = LegacyCacheTables.packageManagers[lower] {
                 return CacheClassifier.Result(
                     title: known.title,
                     owner: nil,
@@ -62,9 +62,9 @@ enum LegacyCacheClassifier {
             break
         }
 
-        if CacheClassifier.keepNames.contains(lower) || CacheClassifier.keepPrefixes.contains(where: { lower.hasPrefix($0) }) {
+        if LegacyCacheTables.keepNames.contains(lower) || LegacyCacheTables.keepPrefixes.contains(where: { lower.hasPrefix($0) }) {
             return CacheClassifier.Result(
-                title: CacheClassifier.friendlyTitle(for: name, location: location),
+                title: LegacyCacheTables.friendlyTitle(for: name, location: location),
                 owner: nil,
                 category: .system,
                 verdict: .keep,
@@ -73,7 +73,7 @@ enum LegacyCacheClassifier {
             )
         }
 
-        if let known = CacheClassifier.packageManagers[lower] {
+        if let known = LegacyCacheTables.packageManagers[lower] {
             return CacheClassifier.Result(
                 title: known.title,
                 owner: nil,
@@ -84,7 +84,7 @@ enum LegacyCacheClassifier {
             )
         }
 
-        if let browser = CacheClassifier.browsers[lower] {
+        if let browser = LegacyCacheTables.browsers[lower] {
             let owner = context.owner(forIdentifier: browser.identifier)
                 ?? CacheOwnerContext.Owner(name: browser.title, bundleIdentifier: browser.identifier)
             if context.isRunning(owner) {
@@ -119,7 +119,7 @@ enum LegacyCacheClassifier {
             let owner = context.owner(forIdentifier: name) ?? context.owner(forName: strippedName)
             if context.isRunning(owner), lower.hasSuffix(".shipit") || lower.contains("updater") {
                 return CacheClassifier.Result(
-                    title: owner.map { "\($0.name) updates" } ?? CacheClassifier.friendlyTitle(for: name, location: location),
+                    title: owner.map { "\($0.name) updates" } ?? LegacyCacheTables.friendlyTitle(for: name, location: location),
                     owner: owner,
                     category: .updater,
                     verdict: .quitFirst,
@@ -128,7 +128,7 @@ enum LegacyCacheClassifier {
                 )
             }
             return CacheClassifier.Result(
-                title: owner.map { "\($0.name) updates" } ?? CacheClassifier.friendlyTitle(for: name, location: location),
+                title: owner.map { "\($0.name) updates" } ?? LegacyCacheTables.friendlyTitle(for: name, location: location),
                 owner: owner,
                 category: .updater,
                 verdict: .safe,
@@ -154,7 +154,7 @@ enum LegacyCacheClassifier {
 
         if isApple {
             return CacheClassifier.Result(
-                title: owner?.name ?? CacheClassifier.friendlyTitle(for: name, location: location),
+                title: owner?.name ?? LegacyCacheTables.friendlyTitle(for: name, location: location),
                 owner: owner,
                 category: .system,
                 verdict: .optional,
@@ -187,7 +187,7 @@ enum LegacyCacheClassifier {
 
         if looksLikeBundleIdentifier {
             return CacheClassifier.Result(
-                title: CacheClassifier.friendlyTitle(for: name, location: location),
+                title: LegacyCacheTables.friendlyTitle(for: name, location: location),
                 owner: nil,
                 category: .application,
                 verdict: .safe,
