@@ -41,12 +41,12 @@ build_test() {
     -o "$BUILD_DIR/$name"
 }
 
-for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke; do
+for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke; do
   print "== building $NAME"
   build_test "$NAME"
 done
 
-/bin/mkdir -p "$FIXTURES/scanner" "$FIXTURES/safety-root" "$FIXTURES/safety-mutation/Candidate" "$FIXTURES/app-removal" "$FIXTURES/orphans"
+/bin/mkdir -p "$FIXTURES/scanner" "$FIXTURES/safety-root" "$FIXTURES/safety-mutation/Candidate" "$FIXTURES/app-removal" "$FIXTURES/orphans" "$FIXTURES/caches"
 print "child fixture" > "$FIXTURES/safety-root/child.txt"
 print "candidate state" > "$FIXTURES/safety-mutation/Candidate/state.txt"
 
@@ -56,4 +56,5 @@ print "== running ($ARCH)"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/AppRemovalSmoke" "$FIXTURES/app-removal"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/OrphanLeftoversSmoke" "$FIXTURES/orphans"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/DuplicateFinderSmoke"
+/usr/bin/arch -"$ARCH" "$BUILD_DIR/CacheExplorerSmoke" "$FIXTURES/caches"
 print "ALL_SMOKE_TESTS_PASSED ($ARCH)"
