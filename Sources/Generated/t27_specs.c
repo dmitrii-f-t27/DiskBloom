@@ -3,6 +3,7 @@
 #include "deletion_policy.h"
 #include "fingerprint.h"
 #include "leftovers_policy.h"
+#include "move_rules.h"
 #include "scan_rules.h"
 #include "text_rules.h"
 #include "uninstaller_policy.h"

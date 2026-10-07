@@ -83,10 +83,6 @@ enum SnapshotValidator {
     }
 }
 
-private struct TrashOutcome: Sendable {
-    let successfulPaths: [String]
-    let failures: [String]
-}
 
 private struct NavigationState {
     let snapshot: ScanSnapshot
@@ -570,52 +566,11 @@ final class AppModel: ObservableObject {
 
         Task {
             let outcome = await Task.detached(priority: .userInitiated) {
-                var successful: [String] = []
-                var failures: [String] = []
-                for node in candidates {
-                    guard let url = node.url else { continue }
-                    let coordinator = NSFileCoordinator(filePresenter: nil)
-                    var coordinationError: NSError?
-                    var localFailure: String?
-                    var didMove = false
-                    coordinator.coordinate(writingItemAt: url, options: .forMoving, error: &coordinationError) { coordinatedURL in
-                        if let reason = DeletionPolicy.validateImmediatelyBeforeTrash(
-                            node,
-                            scanRootURL: protectedRootURL,
-                            activeScanURL: rescanURL,
-                            candidateURL: coordinatedURL
-                        ) {
-                            localFailure = reason
-                            return
-                        }
-                        guard let expectedRelocationIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL) else {
-                            localFailure = "Could not capture the identity before moving: \(url.path)"
-                            return
-                        }
-                        do {
-                            var resultingURL: NSURL?
-                            try FileManager.default.trashItem(at: coordinatedURL, resultingItemURL: &resultingURL)
-                            guard let movedURL = resultingURL as URL?,
-                                  FileIdentity.relocationIdentifier(for: movedURL) == expectedRelocationIdentity,
-                                  (try? movedURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == node.isDirectory else {
-                                let resultPath = (resultingURL as URL?)?.path ?? "no Trash path was returned"
-                                localFailure = "Could not confirm the item’s identity after moving: \(url.path). Result: \(resultPath). No automatic restore of an unknown item was attempted."
-                                return
-                            }
-                            didMove = true
-                        } catch {
-                            localFailure = "\(url.path): \(error.localizedDescription)"
-                        }
-                    }
-                    if let coordinationError {
-                        failures.append("\(url.path): \(coordinationError.localizedDescription)")
-                    } else if let localFailure {
-                        failures.append(localFailure)
-                    } else if didMove {
-                        successful.append(url.path)
-                    }
-                }
-                return TrashOutcome(successfulPaths: successful, failures: failures)
+                DiskMapCleanupCoordinator.moveToTrash(
+                    candidates: candidates,
+                    rescanURL: rescanURL,
+                    protectedRootURL: protectedRootURL
+                )
             }.value
 
             collection.removeAll { node in
