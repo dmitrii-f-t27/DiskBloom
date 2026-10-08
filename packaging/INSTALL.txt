@@ -1,4 +1,4 @@
-DiskBloom 1.4 — macOS 14 or later, Apple silicon (M1 or newer)
+DiskBloom 1.5 — macOS 14 or later, Apple silicon (M1 or newer)
 
 INSTALLATION
 Drag DiskBloom.app to Applications, then open it from Applications.
@@ -14,5 +14,7 @@ You can compare the download's SHA-256 checksum with the SHA256SUMS release file
 Apple's instructions: https://support.apple.com/102445
 
 PRIVACY
-DiskBloom has no network code, analytics or telemetry. Every analysis stays on
-your Mac, and nothing is deleted permanently: reviewed items go to the Trash.
+DiskBloom has no analytics or telemetry, and its disk tools never use the network.
+Only the optional assistant, if you connect an API, sends your questions and the
+names, paths and sizes it looks up to the provider you chose. Nothing is deleted
+permanently: reviewed items go to the Trash.

@@ -20,8 +20,17 @@ DUPLICATE FILES
 • Finds files with identical content: size first, then a full SHA-256, then a byte-by-byte comparison
 • Read-only: shows exact paths and lets you reveal every copy in Finder
 
+CACHES
+• See every cache, the app that owns it and a plain verdict: safe to clear, clear if you need space, quit the app first, or leave it
+• Caches of running apps and iCloud or sign-in state cannot be selected
+
+ASSISTANT
+• Ask in plain words and it opens the right folder, cache list or app for you
+• Uses Apple's on-device model, or any OpenAI-compatible API you choose
+• It can select items, but you always review and confirm the move
+
 SAFE BY DESIGN
-• Everything runs on your Mac: no network access, no account, no analytics and no telemetry
+• The disk tools run entirely on your Mac: no account, no analytics and no telemetry; only the optional assistant uses the API you choose
 • Nothing is deleted permanently: after your review, items go to the Trash, where you can restore them
 • DiskBloom reads only the folders you allow and remembers your choice
 • Paths, identity and contents are verified again immediately before every move

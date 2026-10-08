@@ -37,6 +37,12 @@ targets:
         PRODUCT_NAME: DiskBloom
         COMBINE_HIDPI_IMAGES: YES
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        # The Apple on-device assistant model exists only on macOS 26 and later.
+        OTHER_LDFLAGS: "$(inherited) -weak_framework FoundationModels"
+        # Decisions written in t27 (Specs/*.t27) arrive as generated C.
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Generated/DiskBloom-Bridging.h
+        OTHER_CFLAGS: "$(inherited) -ffp-contract=off -Wno-parentheses-equality"
+        OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -Wno-parentheses-equality"
 schemes:
   DiskBloom:
     build:

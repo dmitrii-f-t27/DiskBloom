@@ -3,7 +3,7 @@ import Combine
 import Darwin
 import Foundation
 
-enum OrphanDataRisk: String, Sendable {
+enum OrphanDataRisk: String, CaseIterable, Sendable {
     case disposable
     case privateState
     case persistentData
@@ -27,10 +27,27 @@ enum OrphanDataRisk: String, Sendable {
         }
     }
 
-    var needsExtraAcknowledgement: Bool { self != .disposable }
+    var t27Code: Int32 {
+        switch self {
+        case .disposable: LO_RISK_DISPOSABLE
+        case .privateState: LO_RISK_PRIVATE
+        case .persistentData: LO_RISK_PERSISTENT
+        }
+    }
+
+    init(t27 code: UInt32) {
+        self = Self.allCases.first { UInt32($0.t27Code) == code } ?? .persistentData
+    }
+
+    var needsExtraAcknowledgement: Bool { lo_risk_needs_acknowledgement(UInt32(t27Code)) }
 }
 
 enum OrphanDataConfidence: String, Sendable {
+    /// How certain a group is, decided by Specs/leftovers_policy.t27 from its distinct Library folders.
+    init(distinctRules: Int) {
+        self = lo_confidence(UInt32(distinctRules)) == UInt32(LO_PROBABLE) ? .probable : .possible
+    }
+
     case probable
     case possible
 
@@ -87,23 +104,16 @@ enum OrphanDataRule: String, CaseIterable, Sendable {
         }
     }
 
-    var risk: OrphanDataRisk {
-        switch self {
-        case .cache, .savedState, .log:
-            .disposable
-        case .httpStorage, .webKit:
-            .privateState
-        case .applicationSupport, .container, .applicationScripts:
-            .persistentData
-        }
-    }
+    /// The folder's code in Specs/leftovers_policy.t27: its position in the declaration.
+    var t27Code: Int32 { Int32(Self.allCases.firstIndex(of: self) ?? 0) }
+
+    var risk: OrphanDataRisk { OrphanDataRisk(t27: lo_rule_risk(UInt32(t27Code))) }
 
     func identifier(from entry: URL) -> String? {
         let name = entry.lastPathComponent
         switch self {
         case .savedState:
-            guard name.hasSuffix(".savedState") else { return nil }
-            return String(name.dropLast(".savedState".count))
+            return T27Text.savedStateStem(name)
         default:
             return name
         }
@@ -123,36 +133,13 @@ enum OrphanDataRule: String, CaseIterable, Sendable {
 }
 
 enum OrphanBundleIdentifier {
+    /// The lowercase bundle ID, or nil when the text is not one; decided by Specs/text_rules.t27.
     static func canonical(_ value: String?) -> String? {
-        guard let value,
-              value.count >= 3,
-              value.count <= 255,
-              value.contains("."),
-              !value.hasPrefix("."),
-              !value.hasSuffix("."),
-              !value.contains(".."),
-              value.unicodeScalars.allSatisfy({ scalar in
-                  (scalar.value >= 48 && scalar.value <= 57)
-                      || (scalar.value >= 65 && scalar.value <= 90)
-                      || (scalar.value >= 97 && scalar.value <= 122)
-                      || scalar == "."
-                      || scalar == "-"
-              }) else { return nil }
-        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count >= 2,
-              parts.allSatisfy({ part in
-                  guard let first = part.unicodeScalars.first else { return false }
-                  return (first.value >= 48 && first.value <= 57)
-                      || (first.value >= 65 && first.value <= 90)
-                      || (first.value >= 97 && first.value <= 122)
-              }) else { return nil }
-        return value.lowercased()
+        value.flatMap(T27Text.canonicalIdentifier)
     }
 
     static func vendorNamespace(_ canonicalIdentifier: String) -> String? {
-        let components = canonicalIdentifier.split(separator: ".")
-        guard components.count >= 2 else { return nil }
-        return components.prefix(2).joined(separator: ".")
+        T27Text.vendorNamespace(canonicalIdentifier)
     }
 }
 
@@ -199,7 +186,7 @@ struct OrphanCleanupOutcome: Sendable {
 }
 
 struct OrphanOwnerIndex: Sendable {
-    private let claims: [String: String]
+    let claims: [String: String]
     let processCheckAvailable: Bool
 
     init(claims: [String: String] = [:], processCheckAvailable: Bool = true) {
@@ -214,22 +201,27 @@ struct OrphanOwnerIndex: Sendable {
     }
 
     func claimReason(for identifier: String) -> String? {
-        guard let canonical = OrphanBundleIdentifier.canonical(identifier) else {
-            return "The bundle ID failed the safety check."
+        let canonical = OrphanBundleIdentifier.canonical(identifier)
+        let related = canonical.flatMap { id in
+            claims.keys.sorted(by: T27Text.less).first { T27Text.identifier($0, extends: id) || T27Text.identifier(id, extends: $0) }
         }
-        if let reason = claims[canonical] { return reason }
-        if let related = claims.keys.sorted().first(where: {
-            $0.hasPrefix(canonical + ".") || canonical.hasPrefix($0 + ".")
-        }) {
-            return "An installed or active related bundle ID \(related) was found."
+        let namespace = canonical.flatMap(OrphanBundleIdentifier.vendorNamespace)
+        let sibling = namespace.flatMap { space in
+            claims.keys.sorted(by: T27Text.less).first { OrphanBundleIdentifier.vendorNamespace($0).map { T27Text.same($0, space) } ?? false }
         }
-        if let namespace = OrphanBundleIdentifier.vendorNamespace(canonical),
-           let sibling = claims.keys.sorted().first(where: {
-               OrphanBundleIdentifier.vendorNamespace($0) == namespace
-           }) {
-            return "An installed or active bundle ID \(sibling) from the same namespace \(namespace) was found."
+        let claim = lo_claim(
+            canonical != nil,
+            canonical.map { claims[$0] != nil } ?? false,
+            related != nil,
+            sibling != nil
+        )
+        switch claim {
+        case UInt32(LO_CLAIM_NONE): return nil
+        case UInt32(LO_CLAIM_INVALID_ID): return "The bundle ID failed the safety check."
+        case UInt32(LO_CLAIM_EXACT): return canonical.flatMap { claims[$0] }
+        case UInt32(LO_CLAIM_RELATED): return "An installed or active related bundle ID \(related ?? "") was found."
+        default: return "An installed or active bundle ID \(sibling ?? "") from the same namespace \(namespace ?? "") was found."
         }
-        return nil
     }
 
     static func capture(
@@ -278,7 +270,7 @@ struct OrphanOwnerIndex: Sendable {
             "Contents/Library/LaunchServices",
             "Contents/Library/SystemExtensions"
         ]
-        let bundleExtensions: Set<String> = ["app", "appex", "xpc", "framework", "bundle", "systemextension"]
+        let bundleExtensionKinds = Set([TX_EXT_APP, TX_EXT_APPEX, TX_EXT_XPC, TX_EXT_FRAMEWORK, TX_EXT_BUNDLE, TX_EXT_SYSTEMEXTENSION].map(UInt32.init))
         for relativeRoot in relativeRoots {
             let root = applicationURL.appendingPathComponent(relativeRoot, isDirectory: true)
             guard let enumerator = FileManager.default.enumerator(
@@ -287,7 +279,7 @@ struct OrphanOwnerIndex: Sendable {
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) else { continue }
             for case let url as URL in enumerator {
-                guard bundleExtensions.contains(url.pathExtension.lowercased()),
+                guard bundleExtensionKinds.contains(T27Text.extensionKind(url.path)),
                       let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
                       values.isDirectory == true,
                       values.isSymbolicLink != true,
@@ -307,10 +299,7 @@ struct OrphanOwnerIndex: Sendable {
             let urls = NSWorkspace.shared.urlsForApplications(withBundleIdentifier: identifier)
             if let existing = urls.first(where: { url in
                 let path = url.standardizedFileURL.path
-                let components = (path as NSString).pathComponents
-                return !components.contains(".Trash")
-                    && !components.contains(".Trashes")
-                    && FileManager.default.fileExists(atPath: path)
+                return !T27Text.hasTrashComponent(path) && FileManager.default.fileExists(atPath: path)
             }), let canonical = OrphanBundleIdentifier.canonical(identifier) {
                 claims[canonical] = "LaunchServices registered an existing application: \(existing.path)"
             }
@@ -331,7 +320,7 @@ struct OrphanOwnerIndex: Sendable {
                 includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
                 options: [.skipsHiddenFiles]
             ) else { continue }
-            for url in entries where url.pathExtension.lowercased() == "plist" {
+            for url in entries where T27Text.extensionKind(url.path) == UInt32(TX_EXT_PLIST) {
                 guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
                       values.isRegularFile == true,
                       values.isSymbolicLink != true,
@@ -371,7 +360,7 @@ struct OrphanOwnerIndex: Sendable {
                   let commands = String(data: data, encoding: .utf8)?.lowercased() else { return false }
             for identifier in candidateIdentifiers {
                 guard let canonical = OrphanBundleIdentifier.canonical(identifier),
-                      commands.contains(canonical) else { continue }
+                      T27Text.contains(commands, canonical) else { continue }
                 claims[canonical] = "This bundle ID was found in the command line of a running process."
             }
             return true
@@ -404,8 +393,7 @@ enum OrphanedAppDataAnalyzer {
             let root = normalizedHome
                 .appendingPathComponent("Library", isDirectory: true)
                 .appendingPathComponent(rule.relativeRoot, isDirectory: true)
-            guard !AppRemovalPathSafety.pathHasSymlinkedComponent(root),
-                  let entries = try? FileManager.default.contentsOfDirectory(
+            let listing = try? FileManager.default.contentsOfDirectory(
                       at: root,
                       includingPropertiesForKeys: [
                           .isDirectoryKey,
@@ -415,30 +403,18 @@ enum OrphanedAppDataAnalyzer {
                           .isUbiquitousItemKey
                       ],
                       options: [.skipsHiddenFiles]
-                  ) else { continue }
+                  )
+            guard md_location_usable(AppRemovalPathSafety.pathHasSymlinkedComponent(root), listing != nil),
+                  let entries = listing else { continue }
             for entry in entries {
                 try checkCancellation()
                 progress.record(entry)
                 examined += 1
-                guard let rawIdentifier = rule.identifier(from: entry),
-                      let canonical = OrphanBundleIdentifier.canonical(rawIdentifier),
-                      !canonical.hasPrefix("com.apple."),
-                      !canonical.hasPrefix("group."),
-                      rule.expectedURL(homeURL: normalizedHome, identifier: rawIdentifier)
-                        .standardizedFileURL.path == entry.standardizedFileURL.path,
-                      let values = try? entry.resourceValues(forKeys: [
-                          .isDirectoryKey,
-                          .isSymbolicLinkKey,
-                          .volumeIsLocalKey,
-                          .volumeIsReadOnlyKey,
-                          .isUbiquitousItemKey
-                      ]),
-                      values.isDirectory == true,
-                      values.isSymbolicLink != true,
-                      values.volumeIsLocal == true,
-                      values.volumeIsReadOnly != true,
-                      values.isUbiquitousItem != true,
-                      !AppRemovalPathSafety.pathHasSymlinkedComponent(entry) else {
+                guard let (rawIdentifier, canonical) = OrphanedAppDataAnalyzer.candidate(
+                    entry: entry,
+                    rule: rule,
+                    homeURL: normalizedHome
+                ) else {
                     skippedUnsafe += 1
                     continue
                 }
@@ -461,7 +437,7 @@ enum OrphanedAppDataAnalyzer {
         var protectedIdentifiers: Set<String> = []
         var items: [OrphanDataItem] = []
 
-        for spec in specs.sorted(by: { $0.url.path < $1.url.path }) {
+        for spec in specs.sorted(by: { T27Text.less($0.url.path, $1.url.path) }) {
             try checkCancellation()
             if ownerIndex.claimReason(for: spec.canonicalIdentifier) != nil {
                 protectedIdentifiers.insert(spec.canonicalIdentifier)
@@ -487,17 +463,21 @@ enum OrphanedAppDataAnalyzer {
 
         let grouped = Dictionary(grouping: items, by: \.canonicalIdentifier)
         let groups = grouped.map { identifier, values in
-            let sorted = values.sorted { $0.url.path < $1.url.path }
+            let sorted = values.sorted { T27Text.less($0.url.path, $1.url.path) }
             return OrphanDataGroup(
                 id: identifier,
                 identifier: sorted.first?.identifier ?? identifier,
                 items: sorted,
-                confidence: Set(sorted.map(\.rule)).count >= 2 ? .probable : .possible
+                confidence: OrphanDataConfidence(distinctRules: Set(sorted.map(\.rule)).count)
             )
         }.sorted {
-            if $0.confidence != $1.confidence { return $0.confidence == .probable }
-            if $0.totalSize != $1.totalSize { return $0.totalSize > $1.totalSize }
-            return $0.identifier.localizedCaseInsensitiveCompare($1.identifier) == .orderedAscending
+            let probableA = UInt32($0.confidence == .probable ? LO_PROBABLE : LO_POSSIBLE)
+            let probableB = UInt32($1.confidence == .probable ? LO_PROBABLE : LO_POSSIBLE)
+            switch Int32(lo_group_order(probableA, probableB, $0.totalSize, $1.totalSize)) {
+            case LO_ORDER_FIRST: return true
+            case LO_ORDER_SECOND: return false
+            default: return $0.identifier.localizedCaseInsensitiveCompare($1.identifier) == .orderedAscending
+            }
         }
 
         return OrphanDataAnalysis(
@@ -513,6 +493,35 @@ enum OrphanedAppDataAnalyzer {
     private static func checkCancellation() throws {
         if Task.isCancelled { throw CancellationError() }
     }
+
+    /// Whether a Library entry may be offered at all; returns its raw and canonical bundle ID.
+    static func candidate(entry: URL, rule: OrphanDataRule, homeURL: URL) -> (String, String)? {
+        let rawIdentifier = rule.identifier(from: entry)
+        let canonical = OrphanBundleIdentifier.canonical(rawIdentifier)
+        let values = try? entry.resourceValues(forKeys: [
+            .isDirectoryKey,
+            .isSymbolicLinkKey,
+            .volumeIsLocalKey,
+            .volumeIsReadOnlyKey,
+            .isUbiquitousItemKey
+        ])
+        let accepted = lo_is_candidate(
+            rawIdentifier != nil,
+            canonical != nil,
+            canonical.map(T27Text.hasApplePrefix) ?? false,
+            canonical.map(T27Text.hasGroupPrefix) ?? false,
+            rawIdentifier.map { T27Text.same(rule.expectedURL(homeURL: homeURL, identifier: $0).standardizedFileURL.path, entry.standardizedFileURL.path) } ?? false,
+            values != nil,
+            values?.isDirectory == true,
+            values?.isSymbolicLink == true,
+            values?.volumeIsLocal == true,
+            values?.volumeIsReadOnly == true,
+            values?.isUbiquitousItem == true,
+            AppRemovalPathSafety.pathHasSymlinkedComponent(entry)
+        )
+        guard accepted, let rawIdentifier, let canonical else { return nil }
+        return (rawIdentifier, canonical)
+    }
 }
 
 enum OrphanDataPolicy {
@@ -521,58 +530,66 @@ enum OrphanDataPolicy {
         homeURL: URL = UserHome.url,
         candidateURL: URL? = nil
     ) -> String? {
-        if let issue = item.eligibilityIssue { return "\(item.url.path): \(issue)" }
-        guard OrphanBundleIdentifier.canonical(item.identifier) == item.canonicalIdentifier else {
-            return "The bundle ID no longer passes the safety check: \(item.identifier)"
-        }
         let original = item.url.standardizedFileURL
         let candidate = (candidateURL ?? original).standardizedFileURL
-        guard candidate.path == original.path else {
-            return "The coordinated path changed: \(original.path)"
-        }
-        let expected = item.rule.expectedURL(homeURL: homeURL, identifier: item.identifier)
-            .standardizedFileURL
-        guard expected.path == original.path else {
-            return "The path does not match an exact allowed rule: \(original.path)"
-        }
-        if AppRemovalPathSafety.pathHasSymlinkedComponent(candidate) {
-            return "The path contains a symbolic link: \(candidate.path)"
-        }
-        guard let values = try? candidate.resourceValues(forKeys: [
+        let expected = item.rule.expectedURL(homeURL: homeURL, identifier: item.identifier).standardizedFileURL
+        let values = try? candidate.resourceValues(forKeys: [
             .isDirectoryKey,
             .isSymbolicLinkKey,
             .volumeIsLocalKey,
             .volumeIsReadOnlyKey,
             .isUbiquitousItemKey
-        ]), values.isDirectory == true, values.isSymbolicLink != true else {
-            return "The item is no longer a regular folder: \(candidate.path)"
+        ])
+        let treeIssue = treeEligibilityIssue(for: item.node, homeURL: homeURL)
+        let issue = lo_move_issue(
+            item.eligibilityIssue != nil,
+            OrphanBundleIdentifier.canonical(item.identifier).map { T27Text.same($0, item.canonicalIdentifier) } ?? false,
+            T27Text.same(candidate.path, original.path),
+            T27Text.same(expected.path, original.path),
+            AppRemovalPathSafety.pathHasSymlinkedComponent(candidate),
+            values?.isDirectory == true && values?.isSymbolicLink != true,
+            values?.volumeIsLocal == true,
+            values?.volumeIsReadOnly == true,
+            values?.isUbiquitousItem == true,
+            treeIssue == nil
+        )
+        switch issue {
+        case UInt32(LO_MOVE_OK): return SnapshotValidator.validate(item.node, candidateURL: candidate)
+        case UInt32(LO_MOVE_BLOCKED): return "\(item.url.path): \(item.eligibilityIssue ?? "")"
+        case UInt32(LO_MOVE_ID_CHANGED): return "The bundle ID no longer passes the safety check: \(item.identifier)"
+        case UInt32(LO_MOVE_PATH_CHANGED): return "The coordinated path changed: \(original.path)"
+        case UInt32(LO_MOVE_RULE_MISMATCH): return "The path does not match an exact allowed rule: \(original.path)"
+        case UInt32(LO_MOVE_SYMLINK): return "The path contains a symbolic link: \(candidate.path)"
+        case UInt32(LO_MOVE_NOT_FOLDER): return "The item is no longer a regular folder: \(candidate.path)"
+        case UInt32(LO_MOVE_NETWORK): return "Network or unknown volume is protected: \(candidate.path)"
+        case UInt32(LO_MOVE_READ_ONLY): return "The volume is read-only: \(candidate.path)"
+        case UInt32(LO_MOVE_CLOUD): return "Cloud item is protected: \(candidate.path)"
+        default: return "\(candidate.path): \(treeIssue ?? "")"
         }
-        if values.volumeIsLocal != true { return "Network or unknown volume is protected: \(candidate.path)" }
-        if values.volumeIsReadOnly == true { return "The volume is read-only: \(candidate.path)" }
-        if values.isUbiquitousItem == true { return "Cloud item is protected: \(candidate.path)" }
-        if let issue = treeEligibilityIssue(for: item.node, homeURL: homeURL) { return "\(candidate.path): \(issue)" }
-        return SnapshotValidator.validate(item.node, candidateURL: candidate)
     }
 
     static func treeEligibilityIssue(for node: DiskNode, homeURL: URL) -> String? {
-        guard let url = node.url else { return "Could not obtain the exact path." }
-        guard node.resourceIdentifier != nil, node.fingerprint != nil else {
-            return "The folder snapshot is incomplete; removal is disabled."
-        }
-        guard node.unreadableCount == 0 else {
-            return "It contains inaccessible items; removal is disabled."
-        }
         let library = homeURL.appendingPathComponent("Library", isDirectory: true).standardizedFileURL.path
-        guard url.standardizedFileURL.path.hasPrefix(library + "/") else {
-            return "The path is outside the user Library."
+        let insideLibrary = node.url.map { T27Text.inside($0.standardizedFileURL.path, library) } ?? false
+        let complete = node.resourceIdentifier != nil && node.fingerprint != nil
+        // The walk is the expensive fact: it runs only when every cheaper fact already passed.
+        let contentsIssue = node.url != nil && complete && node.unreadableCount == 0 && insideLibrary
+            ? node.url.flatMap(inspectTree(at:))
+            : nil
+        switch lo_tree_issue(node.url != nil, complete, node.unreadableCount > 0, insideLibrary, contentsIssue == nil) {
+        case UInt32(LO_TREE_OK): return nil
+        case UInt32(LO_TREE_NO_PATH): return "Could not obtain the exact path."
+        case UInt32(LO_TREE_INCOMPLETE): return "The folder snapshot is incomplete; removal is disabled."
+        case UInt32(LO_TREE_UNREADABLE): return "It contains inaccessible items; removal is disabled."
+        case UInt32(LO_TREE_OUTSIDE_LIBRARY): return "The path is outside the user Library."
+        default: return contentsIssue
         }
-        return inspectTree(at: url)
     }
 
     static func overlappingSelectionReason(_ items: [OrphanDataItem]) -> String? {
-        let paths = items.map { $0.url.standardizedFileURL.path }.sorted()
+        let paths = items.map { $0.url.standardizedFileURL.path }.sorted(by: T27Text.less)
         for (index, path) in paths.enumerated() {
-            for other in paths.dropFirst(index + 1) where other.hasPrefix(path + "/") {
+            for other in paths.dropFirst(index + 1) where T27Text.inside(other, path) {
                 return "Selected paths overlap: \(path) and \(other)"
             }
         }
@@ -598,34 +615,34 @@ enum OrphanDataPolicy {
         }
         if let enumerationIssue { return enumerationIssue }
 
-        let executableBundleExtensions: Set<String> = ["app", "appex", "xpc", "systemextension"]
+        let executableBundleKinds = Set([TX_EXT_APP, TX_EXT_APPEX, TX_EXT_XPC, TX_EXT_SYSTEMEXTENSION].map(UInt32.init))
+        let immutableFlags = UInt32(UF_IMMUTABLE | UF_APPEND | SF_IMMUTABLE | SF_APPEND)
+        let executableBits = mode_t(S_IXUSR | S_IXGRP | S_IXOTH)
         for url in urls {
             var info = stat()
             let result = url.withUnsafeFileSystemRepresentation { path in
                 guard let path else { return Int32(-1) }
                 return lstat(path, &info)
             }
-            guard result == 0 else { return "Could not check permissions: \(url.path)" }
-            if info.st_uid != geteuid() {
-                return "It contains an item owned by another user: \(url.path)"
-            }
-            let immutableFlags = UInt32(UF_IMMUTABLE | UF_APPEND | SF_IMMUTABLE | SF_APPEND)
-            if info.st_flags & immutableFlags != 0 {
-                return "It contains an item protected by flags: \(url.path)"
-            }
-            if FileIdentity.deviceID(for: url) != rootDevice {
-                return "A boundary of another volume was found inside: \(url.path)"
-            }
             let fileType = info.st_mode & S_IFMT
-            if fileType == S_IFLNK {
-                return "A symbolic link was found inside: \(url.path)"
-            }
-            if executableBundleExtensions.contains(url.pathExtension.lowercased()) {
-                return "An executable bundle was found inside: \(url.path)"
-            }
-            let executableBits = mode_t(S_IXUSR | S_IXGRP | S_IXOTH)
-            if fileType == S_IFREG, info.st_mode & executableBits != 0 {
-                return "An executable file was found inside: \(url.path)"
+            let issue = lo_entry_issue(
+                result == 0,
+                info.st_uid == geteuid(),
+                info.st_flags & immutableFlags != 0,
+                FileIdentity.deviceID(for: url) == rootDevice,
+                fileType == S_IFLNK,
+                executableBundleKinds.contains(T27Text.extensionKind(url.path)),
+                fileType == S_IFREG && info.st_mode & executableBits != 0
+            )
+            switch issue {
+            case UInt32(LO_ENTRY_OK): continue
+            case UInt32(LO_ENTRY_NO_STAT): return "Could not check permissions: \(url.path)"
+            case UInt32(LO_ENTRY_OTHER_USER): return "It contains an item owned by another user: \(url.path)"
+            case UInt32(LO_ENTRY_FLAGS): return "It contains an item protected by flags: \(url.path)"
+            case UInt32(LO_ENTRY_OTHER_VOLUME): return "A boundary of another volume was found inside: \(url.path)"
+            case UInt32(LO_ENTRY_SYMLINK): return "A symbolic link was found inside: \(url.path)"
+            case UInt32(LO_ENTRY_EXECUTABLE_BUNDLE): return "An executable bundle was found inside: \(url.path)"
+            default: return "An executable file was found inside: \(url.path)"
             }
         }
         return nil
@@ -633,14 +650,10 @@ enum OrphanDataPolicy {
 }
 
 enum OrphanCleanupCoordinator {
-    typealias TrashMover = @Sendable (URL) throws -> URL?
+    typealias TrashMover = MoveSteps.Mover
     typealias OwnerResolver = @Sendable (Set<String>) -> OrphanOwnerIndex
 
-    static let systemTrashMover: TrashMover = { url in
-        var resultingURL: NSURL?
-        try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
-        return resultingURL as URL?
-    }
+    static let systemTrashMover: TrashMover = MoveSteps.systemTrashMover
 
     static func moveToTrash(
         items: [OrphanDataItem],
@@ -648,33 +661,27 @@ enum OrphanCleanupCoordinator {
         ownerResolver: OwnerResolver,
         mover: TrashMover = systemTrashMover
     ) -> OrphanCleanupOutcome {
-        let ordered = items.sorted { $0.url.path < $1.url.path }
+        let ordered = items.sorted { T27Text.less($0.url.path, $1.url.path) }
         guard !ordered.isEmpty else {
             return OrphanCleanupOutcome(movedPaths: [], uncertainPaths: [], failure: "Nothing selected.", unattemptedPaths: [])
         }
-        if let overlap = OrphanDataPolicy.overlappingSelectionReason(ordered) {
-            return OrphanCleanupOutcome(
-                movedPaths: [], uncertainPaths: [], failure: overlap,
-                unattemptedPaths: ordered.map { $0.url.path }
-            )
+        let queueFailure = MoveSteps.run(MV_LEFTOVERS, MV_PHASE_QUEUE) { step, _ in
+            switch step {
+            case MV_STEP_OVERLAP:
+                return OrphanDataPolicy.overlappingSelectionReason(ordered)
+            case MV_STEP_OWNERS_AND_VALIDATE_EACH:
+                let owners = ownerResolver(Set(ordered.map(\.canonicalIdentifier)))
+                for item in ordered {
+                    if let reason = owners.claimReason(for: item.canonicalIdentifier) { return "Cleanup blocked: \(reason)" }
+                    if let reason = OrphanDataPolicy.validate(item, homeURL: homeURL) { return reason }
+                }
+                return nil
+            default:
+                return nil
+            }
         }
-        let identifiers = Set(ordered.map(\.canonicalIdentifier))
-        let initialOwners = ownerResolver(identifiers)
-        for item in ordered {
-            if let reason = initialOwners.claimReason(for: item.canonicalIdentifier) {
-                return OrphanCleanupOutcome(
-                    movedPaths: [],
-                    uncertainPaths: [],
-                    failure: "Cleanup blocked: \(reason)",
-                    unattemptedPaths: ordered.map { $0.url.path }
-                )
-            }
-            if let reason = OrphanDataPolicy.validate(item, homeURL: homeURL) {
-                return OrphanCleanupOutcome(
-                    movedPaths: [], uncertainPaths: [], failure: reason,
-                    unattemptedPaths: ordered.map { $0.url.path }
-                )
-            }
+        if let queueFailure {
+            return OrphanCleanupOutcome(movedPaths: [], uncertainPaths: [], failure: queueFailure, unattemptedPaths: ordered.map { $0.url.path })
         }
 
         var moved: [String] = []
@@ -686,69 +693,60 @@ enum OrphanCleanupCoordinator {
             var didMove = false
             var uncertain = false
             coordinator.coordinate(writingItemAt: url, options: .forMoving, error: &coordinationError) { coordinatedURL in
-                let freshOwners = ownerResolver(Set([item.canonicalIdentifier]))
-                if let reason = freshOwners.claimReason(for: item.canonicalIdentifier) {
-                    localFailure = "Cleanup blocked: \(reason)"
-                    return
+                var expectedIdentity: String?
+                localFailure = MoveSteps.run(MV_LEFTOVERS, MV_PHASE_ITEM) { step, occurrence in
+                    switch step {
+                    case MV_STEP_OWNERS:
+                        let owners = ownerResolver(Set([item.canonicalIdentifier]))
+                        guard let reason = owners.claimReason(for: item.canonicalIdentifier) else { return nil }
+                        return occurrence == 0 ? "Cleanup blocked: \(reason)" : "Cleanup blocked immediately before moving: \(reason)"
+                    case MV_STEP_VALIDATE:
+                        return OrphanDataPolicy.validate(item, homeURL: homeURL, candidateURL: coordinatedURL)
+                    case MV_STEP_CAPTURE_IDENTITY:
+                        expectedIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL)
+                        return expectedIdentity == nil ? "Could not capture the identity immediately before moving: \(url.path)" : nil
+                    default:
+                        return nil
+                    }
                 }
-                if let reason = OrphanDataPolicy.validate(
-                    item,
-                    homeURL: homeURL,
-                    candidateURL: coordinatedURL
-                ) {
-                    localFailure = reason
-                    return
-                }
-                let ownersImmediatelyBeforeMove = ownerResolver(Set([item.canonicalIdentifier]))
-                if let reason = ownersImmediatelyBeforeMove.claimReason(for: item.canonicalIdentifier) {
-                    localFailure = "Cleanup blocked immediately before moving: \(reason)"
-                    return
-                }
-                if let reason = OrphanDataPolicy.validate(
-                    item,
-                    homeURL: homeURL,
-                    candidateURL: coordinatedURL
-                ) {
-                    localFailure = reason
-                    return
-                }
-                guard let expectedIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL) else {
-                    localFailure = "Could not capture the identity immediately before moving: \(url.path)"
-                    return
-                }
+                guard localFailure == nil, let expectedIdentity else { return }
                 do {
                     let movedURL = try mover(coordinatedURL)
-                    guard let movedURL,
-                          FileIdentity.relocationIdentifier(for: movedURL) == expectedIdentity,
-                          (try? movedURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+                    guard MoveSteps.confirmed(MV_LEFTOVERS, movedURL: movedURL, expectedIdentity: expectedIdentity, expectedDirectory: true) else {
                         let result = movedURL?.path ?? "no Trash path was returned"
                         localFailure = "Could not confirm the item after moving: \(url.path). Result: \(result)."
-                        uncertain = !FileManager.default.fileExists(atPath: coordinatedURL.path)
+                        uncertain = MoveSteps.uncertain(MV_LEFTOVERS, MV_FAILED_UNCONFIRMED, sourcePath: coordinatedURL.path)
                         return
                     }
                     didMove = true
                 } catch {
                     let sourceExists = FileManager.default.fileExists(atPath: coordinatedURL.path)
-                    uncertain = !sourceExists
+                    uncertain = MoveSteps.uncertain(MV_LEFTOVERS, MV_FAILED_THREW, sourcePath: coordinatedURL.path)
                     let suffix = sourceExists
                         ? ""
                         : " The original path disappeared; automatic retry is blocked."
                     localFailure = "\(url.path): \(error.localizedDescription)\(suffix)"
                 }
             }
-            if coordinationError != nil, !FileManager.default.fileExists(atPath: url.path) {
+            if coordinationError != nil, MoveSteps.uncertain(MV_LEFTOVERS, MV_FAILED_COORDINATOR, sourcePath: url.path) {
                 uncertain = true
             }
-            let failure = coordinationError.map { "\(url.path): \($0.localizedDescription)" } ?? localFailure
-            if let failure {
-                return OrphanCleanupOutcome(
-                    movedPaths: moved,
-                    uncertainPaths: uncertain ? [url.path] : [],
-                    failure: failure,
-                    unattemptedPaths: ordered.dropFirst(index + 1).map { $0.url.path }
-                )
+            switch MoveSteps.result(coordinationError: coordinationError != nil, failure: localFailure != nil, moved: didMove) {
+            case MV_FAILED:
+                let failure = coordinationError.map { "\(url.path): \($0.localizedDescription)" } ?? localFailure ?? ""
+                if MoveSteps.stopsAfterFailure(MV_LEFTOVERS) {
+                    return OrphanCleanupOutcome(
+                        movedPaths: moved,
+                        uncertainPaths: uncertain ? [url.path] : [],
+                        failure: failure,
+                        unattemptedPaths: ordered.dropFirst(index + 1).map { $0.url.path }
+                    )
+                }
+            case MV_MOVED:
+                moved.append(url.path)
+            default:
+                break
             }
-            if didMove { moved.append(url.path) }
         }
         return OrphanCleanupOutcome(movedPaths: moved, uncertainPaths: [], failure: nil, unattemptedPaths: [])
     }
@@ -779,21 +777,21 @@ final class OrphanedAppDataModel: ObservableObject {
 
     var selectedItems: [OrphanDataItem] {
         groups.flatMap(\.items).filter {
-            selectedItemIDs.contains($0.id) && !confirmedMovedItemIDs.contains($0.id)
+            md_counts_as_selected(selectedItemIDs.contains($0.id), confirmedMovedItemIDs.contains($0.id))
         }
     }
 
     var selectedSize: Int64 { selectedItems.reduce(0) { $0 + $1.node.size } }
     var processCheckUnavailable: Bool { analysis?.processCheckAvailable == false }
     var needsExtraAcknowledgement: Bool {
-        processCheckUnavailable || selectedItems.contains { $0.risk.needsExtraAcknowledgement }
+        md_needs_acknowledgement(processCheckUnavailable, selectedItems.contains { $0.risk.needsExtraAcknowledgement })
     }
     var hasUncertainOutcome: Bool {
-        guard let uncertainPaths = lastOutcome?.uncertainPaths else { return false }
-        return !Set(uncertainPaths).isSubset(of: manuallyAcknowledgedUncertainPaths)
+        let uncertainPaths = lastOutcome?.uncertainPaths ?? []
+        return md_uncertain_open(!uncertainPaths.isEmpty, Set(uncertainPaths).isSubset(of: manuallyAcknowledgedUncertainPaths))
     }
     var isNavigationLocked: Bool {
-        isReviewing || isMovingToTrash || showingReview || showingOutcomeReport
+        md_leftovers_locked(isReviewing, isMovingToTrash, showingReview, showingOutcomeReport)
     }
 
     func startAnalysis() {
@@ -806,7 +804,7 @@ final class OrphanedAppDataModel: ObservableObject {
             )
             return
         }
-        guard !isReviewing, !isMovingToTrash, !hasUncertainOutcome else {
+        guard md_leftovers_can_analyse(isReviewing, isMovingToTrash, hasUncertainOutcome) else {
             notice = AppNotice(
                 title: "Re-analysis blocked",
                 message: "Check the disputed result of the previous move first."
@@ -872,11 +870,13 @@ final class OrphanedAppDataModel: ObservableObject {
     }
 
     func toggle(_ item: OrphanDataItem) {
-        guard item.isSelectable,
-              !confirmedMovedItemIDs.contains(item.id),
-              !isReviewing,
-              !isMovingToTrash,
-              !hasUncertainOutcome else { return }
+        guard md_leftovers_can_toggle(
+            item.isSelectable,
+            confirmedMovedItemIDs.contains(item.id),
+            isReviewing,
+            isMovingToTrash,
+            hasUncertainOutcome
+        ) else { return }
         if selectedItemIDs.contains(item.id) {
             selectedItemIDs.remove(item.id)
         } else {
@@ -890,7 +890,7 @@ final class OrphanedAppDataModel: ObservableObject {
 
     func requestReview() {
         let items = selectedItems
-        guard !items.isEmpty, !isScanning, !isMovingToTrash, !hasUncertainOutcome else { return }
+        guard md_leftovers_can_review(Int64(items.count), isScanning, isMovingToTrash, hasUncertainOutcome) else { return }
         let generation = UUID()
         reviewGeneration = generation
         reviewTask?.cancel()
@@ -912,7 +912,7 @@ final class OrphanedAppDataModel: ObservableObject {
             }.value
             guard reviewGeneration == generation, !Task.isCancelled else { return }
             isReviewing = false
-            if failures.isEmpty {
+            if md_review_passes(Int64(failures.count)) {
                 showingReview = true
             } else {
                 notice = AppNotice(
@@ -925,7 +925,7 @@ final class OrphanedAppDataModel: ObservableObject {
 
     func moveReviewedItemsToTrash() {
         let items = selectedItems
-        guard showingReview, !items.isEmpty, !isMovingToTrash, !hasUncertainOutcome else { return }
+        guard md_leftovers_can_move(showingReview, Int64(items.count), isMovingToTrash, hasUncertainOutcome) else { return }
         showingReview = false
         isMovingToTrash = true
         let localHome = homeURL
@@ -951,11 +951,9 @@ final class OrphanedAppDataModel: ObservableObject {
 
     func recheckUncertainOutcome() {
         guard let outcome = lastOutcome,
-              !outcome.uncertainPaths.isEmpty,
-              !isReviewing,
-              !isMovingToTrash else { return }
+              md_can_recheck_uncertain(!outcome.uncertainPaths.isEmpty, isReviewing, isMovingToTrash) else { return }
         let uncertain = groups.flatMap(\.items).filter { outcome.uncertainPaths.contains($0.url.path) }
-        guard uncertain.count == outcome.uncertainPaths.count else {
+        guard md_disputed_all_known(Int64(uncertain.count), Int64(outcome.uncertainPaths.count)) else {
             notice = AppNotice(
                 title: "Automatic check impossible",
                 message: "One of the disputed paths has no original snapshot. Check the Trash manually."
@@ -972,7 +970,7 @@ final class OrphanedAppDataModel: ObservableObject {
             }.value
             guard reviewGeneration == generation, !Task.isCancelled else { return }
             isReviewing = false
-            if failures.isEmpty {
+            if md_review_passes(Int64(failures.count)) {
                 lastOutcome = nil
                 showingOutcomeReport = false
                 notice = AppNotice(
@@ -994,9 +992,7 @@ final class OrphanedAppDataModel: ObservableObject {
 
     func acknowledgeUncertainOutcomeAfterManualCheck() {
         guard let outcome = lastOutcome,
-              !outcome.uncertainPaths.isEmpty,
-              !isReviewing,
-              !isMovingToTrash else { return }
+              md_can_recheck_uncertain(!outcome.uncertainPaths.isEmpty, isReviewing, isMovingToTrash) else { return }
         manuallyAcknowledgedUncertainPaths.formUnion(outcome.uncertainPaths)
         showingOutcomeReport = false
         notice = AppNotice(
@@ -1006,7 +1002,7 @@ final class OrphanedAppDataModel: ObservableObject {
     }
 
     func clearLastOutcome() {
-        guard !isMovingToTrash, !hasUncertainOutcome else { return }
+        guard md_can_clear_outcome(isMovingToTrash, hasUncertainOutcome) else { return }
         lastOutcome = nil
         manuallyAcknowledgedUncertainPaths = []
         showingOutcomeReport = false

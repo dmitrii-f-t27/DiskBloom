@@ -21,61 +21,68 @@ enum WorkspaceSection: String, Sendable {
     case appUninstaller
     case orphanedAppData
     case duplicateFinder
+    case cacheExplorer
 }
 
 enum SnapshotValidator {
+    /// Whether an item still matches its snapshot, decided by Specs/scan_rules.t27; nil when it does.
     static func validate(_ node: DiskNode, candidateURL: URL? = nil) -> String? {
-        guard !node.isVirtual, let originalURL = node.url else {
-            return "An aggregate group cannot be reviewed as a single item."
+        let originalURL = node.url
+        let url = candidateURL ?? originalURL ?? URL(fileURLWithPath: "/")
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        var valuesError: Error?
+        var values: URLResourceValues?
+        if exists {
+            do { values = try url.resourceValues(forKeys: [.isSymbolicLinkKey]) } catch { valuesError = error }
         }
-        if let candidateURL,
-           candidateURL.standardizedFileURL.path != originalURL.standardizedFileURL.path {
-            return "The item’s path changed after confirmation. Rescan: \(originalURL.path)"
+        let actual = values != nil ? FileIdentity.read(for: url) : nil
+        let precheck = sn_precheck(
+            node.isVirtual || originalURL == nil,
+            candidateURL.map { candidate in originalURL.map { T27Text.same(candidate.standardizedFileURL.path, $0.standardizedFileURL.path) } ?? false } ?? true,
+            exists,
+            values != nil,
+            values?.isSymbolicLink == true,
+            node.resourceIdentifier != nil && actual != nil,
+            node.resourceIdentifier.flatMap { expected in actual.map { T27Text.same($0, expected) } } ?? false,
+            node.fingerprint != nil
+        )
+        let path = originalURL?.path ?? url.path
+        switch precheck {
+        case UInt32(SN_OK): break
+        case UInt32(SN_AGGREGATE): return "An aggregate group cannot be reviewed as a single item."
+        case UInt32(SN_PATH_CHANGED): return "The item’s path changed after confirmation. Rescan: \(path)"
+        case UInt32(SN_GONE): return "The item no longer exists: \(url.path)"
+        case UInt32(SN_VALUES_UNREADABLE): return "Could not re-verify \(url.path): \(valuesError?.localizedDescription ?? "")"
+        case UInt32(SN_BECAME_SYMLINK): return "The item became a symbolic link after scanning: \(url.path)"
+        case UInt32(SN_IDENTITY_UNKNOWN): return "Could not confirm the item’s identity: \(url.path). Rescan."
+        case UInt32(SN_IDENTITY_CHANGED): return "The item changed after scanning: \(url.path). Rescan."
+        default: return "No complete content snapshot exists for the item: \(url.path). Rescan."
         }
-        let url = candidateURL ?? originalURL
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            return "The item no longer exists: \(url.path)"
-        }
-        do {
-            let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey])
-            if values.isSymbolicLink == true {
-                return "The item became a symbolic link after scanning: \(url.path)"
-            }
-            guard let expected = node.resourceIdentifier,
-                  let actual = FileIdentity.read(for: url) else {
-                return "Could not confirm the item’s identity: \(url.path). Rescan."
-            }
-            if actual != expected {
-                return "The item changed after scanning: \(url.path). Rescan."
-            }
-        } catch {
-            return "Could not re-verify \(url.path): \(error.localizedDescription)"
-        }
-        guard let expectedFingerprint = node.fingerprint else {
-            return "No complete content snapshot exists for the item: \(url.path). Rescan."
-        }
+        var refreshed: DiskNode?
+        var measureError: Error?
         do {
             var scanner = DiskScanner()
-            let refreshed = try scanner.scan(root: url, counter: ScanCounter()).root
-            guard refreshed.resourceIdentifier == node.resourceIdentifier,
-                  refreshed.isDirectory == node.isDirectory,
-                  refreshed.fingerprint == expectedFingerprint,
-                  refreshed.size == node.size,
-                  refreshed.fileCount == node.fileCount,
-                  refreshed.directoryCount == node.directoryCount else {
-                return "Contents changed after analysis: \(url.path). Review the updated data before moving."
-            }
+            refreshed = try scanner.scan(root: url, counter: ScanCounter()).root
         } catch {
-            return "Could not re-measure \(url.path): \(error.localizedDescription)"
+            measureError = error
         }
-        return nil
+        let comparison = sn_compare(
+            refreshed != nil,
+            refreshed?.resourceIdentifier == node.resourceIdentifier,
+            refreshed?.isDirectory == node.isDirectory,
+            refreshed?.fingerprint == node.fingerprint,
+            refreshed?.size == node.size,
+            refreshed?.fileCount == node.fileCount,
+            refreshed?.directoryCount == node.directoryCount
+        )
+        switch comparison {
+        case UInt32(SN_OK): return nil
+        case UInt32(SN_REMEASURE_FAILED): return "Could not re-measure \(url.path): \(measureError?.localizedDescription ?? "")"
+        default: return "Contents changed after analysis: \(url.path). Review the updated data before moving."
+        }
     }
 }
 
-private struct TrashOutcome: Sendable {
-    let successfulPaths: [String]
-    let failures: [String]
-}
 
 private struct NavigationState {
     let snapshot: ScanSnapshot
@@ -85,6 +92,7 @@ private struct NavigationState {
 }
 
 enum DeletionPolicy {
+    /// The facts Specs/deletion_policy.t27 decides from. Missing facts are filled conservatively.
     static func rejectionReason(
         for node: DiskNode,
         scanRootURL: URL,
@@ -92,89 +100,77 @@ enum DeletionPolicy {
         candidateURL: URL? = nil,
         appURL: URL = Bundle.main.bundleURL
     ) -> String? {
-        guard !node.isVirtual, let originalNodeURL = node.url else {
-            return "An aggregate group cannot be moved to the Trash. Open the folder and choose a specific item."
-        }
-        if let candidateURL,
-           candidateURL.standardizedFileURL.path != originalNodeURL.standardizedFileURL.path {
-            return "The item’s path changed after confirmation. Rescan and confirm the new path."
-        }
-        let url = candidateURL ?? originalNodeURL
+        let originalNodeURL = node.url
+        let url = candidateURL ?? originalNodeURL ?? scanRootURL
         let original = url.standardizedFileURL
         let resolved = original.resolvingSymlinksInPath()
-        guard original.path == resolved.path else {
-            return "Symbolic links and redirected paths are view-only."
-        }
-        guard original.path != UserHome.path else {
-            return "The home folder is protected. Choose an item inside it."
-        }
         let scanRoot = scanRootURL.standardizedFileURL.resolvingSymlinksInPath()
-        if scanRoot.path == "/" {
-            return "Cleanup is disabled while viewing the entire system disk. Choose a specific user folder."
-        }
-        if original.path == scanRoot.path {
-            return "The root of the current analysis is protected. Choose a specific item inside it."
-        }
-        guard original.path.hasPrefix(scanRoot.path + "/") else {
-            return "The item is no longer inside the selected analysis area. Rescan."
-        }
-        if let activeScanURL {
-            let activePath = activeScanURL.standardizedFileURL.resolvingSymlinksInPath().path
-            if original.path == activePath || activePath.hasPrefix(original.path + "/") {
-                return "The item contains the current analysis area. Go back to the parent map first."
-            }
-        }
         let home = UserHome.path
-        let isInsideHome = original.path.hasPrefix(home + "/")
-        let components = original.pathComponents
-        let isInsideExternalVolume = components.count >= 4 && components[1] == "Volumes"
-        guard isInsideHome || isInsideExternalVolume else {
-            return "System directories are available for analysis only. Cleanup is allowed inside the home folder or a selected external disk."
-        }
+        let isInsideHome = T27Text.inside(original.path, home)
+        let relativePath = isInsideHome ? String(original.path.dropFirst(home.count + 1)) : ""
+
+        var library = UInt32(DP_LIB_NONE)
         if isInsideHome {
-            let relativePath = String(original.path.dropFirst(home.count + 1))
-            let allowedLibraryPaths = [
-                "Library/Caches",
-                "Library/Developer/Xcode/DerivedData"
-            ]
-            let isAllowedLibraryCache = allowedLibraryPaths.contains { allowedPath in
-                relativePath == allowedPath || relativePath.hasPrefix(allowedPath + "/")
-            }
-            if (relativePath == "Library" || relativePath.hasPrefix("Library/")) && !isAllowedLibraryCache {
-                return "The Library folder holds app state, profiles and cloud data. DiskBloom allows cleanup only for Caches and Xcode DerivedData."
-            }
-            let firstComponent = relativePath.split(separator: "/").first.map(String.init) ?? ""
-            if firstComponent.hasPrefix(".") && firstComponent != ".cache" {
-                return "Hidden settings and credential directories are protected. Use Finder for them only after checking your backup."
-            }
-            let protectedHomePaths = ["mlx/profiles", "My Drive"].map { home + "/" + $0 }
-            if protectedHomePaths.contains(where: { protectedPath in
-                original.path == protectedPath || original.path.hasPrefix(protectedPath + "/")
-            }) {
-                return "Profiles and cloud data are protected. DiskBloom does not move them to the Trash."
+            switch T27Text.libraryArea(relative: relativePath) {
+            case UInt32(TX_LIB_ALLOWED_CACHE): library = UInt32(DP_LIB_ALLOWED_CACHE)
+            case UInt32(TX_LIB_OTHER): library = UInt32(DP_LIB_OTHER)
+            default: break
             }
         }
-        if original.pathComponents.contains(where: { $0 == ".Trash" || $0 == ".Trashes" }) {
-            return "Cloud data, profiles, credentials and app state are protected. DiskBloom does not move them to the Trash."
-        }
-        let volumeValues = try? original.resourceValues(forKeys: [.volumeIsLocalKey, .volumeIsReadOnlyKey])
-        if volumeValues?.volumeIsLocal != true {
-            return "Cleanup on network and unknown volumes is disabled."
-        }
-        if volumeValues?.volumeIsReadOnly == true {
-            return "This volume is read-only."
-        }
-        guard FileIdentity.deviceID(for: original) == FileIdentity.deviceID(for: scanRoot) else {
-            return "The item is on a different volume than the selected analysis root."
-        }
+        let protectedHomePaths = ["mlx/profiles", "My Drive"].map { home + "/" + $0 }
+        let activePath = activeScanURL?.standardizedFileURL.resolvingSymlinksInPath().path
         let appPath = appURL.standardizedFileURL.path
-        if original.path == appPath || appPath.hasPrefix(original.path + "/") {
-            return "A running application and the folder that contains it are protected."
+        let volumeValues = try? original.resourceValues(forKeys: [.volumeIsLocalKey, .volumeIsReadOnlyKey])
+
+        let reason = dp_rejection(
+            node.isVirtual || originalNodeURL == nil,
+            candidateURL.map { candidate in
+                originalNodeURL.map { !T27Text.same(candidate.standardizedFileURL.path, $0.standardizedFileURL.path) } ?? true
+            } ?? false,
+            !T27Text.same(original.path, resolved.path),
+            T27Text.same(original.path, home),
+            T27Text.same(scanRoot.path, "/"),
+            T27Text.same(original.path, scanRoot.path),
+            T27Text.inside(original.path, scanRoot.path),
+            activePath.map { T27Text.within($0, original.path) } ?? false,
+            isInsideHome,
+            T27Text.onExternalVolume(original.path),
+            library,
+            isInsideHome && T27Text.hiddenFirstComponent(relative: relativePath),
+            protectedHomePaths.contains { T27Text.within(original.path, $0) },
+            T27Text.hasTrashComponent(original.path),
+            volumeValues?.volumeIsLocal == true,
+            volumeValues?.volumeIsReadOnly == true,
+            FileIdentity.deviceID(for: original) == FileIdentity.deviceID(for: scanRoot),
+            T27Text.within(appPath, original.path),
+            node.resourceIdentifier != nil
+        )
+        return message(for: reason)
+    }
+
+    /// The sentence shown for each refusal code of Specs/deletion_policy.t27.
+    static func message(for reason: UInt32) -> String? {
+        switch reason {
+        case UInt32(DP_ALLOWED): nil
+        case UInt32(DP_AGGREGATE): "An aggregate group cannot be moved to the Trash. Open the folder and choose a specific item."
+        case UInt32(DP_PATH_CHANGED): "The item’s path changed after confirmation. Rescan and confirm the new path."
+        case UInt32(DP_SYMLINK): "Symbolic links and redirected paths are view-only."
+        case UInt32(DP_HOME_ROOT): "The home folder is protected. Choose an item inside it."
+        case UInt32(DP_WHOLE_DISK): "Cleanup is disabled while viewing the entire system disk. Choose a specific user folder."
+        case UInt32(DP_SCAN_ROOT): "The root of the current analysis is protected. Choose a specific item inside it."
+        case UInt32(DP_OUTSIDE_SCAN): "The item is no longer inside the selected analysis area. Rescan."
+        case UInt32(DP_CONTAINS_ACTIVE_SCAN): "The item contains the current analysis area. Go back to the parent map first."
+        case UInt32(DP_SYSTEM_AREA): "System directories are available for analysis only. Cleanup is allowed inside the home folder or a selected external disk."
+        case UInt32(DP_LIBRARY): "The Library folder holds app state, profiles and cloud data. DiskBloom allows cleanup only for Caches and Xcode DerivedData."
+        case UInt32(DP_HIDDEN): "Hidden settings and credential directories are protected. Use Finder for them only after checking your backup."
+        case UInt32(DP_PROTECTED_HOME): "Profiles and cloud data are protected. DiskBloom does not move them to the Trash."
+        case UInt32(DP_TRASH): "Cloud data, profiles, credentials and app state are protected. DiskBloom does not move them to the Trash."
+        case UInt32(DP_NETWORK): "Cleanup on network and unknown volumes is disabled."
+        case UInt32(DP_READ_ONLY): "This volume is read-only."
+        case UInt32(DP_OTHER_VOLUME): "The item is on a different volume than the selected analysis root."
+        case UInt32(DP_RUNNING_APP): "A running application and the folder that contains it are protected."
+        default: "The item could not be reliably identified. It is view-only."
         }
-        guard node.resourceIdentifier != nil else {
-            return "The item could not be reliably identified. It is view-only."
-        }
-        return nil
     }
 
     static func validateImmediatelyBeforeTrash(
@@ -227,12 +223,11 @@ final class AppModel: ObservableObject {
 
     var focusNode: DiskNode? { focusStack.last ?? snapshot?.root }
     var collectionSize: Int64 { collection.reduce(0) { $0 + $1.size } }
-    var canGoBack: Bool { focusStack.count > 1 || !navigationHistory.isEmpty }
+    var canGoBack: Bool { md_can_go_back(Int64(focusStack.count), Int64(navigationHistory.count)) }
 
     func startInitialScan() {
-        guard snapshot == nil, !isScanning else { return }
         // The sandboxed build waits on the welcome screen until the person grants a folder.
-        guard FolderAccess.shared.hasAccess(to: currentURL) else { return }
+        guard md_starts_initial_scan(snapshot != nil, isScanning, FolderAccess.shared.hasAccess(to: currentURL)) else { return }
         startScan(at: currentURL)
     }
 
@@ -240,7 +235,7 @@ final class AppModel: ObservableObject {
 
     /// Opens a sidebar source, asking for access first in the sandboxed build.
     func open(source url: URL) {
-        if FolderAccess.shared.hasAccess(to: url) {
+        if !md_needs_permission(FolderAccess.shared.hasAccess(to: url)) {
             startScan(at: url)
             return
         }
@@ -259,10 +254,10 @@ final class AppModel: ObservableObject {
 
     func selectWorkspaceSection(_ section: WorkspaceSection) {
         workspaceSection = section
-        if section != .diskMap, isScanning {
-            cancelScan()
-        } else if section == .diskMap, snapshot == nil {
-            startInitialScan()
+        switch Int32(md_section_change(section == .diskMap, isScanning, snapshot != nil)) {
+        case MD_SECTION_CANCEL_SCAN: cancelScan()
+        case MD_SECTION_START_INITIAL: startInitialScan()
+        default: break
         }
     }
 
@@ -281,7 +276,7 @@ final class AppModel: ObservableObject {
     }
 
     func startScan(at url: URL, resetNavigation: Bool = true, rememberCurrent: Bool = false) {
-        guard !isMovingToTrash else {
+        guard md_can_start_scan(isMovingToTrash) else {
             notice = AppNotice(title: "Operation still in progress", message: "Wait for the move to the Trash to finish.")
             return
         }
@@ -291,19 +286,22 @@ final class AppModel: ObservableObject {
         let generation = UUID()
         scanGeneration = generation
 
-        if rememberCurrent,
-           let snapshot,
-           !focusStack.isEmpty {
-            navigationHistory.append(
-                NavigationState(
-                    snapshot: snapshot,
-                    focusStack: focusStack,
-                    inspectedNode: inspectedNode,
-                    currentURL: currentURL
+        switch Int32(md_scan_history(rememberCurrent, snapshot != nil, !focusStack.isEmpty, resetNavigation)) {
+        case MD_HISTORY_PUSH:
+            if let snapshot {
+                navigationHistory.append(
+                    NavigationState(
+                        snapshot: snapshot,
+                        focusStack: focusStack,
+                        inspectedNode: inspectedNode,
+                        currentURL: currentURL
+                    )
                 )
-            )
-        } else if resetNavigation {
+            }
+        case MD_HISTORY_CLEAR:
             navigationHistory = []
+        default:
+            break
         }
         if resetNavigation {
             analysisRootURL = normalized
@@ -371,7 +369,7 @@ final class AppModel: ObservableObject {
     }
 
     func rescan() {
-        guard FolderAccess.shared.hasAccess(to: currentURL) else {
+        guard !md_needs_permission(FolderAccess.shared.hasAccess(to: currentURL)) else {
             open(source: currentURL)
             return
         }
@@ -379,19 +377,17 @@ final class AppModel: ObservableObject {
     }
 
     func enter(_ node: DiskNode) {
-        guard node.isDirectory, !node.isVirtual else {
-            inspectedNode = node
-            return
-        }
+        let action = Int32(md_enter(node.isDirectory, node.isVirtual, node.children.isEmpty, node.url != nil))
         inspectedNode = node
-        if node.children.isEmpty, let url = node.url {
+        guard action != MD_ENTER_INSPECT else { return }
+        if action == MD_ENTER_RESCAN, let url = node.url {
             let targetPath = url.standardizedFileURL.path
             let previousCount = collection.count
             collection.removeAll { selected in
                 guard let selectedPath = selected.url?.standardizedFileURL.path else { return false }
-                return targetPath == selectedPath || targetPath.hasPrefix(selectedPath + "/")
+                return T27Text.within(targetPath, selectedPath)
             }
-            if collection.count != previousCount {
+            if md_queue_trimmed(Int64(previousCount), Int64(collection.count)) {
                 invalidatePendingReview()
                 notice = AppNotice(
                     title: "Removed from queue",
@@ -405,9 +401,14 @@ final class AppModel: ObservableObject {
     }
 
     func goBack() {
-        if focusStack.count > 1 {
+        switch Int32(md_back(Int64(focusStack.count), Int64(navigationHistory.count))) {
+        case MD_BACK_POP_FOCUS:
             focusStack.removeLast()
             inspectedNode = focusStack.last
+            return
+        case MD_BACK_RESTORE_SCAN:
+            break
+        default:
             return
         }
         guard let previous = navigationHistory.popLast() else { return }
@@ -432,6 +433,50 @@ final class AppModel: ObservableObject {
         inspectedNode = node
     }
 
+    /// The chain of real nodes from the scan root down to `path`, if the current snapshot holds it.
+    private func nodeChain(toPath path: String) -> [DiskNode]? {
+        guard let root = snapshot?.root, let rootPath = root.url?.standardizedFileURL.path else { return nil }
+        let target = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard T27Text.within(target, rootPath) else { return nil }
+        var chain = [root]
+        var current = root
+        while !(current.url.map { T27Text.same($0.standardizedFileURL.path, target) } ?? false) {
+            guard let next = current.children.first(where: { child in
+                guard !child.isVirtual, let childPath = child.url?.standardizedFileURL.path else { return false }
+                return T27Text.within(target, childPath)
+            }) else { return nil }
+            chain.append(next)
+            current = next
+        }
+        return chain
+    }
+
+    func node(atPath path: String) -> DiskNode? {
+        nodeChain(toPath: path)?.last
+    }
+
+    /// Moves the map to an item that is already in the current snapshot. Returns false if it is not.
+    @discardableResult
+    func focus(onPath path: String) -> Bool {
+        guard !isScanning, var chain = nodeChain(toPath: path), let target = chain.last else { return false }
+        // A folder below the scan depth has no children in the snapshot; it needs its own scan.
+        switch Int32(md_focus(target.isDirectory, target.isPackage, target.children.isEmpty, Int64(chain.count))) {
+        case MD_FOCUS_FAIL:
+            return false
+        case MD_FOCUS_FOLDER:
+            focusStack = chain
+            inspectedNode = target.children.first ?? target
+        case MD_FOCUS_PARENT:
+            chain.removeLast()
+            focusStack = chain
+            inspectedNode = target
+        default:
+            focusStack = chain
+            inspectedNode = target
+        }
+        return true
+    }
+
     func revealInFinder(_ node: DiskNode) {
         guard let url = node.url else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -451,29 +496,34 @@ final class AppModel: ObservableObject {
 
     func toggleCollection(_ node: DiskNode) {
         invalidatePendingReview()
-        if let index = collection.firstIndex(where: { samePath($0, node) }) {
-            collection.remove(at: index)
-            return
-        }
-        if let reason = rejectionReason(for: node) {
-            notice = AppNotice(title: "View only", message: reason)
-            return
-        }
-        guard let url = node.url else { return }
-        let path = url.standardizedFileURL.path
-        if let parent = collection.first(where: { selected in
+        let index = collection.firstIndex(where: { samePath($0, node) })
+        let reason = index == nil ? rejectionReason(for: node) : nil
+        let path = node.url?.standardizedFileURL.path ?? ""
+        let parent = node.url == nil ? nil : collection.first(where: { selected in
             guard let selectedPath = selected.url?.standardizedFileURL.path else { return false }
-            return path.hasPrefix(selectedPath + "/")
-        }) {
+            return T27Text.inside(path, selectedPath)
+        })
+        switch Int32(md_queue_toggle(index != nil, reason != nil, node.url != nil, parent != nil)) {
+        case MD_QUEUE_REMOVE:
+            if let index { collection.remove(at: index) }
+            return
+        case MD_QUEUE_REFUSE:
+            notice = AppNotice(title: "View only", message: reason ?? "")
+            return
+        case MD_QUEUE_IGNORE:
+            return
+        case MD_QUEUE_ALREADY_INCLUDED:
             notice = AppNotice(
                 title: "Already included",
-                message: "The item is already part of the selected folder “\(parent.name)”."
+                message: "The item is already part of the selected folder “\(parent?.name ?? "")”."
             )
             return
+        default:
+            break
         }
         collection.removeAll { selected in
             guard let selectedPath = selected.url?.standardizedFileURL.path else { return false }
-            return selectedPath.hasPrefix(path + "/")
+            return T27Text.inside(selectedPath, path)
         }
         collection.append(node)
     }
@@ -484,7 +534,7 @@ final class AppModel: ObservableObject {
     }
 
     func requestTrashReview() {
-        guard !collection.isEmpty, !isReviewingSelection else { return }
+        guard md_queue_can_review(Int64(collection.count), isReviewingSelection) else { return }
         reviewTask?.cancel()
         let generation = UUID()
         reviewGeneration = generation
@@ -510,7 +560,7 @@ final class AppModel: ObservableObject {
             }.value
             guard reviewGeneration == generation, !Task.isCancelled else { return }
             isReviewingSelection = false
-            if failures.isEmpty {
+            if md_review_passes(Int64(failures.count)) {
                 showingTrashReview = true
             } else {
                 notice = AppNotice(
@@ -522,7 +572,7 @@ final class AppModel: ObservableObject {
     }
 
     func moveReviewedItemsToTrash() {
-        guard !collection.isEmpty, !isMovingToTrash else { return }
+        guard md_queue_can_move(Int64(collection.count), isMovingToTrash) else { return }
         showingTrashReview = false
         isMovingToTrash = true
         let candidates = collection
@@ -531,52 +581,11 @@ final class AppModel: ObservableObject {
 
         Task {
             let outcome = await Task.detached(priority: .userInitiated) {
-                var successful: [String] = []
-                var failures: [String] = []
-                for node in candidates {
-                    guard let url = node.url else { continue }
-                    let coordinator = NSFileCoordinator(filePresenter: nil)
-                    var coordinationError: NSError?
-                    var localFailure: String?
-                    var didMove = false
-                    coordinator.coordinate(writingItemAt: url, options: .forMoving, error: &coordinationError) { coordinatedURL in
-                        if let reason = DeletionPolicy.validateImmediatelyBeforeTrash(
-                            node,
-                            scanRootURL: protectedRootURL,
-                            activeScanURL: rescanURL,
-                            candidateURL: coordinatedURL
-                        ) {
-                            localFailure = reason
-                            return
-                        }
-                        guard let expectedRelocationIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL) else {
-                            localFailure = "Could not capture the identity before moving: \(url.path)"
-                            return
-                        }
-                        do {
-                            var resultingURL: NSURL?
-                            try FileManager.default.trashItem(at: coordinatedURL, resultingItemURL: &resultingURL)
-                            guard let movedURL = resultingURL as URL?,
-                                  FileIdentity.relocationIdentifier(for: movedURL) == expectedRelocationIdentity,
-                                  (try? movedURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == node.isDirectory else {
-                                let resultPath = (resultingURL as URL?)?.path ?? "no Trash path was returned"
-                                localFailure = "Could not confirm the item’s identity after moving: \(url.path). Result: \(resultPath). No automatic restore of an unknown item was attempted."
-                                return
-                            }
-                            didMove = true
-                        } catch {
-                            localFailure = "\(url.path): \(error.localizedDescription)"
-                        }
-                    }
-                    if let coordinationError {
-                        failures.append("\(url.path): \(coordinationError.localizedDescription)")
-                    } else if let localFailure {
-                        failures.append(localFailure)
-                    } else if didMove {
-                        successful.append(url.path)
-                    }
-                }
-                return TrashOutcome(successfulPaths: successful, failures: failures)
+                DiskMapCleanupCoordinator.moveToTrash(
+                    candidates: candidates,
+                    rescanURL: rescanURL,
+                    protectedRootURL: protectedRootURL
+                )
             }.value
 
             collection.removeAll { node in
@@ -584,7 +593,7 @@ final class AppModel: ObservableObject {
                 return outcome.successfulPaths.contains(path)
             }
             isMovingToTrash = false
-            if outcome.failures.isEmpty {
+            if md_review_passes(Int64(outcome.failures.count)) {
                 notice = AppNotice(
                     title: "Moved to Trash",
                     message: "Items: \(outcome.successfulPaths.count). The data can be restored from Finder until the Trash is emptied."
@@ -605,7 +614,7 @@ final class AppModel: ObservableObject {
               let right = rhs.url?.standardizedFileURL.path else {
             return lhs.id == rhs.id
         }
-        return left == right
+        return T27Text.same(left, right)
     }
 
     private func invalidatePendingReview() {
@@ -640,29 +649,20 @@ final class AppModel: ObservableObject {
         for volume in volumes {
             let values = try? volume.resourceValues(forKeys: Set(keys))
             let name = values?.volumeName ?? volume.lastPathComponent
-            let subtitle: String
-            let icon: String
-            if values?.volumeIsLocal == false {
-                subtitle = "Network volume"
-                icon = "network"
-            } else if values?.volumeIsInternal == true {
-                subtitle = "Internal disk"
-                icon = "internaldrive.fill"
-            } else if values?.volumeIsRemovable == true {
-                subtitle = "Removable volume"
-                icon = "externaldrive.badge.plus"
-            } else if values?.volumeIsInternal == false {
-                subtitle = "External disk"
-                icon = "externaldrive.fill"
-            } else {
-                subtitle = "Other volume"
-                icon = "externaldrive"
-            }
-            let labeledSubtitle = values?.volumeIsReadOnly == true ? subtitle + " · read-only" : subtitle
+            let kind = md_volume_kind(
+                values?.volumeIsLocal != nil, values?.volumeIsLocal == true,
+                values?.volumeIsInternal != nil, values?.volumeIsInternal == true,
+                values?.volumeIsRemovable != nil, values?.volumeIsRemovable == true
+            )
+            let subtitle = T27Text.output { md_text(md_volume_subtitle(kind), $0) } ?? ""
+            let icon = T27Text.output { md_text(md_volume_icon(kind), $0) } ?? ""
+            let readOnly = T27Text.output { md_text(UInt32(MD_TEXT_READ_ONLY), $0) } ?? ""
+            let labeledSubtitle = values?.volumeIsReadOnly == true ? subtitle + readOnly : subtitle
+            let unnamed = T27Text.output { md_text(UInt32(MD_TEXT_UNNAMED_DISK), $0) } ?? ""
             result.append(
                 ScanSource(
                     id: volume.standardizedFileURL.path,
-                    name: name.isEmpty ? "Disk" : name,
+                    name: name.isEmpty ? unnamed : name,
                     subtitle: labeledSubtitle,
                     url: volume,
                     icon: icon

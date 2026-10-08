@@ -9,7 +9,7 @@ Status on 2026-09-24: **prepared, not submitted.** Everything that can live in t
 | Sandboxed app: folder grants through the system open panel, remembered as security-scoped bookmarks | `Sources/FolderAccess.swift` |
 | Entitlements: App Sandbox, user-selected read-write files, app-scoped bookmarks | `Config/DiskBloom-AppStore.entitlements` |
 | Xcode project for the archive: universal Release build, hardened runtime, asset catalog icon | `project.yml` → `DiskBloom.xcodeproj` (XcodeGen) |
-| Bundle ID `io.github.dmitrii-f-t27.DiskBloom`, version 1.4 (5) | `Config/Version.xcconfig` |
+| Bundle ID `io.github.dmitrii-f-t27.DiskBloom`, version 1.5 (6) | `Config/Version.xcconfig` |
 | Utilities category, `ITSAppUsesNonExemptEncryption = NO` | `Info.plist` |
 | Privacy manifest | `Resources/PrivacyInfo.xcprivacy` |
 | Privacy policy | [`PRIVACY.md`](../PRIVACY.md) |

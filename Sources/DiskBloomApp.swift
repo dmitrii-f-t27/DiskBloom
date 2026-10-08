@@ -6,6 +6,8 @@ struct DiskBloomApp: App {
     @StateObject private var uninstaller = AppUninstallerModel()
     @StateObject private var orphanedData = OrphanedAppDataModel()
     @StateObject private var duplicateFinder = DuplicateFinderModel()
+    @StateObject private var cacheExplorer = CacheExplorerModel()
+    @StateObject private var assistant = AssistantModel()
 
     var body: some Scene {
         WindowGroup {
@@ -14,6 +16,16 @@ struct DiskBloomApp: App {
                 .environmentObject(uninstaller)
                 .environmentObject(orphanedData)
                 .environmentObject(duplicateFinder)
+                .environmentObject(cacheExplorer)
+                .environmentObject(assistant)
+                .onAppear {
+                    assistant.connect(
+                        app: model,
+                        caches: cacheExplorer,
+                        uninstaller: uninstaller,
+                        orphans: orphanedData
+                    )
+                }
                 #if DEBUG
                 .onAppear { ScreenshotAutomation.apply(model: model, duplicateFinder: duplicateFinder) }
                 #endif
@@ -22,6 +34,9 @@ struct DiskBloomApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .newItem) {
+                Button(assistant.isPresented ? "Hide Assistant" : "Show Assistant") { assistant.isPresented.toggle() }
+                    .keyboardShortcut("k", modifiers: [.command])
+                Divider()
                 Button("Choose Folder…") { model.chooseFolder() }
                     .keyboardShortcut("o", modifiers: [.command])
                     .disabled(model.workspaceSection != .diskMap)
@@ -36,6 +51,7 @@ struct DiskBloomApp: App {
                             || uninstaller.showingReview
                             || uninstaller.showingOutcomeReport
                             || orphanedData.isNavigationLocked
+                            || cacheExplorer.isNavigationLocked
                     )
                 Button("App Uninstaller") { model.selectWorkspaceSection(.appUninstaller) }
                     .disabled(
@@ -44,6 +60,7 @@ struct DiskBloomApp: App {
                             || uninstaller.showingReview
                             || uninstaller.showingOutcomeReport
                             || orphanedData.isNavigationLocked
+                            || cacheExplorer.isNavigationLocked
                     )
                 Button("Possible Leftovers") { model.selectWorkspaceSection(.orphanedAppData) }
                     .disabled(
@@ -52,6 +69,7 @@ struct DiskBloomApp: App {
                             || uninstaller.showingReview
                             || uninstaller.showingOutcomeReport
                             || orphanedData.isNavigationLocked
+                            || cacheExplorer.isNavigationLocked
                     )
                 Button("Duplicate Files") { model.selectWorkspaceSection(.duplicateFinder) }
                     .disabled(
@@ -60,6 +78,16 @@ struct DiskBloomApp: App {
                             || uninstaller.showingReview
                             || uninstaller.showingOutcomeReport
                             || orphanedData.isNavigationLocked
+                            || cacheExplorer.isNavigationLocked
+                    )
+                Button("Caches") { model.selectWorkspaceSection(.cacheExplorer) }
+                    .disabled(
+                        uninstaller.isMovingToTrash
+                            || uninstaller.isReviewing
+                            || uninstaller.showingReview
+                            || uninstaller.showingOutcomeReport
+                            || orphanedData.isNavigationLocked
+                            || cacheExplorer.isNavigationLocked
                     )
             }
         }

@@ -1,12 +1,12 @@
 # DiskBloom
 
-DiskBloom is a local, native macOS app that shows where your disk space went, safely uninstalls apps together with their related data, and finds possible app leftovers and byte-for-byte duplicate files. It builds an interactive ring map, shows the largest items, prepares a verified removal plan for an `.app` together with explicitly selected related data, and finds files with identical content. Nothing is ever deleted permanently: after your review, items go to the Trash.
+DiskBloom is a local, native macOS app that shows where your disk space went, safely uninstalls apps together with their related data, finds possible app leftovers and byte-for-byte duplicate files, explains which caches are safe to clear, and has an optional assistant you can chat with. It builds an interactive ring map, shows the largest items, prepares a verified removal plan for an `.app` together with explicitly selected related data, and finds files with identical content. Nothing is ever deleted permanently: after your review, items go to the Trash.
 
 ## Download and install
 
-**[Download DiskBloom 1.4 for macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.4.0/DiskBloom-1.4.0-macOS-arm64.dmg)**
+**[Download DiskBloom 1.5 for macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.5.0/DiskBloom-1.5.0-macOS-arm64.dmg)**
 
-[ZIP archive](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.4.0/DiskBloom-1.4.0-macOS-arm64.zip) · [All releases](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.4.0/SHA256SUMS)
+[ZIP archive](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.5.0/DiskBloom-1.5.0-macOS-arm64.zip) · [All releases](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.5.0/SHA256SUMS)
 
 Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later.** The direct download does not support Intel Macs. The interface is in English.
 
@@ -14,7 +14,7 @@ Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or la
 2. Open DiskBloom from Applications. The prebuilt app does not need Xcode.
 3. Choose a tool and a folder to analyze. The duplicate finder is read-only; cleanup actions in the other tools need a separate confirmation.
 
-**Signature status:** version 1.4 (build 5) from GitHub has a local ad-hoc signature, without a Developer ID and without Apple notarization. macOS may block the first launch. If you trust this release, try to open the app once, then use the per-app permission in System Settings → Privacy & Security. Do not turn off Gatekeeper for the whole system. [Apple's instructions](https://support.apple.com/102445).
+**Signature status:** version 1.5 (build 6) from GitHub has a local ad-hoc signature, without a Developer ID and without Apple notarization. macOS may block the first launch. If you trust this release, try to open the app once, then use the per-app permission in System Settings → Privacy & Security. Do not turn off Gatekeeper for the whole system. [Apple's instructions](https://support.apple.com/102445).
 
 ## Features
 
@@ -27,6 +27,25 @@ Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or la
 - re-measurement, a content fingerprint, path and file identity checks before any move;
 - only `FileManager.trashItem` is used — there is no direct permanent deletion;
 - system folders and the root of the home folder are view-only.
+
+## Caches
+
+The Caches section measures `~/Library/Caches`, Xcode `DerivedData` and `~/.cache`, finds the app that owns each cache (bundle ID, running apps, LaunchServices) and gives it a verdict with a plain reason:
+
+- **Safe to clear** — the owner rebuilds it (app caches of idle apps, browser caches of closed browsers, downloaded updates, crash reports, DerivedData while Xcode is closed);
+- **Clear if you need space** — rebuilt when needed but downloaded again (Homebrew, pip, uv, Hugging Face models, …), Apple caches, or an owner that could not be identified;
+- **Quit the app first** — the owner is running; the cache cannot be selected;
+- **Leave it** — iCloud, sign-in, sync and system state, or folders macOS protects in part;
+- **Clear with its tool** — `~/.npm`, Cargo, Gradle, simulator caches: shown with the command that clears them, never moved by DiskBloom.
+
+Selected caches go through the same review sheet; right before each move DiskBloom checks again that the owner is not running and that the folder did not change, using the same path and snapshot checks as the Disk Map.
+
+## Assistant
+
+Press ⌘K or "Ask DiskBloom" to chat with an assistant that looks up real sizes and opens the right place in the app: a folder in the Disk Map, the Caches list, an app in the uninstaller, or Finder. It can select caches or queue items, but it never moves anything: you review the exact paths and confirm.
+
+- **Apple, on this Mac** (default): Apple's on-device model, free and private; needs macOS 26 with Apple Intelligence turned on and understands the languages Apple supports.
+- **API (OpenAI-compatible)**: any `/chat/completions` server with tool calling — presets for NVIDIA NIM, Z.ai, OpenRouter, OpenAI, Ollama and LM Studio, or a custom address. Pick the model from the provider's list. The key is kept in the Keychain.
 
 ## App Uninstaller
 
@@ -122,7 +141,7 @@ The Mac App Store build is produced by `DiskBloom.xcodeproj`, which is generated
 ARCH=x86_64 ./Tests/run-smoke-tests.sh   # Intel slice, runs under Rosetta
 ```
 
-Five suites cover the scanner, cleanup safety, app removal, possible leftovers and the duplicate finder. They build their own fixtures inside `.build/` and never call the real Trash: the leftovers coordinator test uses an injected mover.
+Six smoke suites cover the scanner, cleanup safety, app removal, possible leftovers, the duplicate finder and the cache explorer. The script also runs every t27 spec's own tests and eleven differential tests that compare the t27 rules with the Swift rules they replaced. Tests build their own fixtures inside `.build/` and never call the real Trash: the move coordinators use an injected mover.
 
 ## Important limitations
 
@@ -135,6 +154,10 @@ Five suites cover the scanner, cleanup safety, app removal, possible leftovers a
 - An Apple trust anchor and a Team ID are not a notarization/Gatekeeper check and do not prove by themselves that a developer exclusively owns a bundle ID. The strict signature check deliberately fails closed: a modified bundle can require manual selection of related paths.
 - It is impossible to find every arbitrarily named leftover of a third-party app. DiskBloom shows only confirmed exact relations and clearly marked possible ones; apps with a privileged helper or a system extension may need the vendor's official uninstaller.
 
+## Decisions written in t27
+
+Every decision the app makes — cache verdicts, what may go to the Trash, the uninstaller and leftovers rules, the scanner, the order of checks around a move, the duplicate finder and SHA-256, size formatting, the ring map, what each screen allows and the assistant's rules — is written in t27, the spec language of the Trinity stack, and compiled to C that Swift calls. Swift collects the facts and carries out the answer. See [Specs/README.md](Specs/README.md).
+
 ## Privacy
 
-DiskBloom has no network code, no analytics and no telemetry. See [PRIVACY.md](PRIVACY.md).
+DiskBloom has no analytics and no telemetry, and its disk tools never use the network. Only the optional assistant, when you connect an API, sends your questions and the names, paths and sizes it looks up to the provider you chose. See [PRIVACY.md](PRIVACY.md).

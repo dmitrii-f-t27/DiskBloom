@@ -95,7 +95,7 @@ final class DuplicateFinderModel: ObservableObject {
     }
 
     func repeatScan() {
-        guard let rootURL, !isScanning else { return }
+        guard md_can_repeat_duplicate_scan(rootURL != nil, isScanning), let rootURL else { return }
         startScan(at: rootURL)
     }
 

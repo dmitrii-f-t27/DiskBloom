@@ -9,17 +9,18 @@ struct SunburstSegment: Identifiable {
     let color: Color
 }
 
+/// Lays out the ring map by Specs/sunburst_rules.t27.
 enum SunburstLayout {
-    static let maxDepth = 6
-    static let maxSegments = 2_400
+    static let maxDepth = Int(SB_MAX_DEPTH)
+    static let maxSegments = Int(SB_MAX_SEGMENTS)
 
     static func make(for root: DiskNode) -> [SunburstSegment] {
         guard root.size > 0 else { return [] }
         var result: [SunburstSegment] = []
         append(
             children: root.children,
-            startAngle: -.pi / 2,
-            endAngle: .pi * 1.5,
+            startAngle: SB_START_ANGLE,
+            endAngle: SB_END_ANGLE,
             depth: 0,
             inheritedBranch: 0,
             into: &result
@@ -35,18 +36,17 @@ enum SunburstLayout {
         inheritedBranch: Int,
         into result: inout [SunburstSegment]
     ) {
-        guard depth < maxDepth, !children.isEmpty, result.count < maxSegments else { return }
-        let total = children.reduce(Int64(0)) { $0 + max(0, $1.size) }
+        guard sb_lays_out(Int64(depth), Int64(children.count), Int64(result.count)) else { return }
+        let total = children.reduce(Int64(0)) { $0 + sr_non_negative($1.size) }
         guard total > 0 else { return }
 
         var cursor = startAngle
         let fullSpan = endAngle - startAngle
         for (index, child) in children.enumerated() {
-            guard result.count < maxSegments else { break }
-            let fraction = Double(max(0, child.size)) / Double(total)
-            let next = index == children.count - 1 ? endAngle : cursor + fullSpan * fraction
-            let branch = depth == 0 ? index : inheritedBranch
-            if next - cursor > 0.000_01 {
+            guard sb_has_room(Int64(result.count)) else { break }
+            let next = sb_child_end(cursor, fullSpan, sb_share(child.size, total), endAngle, index == children.count - 1)
+            let branch = Int(sb_branch(Int64(depth), Int64(index), Int64(inheritedBranch)))
+            if sb_visible(cursor, next) {
                 result.append(
                     SunburstSegment(
                         id: child.id,
@@ -72,13 +72,51 @@ enum SunburstLayout {
         }
     }
 
+    /// Hue, saturation and brightness, or the fixed RGB of the "Other" group (last value 1).
+    static func paletteComponents(branch: Int, depth: Int, isVirtual: Bool) -> [Double] {
+        if isVirtual { return [SB_VIRTUAL_RED, SB_VIRTUAL_GREEN, SB_VIRTUAL_BLUE, 1] }
+        return [sb_hue(Int64(branch)), sb_saturation(Int64(depth)), sb_brightness(Int64(depth)), 0]
+    }
+
     static func paletteColor(branch: Int, depth: Int, isVirtual: Bool = false) -> Color {
-        if isVirtual { return Color(red: 0.35, green: 0.39, blue: 0.46) }
-        let hues: [Double] = [0.48, 0.39, 0.15, 0.075, 0.93, 0.73, 0.56, 0.29]
-        let hue = hues[abs(branch) % hues.count]
-        let saturation = max(0.46, 0.82 - Double(depth) * 0.055)
-        let brightness = max(0.68, 0.96 - Double(depth) * 0.045)
-        return Color(hue: hue, saturation: saturation, brightness: brightness)
+        let c = paletteComponents(branch: branch, depth: depth, isVirtual: isVirtual)
+        if c[3] == 1 { return Color(red: c[0], green: c[1], blue: c[2]) }
+        return Color(hue: c[0], saturation: c[1], brightness: c[2])
+    }
+}
+
+/// The ring-map arithmetic for the space available, by Specs/sunburst_rules.t27.
+struct SunburstGeometry {
+    let outerRadius: Double
+    let innerRadius: Double
+    let ringWidth: Double
+
+    init(side: Double, deepest: Int) {
+        outerRadius = sb_outer_radius(side)
+        innerRadius = sb_inner_radius(outerRadius)
+        ringWidth = sb_ring_width(outerRadius, innerRadius, sb_ring_count(Int64(deepest)))
+    }
+
+    var centerSide: Double { sb_center_side(innerRadius) }
+
+    func ring(depth: Int) -> (inner: Double, outer: Double) {
+        let inner = sb_ring_inner(innerRadius, Int64(depth), ringWidth)
+        return (inner, sb_ring_outer(outerRadius, inner, ringWidth))
+    }
+
+    func inCenter(radius: Double) -> Bool { sb_in_center(radius, innerRadius) }
+
+    func hitRing(radius: Double) -> Int? {
+        let ring = sb_hit_ring(radius, innerRadius, outerRadius, ringWidth)
+        return ring < 0 ? nil : Int(ring)
+    }
+
+    static func layoutAngle(_ angle: Double) -> Double { sb_layout_angle(angle) }
+    static func hoverY(height: Double) -> Double { sb_hover_y(height) }
+    static func inset(start: Double, end: Double, gap: Double) -> Double { sb_sector_inset(start, end, gap) }
+
+    static func hits(_ segment: SunburstSegment, depth: Int, angle: Double) -> Bool {
+        sb_segment_hit(Int64(segment.depth), segment.startAngle, segment.endAngle, Int64(depth), angle)
     }
 }
 
@@ -91,8 +129,7 @@ private struct RingSector: Shape {
 
     func path(in rect: CGRect) -> Path {
         let center = CGPoint(x: rect.midX, y: rect.midY)
-        let span = max(0, endAngle - startAngle)
-        let inset = min(gap, span * 0.2)
+        let inset = SunburstGeometry.inset(start: startAngle, end: endAngle, gap: gap)
         let start = Angle(radians: startAngle + inset)
         let end = Angle(radians: endAngle - inset)
         var path = Path()
@@ -118,10 +155,10 @@ struct SunburstView: View {
     var body: some View {
         GeometryReader { proxy in
             let side = min(proxy.size.width, proxy.size.height)
-            let outerRadius = max(110, side / 2 - 20)
-            let innerRadius = max(54, min(84, outerRadius * 0.24))
-            let activeRingCount = max(1, (segments.map(\.depth).max() ?? 0) + 1)
-            let ringWidth = max(12, (outerRadius - innerRadius) / CGFloat(activeRingCount))
+            let geometry = SunburstGeometry(side: Double(side), deepest: segments.map(\.depth).max() ?? 0)
+            let outerRadius = CGFloat(geometry.outerRadius)
+            let innerRadius = CGFloat(geometry.innerRadius)
+            let ringWidth = CGFloat(geometry.ringWidth)
 
             ZStack {
                 Circle()
@@ -131,15 +168,16 @@ struct SunburstView: View {
                 Canvas { context, size in
                     let rect = CGRect(origin: .zero, size: size)
                     for segment in segments {
-                        let inner = innerRadius + CGFloat(segment.depth) * ringWidth
-                        let outer = min(outerRadius, inner + ringWidth - 2)
+                        let ring = geometry.ring(depth: segment.depth)
+                        let inner = CGFloat(ring.inner)
+                        let outer = CGFloat(ring.outer)
                         guard outer > inner else { continue }
                         let path = RingSector(
                             startAngle: segment.startAngle,
                             endAngle: segment.endAngle,
                             innerRadius: inner,
                             outerRadius: outer,
-                            gap: 0.006
+                            gap: SB_SECTOR_GAP
                         ).path(in: rect)
                         let isHighlighted = hoveredNode?.id == segment.node.id || model.inspectedNode?.id == segment.node.id
                         context.fill(path, with: .color(segment.color.opacity(isHighlighted ? 1 : 0.88)))
@@ -171,7 +209,7 @@ struct SunburstView: View {
                             let dx = value.location.x - proxy.size.width / 2
                             let dy = value.location.y - proxy.size.height / 2
                             let radius = hypot(dx, dy)
-                            if radius < innerRadius {
+                            if geometry.inCenter(radius: Double(radius)) {
                                 model.goBack()
                             } else if let node = hitTest(
                                 point: value.location,
@@ -186,14 +224,14 @@ struct SunburstView: View {
                 )
 
                 centerLabel
-                    .frame(width: innerRadius * 1.72, height: innerRadius * 1.72)
+                    .frame(width: CGFloat(geometry.centerSide), height: CGFloat(geometry.centerSide))
                     .contentShape(Circle())
                     .onTapGesture { model.goBack() }
 
                 if let hoveredNode {
                     hoverCard(hoveredNode)
                         .frame(maxWidth: 250)
-                        .position(x: proxy.size.width / 2, y: max(42, proxy.size.height - 36))
+                        .position(x: proxy.size.width / 2, y: CGFloat(SunburstGeometry.hoverY(height: Double(proxy.size.height))))
                         .allowsHitTesting(false)
                 }
             }
@@ -257,14 +295,11 @@ struct SunburstView: View {
     ) -> DiskNode? {
         let dx = point.x - size.width / 2
         let dy = point.y - size.height / 2
-        let radius = hypot(dx, dy)
-        guard radius >= innerRadius, radius <= outerRadius else { return nil }
-        let depth = Int((radius - innerRadius) / ringWidth)
-        var angle = atan2(Double(dy), Double(dx))
-        if angle < -.pi / 2 { angle += .pi * 2 }
-        return segments.first { segment in
-            segment.depth == depth && angle >= segment.startAngle && angle <= segment.endAngle
-        }?.node
+        let ring = sb_hit_ring(Double(hypot(dx, dy)), Double(innerRadius), Double(outerRadius), Double(ringWidth))
+        guard ring >= 0 else { return nil }
+        let depth = Int(ring)
+        let angle = SunburstGeometry.layoutAngle(atan2(Double(dy), Double(dx)))
+        return segments.first { SunburstGeometry.hits($0, depth: depth, angle: angle) }?.node
     }
 }
 
