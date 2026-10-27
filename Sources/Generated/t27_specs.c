@@ -6,6 +6,7 @@
 #include "fingerprint.h"
 #include "format_rules.h"
 #include "leftovers_policy.h"
+#include "memory_rules.h"
 #include "model_rules.h"
 #include "move_rules.h"
 #include "scan_rules.h"

@@ -1,6 +1,6 @@
 # DiskBloom Privacy Policy
 
-Last updated: October 7, 2026
+Last updated: October 27, 2026
 
 DiskBloom is a disk space analyzer and cleanup tool for macOS. It is built to work entirely on your Mac.
 
@@ -20,6 +20,10 @@ The assistant is optional and answers only when you write to it.
 - By default it uses Apple's on-device model (macOS 26 with Apple Intelligence). Nothing leaves your Mac.
 - If you connect an API in the assistant's settings (for example NVIDIA, Z.ai, OpenRouter, OpenAI or a local server such as Ollama), DiskBloom sends your questions and the names, paths and sizes of the folders, apps and caches the assistant looks up directly to the address you entered. File contents are never sent. That provider's own privacy policy applies; DiskBloom's developer receives nothing.
 - The API key is stored in your macOS Keychain. The address and model name are stored in DiskBloom's preferences.
+
+## The memory monitor
+
+The memory monitor in the menu bar reads, on your Mac only, how much memory is in use and the names, paths, memory use and CPU time of the running processes it is allowed to read. The paths are used only to group helper processes with their app. It shows them while the app runs and keeps nothing: no history is saved and nothing is sent anywhere. It never stops or changes a process.
 
 ## What DiskBloom stores on your Mac
 

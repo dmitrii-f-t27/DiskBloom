@@ -16,6 +16,7 @@ Every decision DiskBloom makes is written in [t27](https://github.com/gHashTag/t
 | `format_rules.t27` | compact sizes, singular/plural, disk usage and fraction, progress cadence | `ByteFormat`, `Plural`, `VolumeStats` (`Models.swift`) |
 | `sunburst_rules.t27` | ring map layout, palette, radii, sector inset, which ring and angle the pointer is on | `SunburstLayout`, `SunburstGeometry` (`SunburstView.swift`) |
 | `model_rules.t27` | navigation, the cleanup queue, volume labels, which buttons each screen allows, uninstall review steps, folder grants, when the assistant is busy, API settings status, tool limits | `AppModel`, `CacheExplorerModel`, `OrphanedAppDataModel`, `AppUninstallerModel`, `DuplicateFinderModel`, `FolderAccess` |
+| `memory_rules.t27` | the memory monitor in the menu bar: used memory as Activity Monitor counts it, the pressure level, binary sizes, CPU use from two samples, which app a process belongs to, list order and length, the sandbox and unreadable-process notes, refresh times | `MemoryRules`, `MemorySampler`, `MemoryGrouping` (`MemoryMonitor.swift`) |
 | `assistant_rules.t27` | section/verdict words the model may use, path forms, base URL and local hosts, chat and recommended models, HTTP hints, history cut, stripping `<think>` blocks, the app catalog walk, when to send and when a reply is final, each tool's plan | `Assistant.swift`, `AssistantBackends.swift` |
 
 Expensive checks stay lazy: a spec returns the id of the next step (`mv_step`, `md_review_step`), Swift performs it and asks again.
@@ -23,7 +24,7 @@ Expensive checks stay lazy: a spec returns the id of the next step (`mv_step`, `
 ## What stays in Swift, and why
 
 - Views and their texts (SwiftUI); the codes a spec returns are mapped to messages in Swift.
-- System calls: FileManager, NSWorkspace, Security and Keychain, URLSession, FoundationModels, NSFileCoordinator.
+- System calls: FileManager, NSWorkspace, Security and Keychain, URLSession, FoundationModels, NSFileCoordinator; for the memory monitor, `host_statistics64`, `sysctlbyname` and libproc (`proc_listallpids`, `proc_pid_rusage`, `proc_pidpath`).
 - Unicode work the OS owns: lowercasing and trimming, NFC/NFD normalization, localized compare, `ByteCountFormatter`, `String(format:)`; `atan2` and `hypot` from the maths library.
 - Concurrency bookkeeping (task generations, cancellation) and JSON shaping; tool specs and prompts for the model.
 

@@ -8,6 +8,7 @@ struct DiskBloomApp: App {
     @StateObject private var duplicateFinder = DuplicateFinderModel()
     @StateObject private var cacheExplorer = CacheExplorerModel()
     @StateObject private var assistant = AssistantModel()
+    @State private var memoryMonitor = MemoryMonitorModel()
 
     var body: some Scene {
         WindowGroup {
@@ -91,6 +92,14 @@ struct DiskBloomApp: App {
                     )
             }
         }
+
+        // The memory monitor in the menu bar (Specs/memory_rules.t27).
+        MenuBarExtra {
+            MemoryMenuPanel(monitor: memoryMonitor)
+        } label: {
+            MemoryMenuLabel(monitor: memoryMonitor)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 
