@@ -176,13 +176,16 @@ struct DiskScanner: Sendable {
 
         var accumulator = ChildAccumulator(maxVisibleChildren: maxChildrenPerFolder)
         for entry in entries {
-            try checkCancellation()
-            let incompleteBefore = incompleteManifestEvents
-            if let child = try scanNode(entry, depth: depth + 1, counter: counter) {
-                accumulator.add(child)
-            }
-            if incompleteManifestEvents != incompleteBefore {
-                accumulator.invalidateFingerprint()
+            // Free this entry's temporary Foundation objects before the next one, so a scan's memory stays small (Specs/memory_rules.t27).
+            try autoreleasepool {
+                try checkCancellation()
+                let incompleteBefore = incompleteManifestEvents
+                if let child = try scanNode(entry, depth: depth + 1, counter: counter) {
+                    accumulator.add(child)
+                }
+                if incompleteManifestEvents != incompleteBefore {
+                    accumulator.invalidateFingerprint()
+                }
             }
         }
 
@@ -240,84 +243,87 @@ struct DiskScanner: Sendable {
             fingerprint: .empty
         )
         for entry in entries {
-            try checkCancellation()
-            counter.record(entry)
-            let values = try? entry.resourceValues(forKeys: resourceKeys)
-            let isDirectory = values?.isDirectory == true
-            let nestedIdentity = values != nil && isDirectory && values?.isSymbolicLink != true && values?.isVolume != true
-                ? FileIdentity.read(for: entry)
-                : nil
-            let linkKey = values != nil && !isDirectory && values?.isSymbolicLink != true && values?.isVolume != true
-                ? FileIdentity.hardLinkKeyIfNeeded(for: entry)
-                : nil
-            let action = sr_measure_action(
-                values != nil,
-                values?.isSymbolicLink == true,
-                values?.isVolume == true,
-                isDirectory,
-                linkKey.map { seenFileIdentifiers.contains($0) } ?? false,
-                nestedIdentity != nil,
-                nestedIdentity.map { seenDirectoryIdentifiers.contains($0) } ?? false
-            )
-            switch action {
-            case UInt32(SR_UNREADABLE):
-                result.unreadableCount += 1
-            case UInt32(SR_SYMLINK):
-                skippedSymbolicLinks += 1
-                result.addFingerprint(
-                    ContentFingerprint.node(
-                        name: displayName(for: entry),
-                        identity: FileIdentity.read(for: entry),
-                        size: 0,
-                        modificationDate: values?.contentModificationDate,
-                        isDirectory: false,
-                        children: nil
-                    )
+            // Free this entry's temporary Foundation objects before the next one, so a scan's memory stays small (Specs/memory_rules.t27).
+            try autoreleasepool {
+                try checkCancellation()
+                counter.record(entry)
+                let values = try? entry.resourceValues(forKeys: resourceKeys)
+                let isDirectory = values?.isDirectory == true
+                let nestedIdentity = values != nil && isDirectory && values?.isSymbolicLink != true && values?.isVolume != true
+                    ? FileIdentity.read(for: entry)
+                    : nil
+                let linkKey = values != nil && !isDirectory && values?.isSymbolicLink != true && values?.isVolume != true
+                    ? FileIdentity.hardLinkKeyIfNeeded(for: entry)
+                    : nil
+                let action = sr_measure_action(
+                    values != nil,
+                    values?.isSymbolicLink == true,
+                    values?.isVolume == true,
+                    isDirectory,
+                    linkKey.map { seenFileIdentifiers.contains($0) } ?? false,
+                    nestedIdentity != nil,
+                    nestedIdentity.map { seenDirectoryIdentifiers.contains($0) } ?? false
                 )
-            case UInt32(SR_SKIP_MOUNT):
-                skippedMountPoints += 1
-                incompleteManifestEvents += 1
-                result.addFingerprint(nil)
-            case UInt32(SR_SKIP_SEEN_FOLDER):
-                incompleteManifestEvents += 1
-                result.addFingerprint(nil)
-            case UInt32(SR_MEASURE):
-                if let nestedIdentity { seenDirectoryIdentifiers.insert(nestedIdentity) }
-                if let values {
-                    let nested = try measureDirectory(
-                        entry,
-                        capturedIdentity: nestedIdentity,
-                        capturedValues: values,
-                        counter: counter
+                switch action {
+                case UInt32(SR_UNREADABLE):
+                    result.unreadableCount += 1
+                case UInt32(SR_SYMLINK):
+                    skippedSymbolicLinks += 1
+                    result.addFingerprint(
+                        ContentFingerprint.node(
+                            name: displayName(for: entry),
+                            identity: FileIdentity.read(for: entry),
+                            size: 0,
+                            modificationDate: values?.contentModificationDate,
+                            isDirectory: false,
+                            children: nil
+                        )
                     )
-                    result.add(nested)
+                case UInt32(SR_SKIP_MOUNT):
+                    skippedMountPoints += 1
+                    incompleteManifestEvents += 1
+                    result.addFingerprint(nil)
+                case UInt32(SR_SKIP_SEEN_FOLDER):
+                    incompleteManifestEvents += 1
+                    result.addFingerprint(nil)
+                case UInt32(SR_MEASURE):
+                    if let nestedIdentity { seenDirectoryIdentifiers.insert(nestedIdentity) }
+                    if let values {
+                        let nested = try measureDirectory(
+                            entry,
+                            capturedIdentity: nestedIdentity,
+                            capturedValues: values,
+                            counter: counter
+                        )
+                        result.add(nested)
+                    }
+                case UInt32(SR_FILE_REPEAT_LINK):
+                    result.addFingerprint(
+                        ContentFingerprint.node(
+                            name: displayName(for: entry),
+                            identity: FileIdentity.read(for: entry),
+                            size: values.map(allocatedSize(from:)) ?? 0,
+                            modificationDate: values?.contentModificationDate,
+                            isDirectory: false,
+                            children: nil
+                        )
+                    )
+                default:
+                    if let linkKey { seenFileIdentifiers.insert(linkKey) }
+                    let size = values.map(allocatedSize(from:)) ?? 0
+                    result.size += size
+                    result.fileCount += 1
+                    result.addFingerprint(
+                        ContentFingerprint.node(
+                            name: displayName(for: entry),
+                            identity: FileIdentity.read(for: entry),
+                            size: size,
+                            modificationDate: values?.contentModificationDate,
+                            isDirectory: false,
+                            children: nil
+                        )
+                    )
                 }
-            case UInt32(SR_FILE_REPEAT_LINK):
-                result.addFingerprint(
-                    ContentFingerprint.node(
-                        name: displayName(for: entry),
-                        identity: FileIdentity.read(for: entry),
-                        size: values.map(allocatedSize(from:)) ?? 0,
-                        modificationDate: values?.contentModificationDate,
-                        isDirectory: false,
-                        children: nil
-                    )
-                )
-            default:
-                if let linkKey { seenFileIdentifiers.insert(linkKey) }
-                let size = values.map(allocatedSize(from:)) ?? 0
-                result.size += size
-                result.fileCount += 1
-                result.addFingerprint(
-                    ContentFingerprint.node(
-                        name: displayName(for: entry),
-                        identity: FileIdentity.read(for: entry),
-                        size: size,
-                        modificationDate: values?.contentModificationDate,
-                        isDirectory: false,
-                        children: nil
-                    )
-                )
             }
         }
         let identityAfter = FileIdentity.read(for: url)

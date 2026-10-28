@@ -8,6 +8,8 @@ struct DiskBloomApp: App {
     @StateObject private var duplicateFinder = DuplicateFinderModel()
     @StateObject private var cacheExplorer = CacheExplorerModel()
     @StateObject private var assistant = AssistantModel()
+    @State private var memoryMonitor = MemoryMonitorModel()
+    @State private var monitorController = MonitorModeController()
 
     var body: some Scene {
         WindowGroup {
@@ -26,6 +28,7 @@ struct DiskBloomApp: App {
                         orphans: orphanedData
                     )
                 }
+                .onAppear { monitorController.attach(app: model) }
                 #if DEBUG
                 .onAppear { ScreenshotAutomation.apply(model: model, duplicateFinder: duplicateFinder) }
                 #endif
@@ -91,6 +94,18 @@ struct DiskBloomApp: App {
                     )
             }
         }
+
+        // The memory monitor in the menu bar (Specs/memory_rules.t27).
+        MenuBarExtra {
+            MemoryMenuPanel(
+                monitor: memoryMonitor,
+                canQuit: mm_can_quit(model.isMovingToTrash, uninstaller.isMovingToTrash,
+                                     orphanedData.isMovingToTrash, cacheExplorer.isMovingToTrash)
+            )
+        } label: {
+            MemoryMenuLabel(monitor: memoryMonitor)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 

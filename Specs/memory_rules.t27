@@ -1,0 +1,404 @@
+// SPDX-License-Identifier: MIT
+; Specs/memory_rules.t27 -- DiskBloom: the memory monitor in the menu bar
+; How full the memory is (the way Activity Monitor counts it), how hard the system is pressed, which apps
+; and services use the memory and the processor, in what order they are listed, and how often the numbers
+; refresh. Swift reads the facts (VM page counts, the pressure level, swap, each process's footprint and
+; CPU time) and shows what this spec answers. ASCII only.
+; Generated C: Sources/Generated/memory_rules.h (Specs/generate.sh).
+
+module DiskBloomMemoryRules;
+
+; --- How full the memory is ------------------------------------------------------------------------------
+; Activity Monitor: Memory Used = App Memory + Wired + Compressed, where App Memory is the anonymous
+; pages less the purgeable ones; Cached Files are the file-backed pages plus the purgeable ones.
+pub fn mm_pages_bytes(pages: i64, page_size: i64) -> i64 {
+    if (pages <= 0 or page_size <= 0) { return 0; }
+    return pages * page_size;
+}
+
+pub fn mm_app_bytes(internal_pages: i64, purgeable_pages: i64, page_size: i64) -> i64 {
+    return mm_pages_bytes(internal_pages - purgeable_pages, page_size);
+}
+
+pub fn mm_cached_bytes(external_pages: i64, purgeable_pages: i64, page_size: i64) -> i64 {
+    var pages: i64 = 0;
+    if (external_pages > 0) { pages = pages + external_pages; }
+    if (purgeable_pages > 0) { pages = pages + purgeable_pages; }
+    return mm_pages_bytes(pages, page_size);
+}
+
+; Used memory never shows more than the Mac has.
+pub fn mm_used_bytes(app: i64, wired: i64, compressed: i64, total: i64) -> i64 {
+    var used: i64 = 0;
+    if (app > 0) { used = used + app; }
+    if (wired > 0) { used = used + wired; }
+    if (compressed > 0) { used = used + compressed; }
+    if (total > 0 and used > total) { return total; }
+    return used;
+}
+
+; What is left once used memory and cached files are counted.
+pub fn mm_free_bytes(total: i64, used: i64, cached: i64) -> i64 {
+    var free: i64 = total - used - cached;
+    if (free < 0) { return 0; }
+    return free;
+}
+
+; Whole percent of the memory in use, rounded half up, 0...100. The menu bar shows it.
+pub fn mm_used_percent(used: i64, total: i64) -> i64 {
+    if (total <= 0 or used <= 0) { return 0; }
+    if (used >= total) { return 100; }
+    return (used * 100 + total / 2) / total;
+}
+
+; --- How hard the system is pressed ----------------------------------------------------------------------
+; kern.memorystatus_vm_pressure_level: 1 normal, 2 warning, 4 critical. Anything else is unknown, and then
+; the share of used memory decides.
+pub const MM_LEVEL_NORMAL : u32 = 0;
+pub const MM_LEVEL_WARNING : u32 = 1;
+pub const MM_LEVEL_CRITICAL : u32 = 2;
+pub const MM_WARNING_PERCENT : i64 = 80;
+pub const MM_CRITICAL_PERCENT : i64 = 95;
+
+pub fn mm_level(pressure_code: i64, used_percent: i64) -> u32 {
+    if (pressure_code == 4) { return MM_LEVEL_CRITICAL; }
+    if (pressure_code == 2) { return MM_LEVEL_WARNING; }
+    if (pressure_code == 1) { return MM_LEVEL_NORMAL; }
+    if (used_percent >= MM_CRITICAL_PERCENT) { return MM_LEVEL_CRITICAL; }
+    if (used_percent >= MM_WARNING_PERCENT) { return MM_LEVEL_WARNING; }
+    return MM_LEVEL_NORMAL;
+}
+
+; Whether the system pressure itself is known (the panel then names it; otherwise it says "estimated").
+pub fn mm_pressure_known(pressure_code: i64) -> bool {
+    return pressure_code == 1 or pressure_code == 2 or pressure_code == 4;
+}
+
+; The swap line shows only when something is swapped out.
+pub fn mm_swap_shows(swap_used: i64) -> bool {
+    return swap_used > 0;
+}
+
+; --- Memory sizes in binary units, as Activity Monitor shows them ---------------------------------------
+pub const MM_UNIT_MB : u32 = 0;
+pub const MM_UNIT_GB : u32 = 1;
+pub const MM_MIB : i64 = 1048576;
+pub const MM_GIB : i64 = 1073741824;
+
+pub fn mm_memory_unit(bytes: i64) -> u32 {
+    if (bytes >= MM_GIB) { return MM_UNIT_GB; }
+    return MM_UNIT_MB;
+}
+
+; The size in the precision the panel shows, rounded half up: tenths of a GB, whole MB.
+pub fn mm_memory_amount(bytes: i64, unit: u32) -> i64 {
+    if (bytes <= 0) { return 0; }
+    if (unit == MM_UNIT_GB) { return (bytes * 10 + MM_GIB / 2) / MM_GIB; }
+    return (bytes + MM_MIB / 2) / MM_MIB;
+}
+
+; Digits after the point: one for GB, none for MB.
+pub fn mm_memory_digits(unit: u32) -> u32 {
+    if (unit == MM_UNIT_GB) { return 1; }
+    return 0;
+}
+
+; --- Processor use from two samples ------------------------------------------------------------------------
+; proc_pid_rusage gives CPU time in mach ticks; mach_timebase_info turns ticks into nanoseconds.
+pub fn mm_ticks_ns(ticks: i64, numer: i64, denom: i64) -> i64 {
+    if (ticks <= 0 or numer <= 0 or denom <= 0) { return 0; }
+    return (ticks / denom) * numer + ((ticks % denom) * numer) / denom;
+}
+
+; CPU use in per mille of one core (1000 = one core fully busy, as Activity Monitor's 100 %), from the CPU
+; time a process spent between two samples and the wall time between them. -1 means not known yet: there is
+; no earlier sample, no time passed, or the counter went back (the process ID was reused).
+pub fn mm_cpu_permille(has_previous: bool, cpu_ns_now: i64, cpu_ns_before: i64, wall_ns: i64) -> i64 {
+    if (has_previous == false or wall_ns <= 0 or cpu_ns_now < cpu_ns_before) { return -1; }
+    return ((cpu_ns_now - cpu_ns_before) * 1000) / wall_ns;
+}
+
+; Adding the CPU use of the processes of one app: an unknown value adds nothing.
+pub fn mm_cpu_sum(a: i64, b: i64) -> i64 {
+    if (a < 0) { return b; }
+    if (b < 0) { return a; }
+    return a + b;
+}
+
+; --- Which app or service a process belongs to -----------------------------------------------------------
+; A process inside an app bundle counts for the outermost bundle: the path up to and including the first
+; ".app" that ends the path or is followed by "/". 0 when the process is not inside an app.
+pub const MM_PATH_MAX : u32 = 4096;
+
+pub fn mm_group_end(path: [4096]u8, len: u32) -> u32 {
+    if (len < 4 or len > MM_PATH_MAX) { return 0; }
+    var i: u32 = 1;
+    while (i + 4 <= len) {
+        if (path[i] == 46 and path[i + 1] == 97 and path[i + 2] == 112 and path[i + 3] == 112) {
+            if (path[i - 1] != 47) {
+                if (i + 4 == len) { return len; }
+                if (path[i + 4] == 47) { return i + 4; }
+            }
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+; Where a process's own name starts: just after the last "/". A service outside an app is listed by it.
+pub fn mm_name_start(path: [4096]u8, len: u32) -> u32 {
+    if (len > MM_PATH_MAX) { return 0; }
+    var start: u32 = 0;
+    var i: u32 = 0;
+    while (i < len) {
+        if (path[i] == 47) { start = i + 1; }
+        i = i + 1;
+    }
+    return start;
+}
+
+; An app is listed by its bundle's file name without ".app": the name ends 4 bytes before the group end.
+pub fn mm_app_name_end(group_end: u32) -> u32 {
+    if (group_end < 4) { return 0; }
+    return group_end - 4;
+}
+
+; --- The list in the panel --------------------------------------------------------------------------------
+pub const MM_SORT_MEMORY : u32 = 0;
+pub const MM_SORT_CPU : u32 = 1;
+pub const MM_TOP_ROWS : i64 = 8;
+; An app or service is listed when it holds at least 1 MB or uses at least 1 % of a core.
+pub const MM_MIN_ROW_BYTES : i64 = 1048576;
+pub const MM_MIN_ROW_CPU_PERMILLE : i64 = 10;
+
+pub fn mm_row_shows(bytes: i64, cpu_permille: i64) -> bool {
+    return bytes >= MM_MIN_ROW_BYTES or cpu_permille >= MM_MIN_ROW_CPU_PERMILLE;
+}
+
+; Whether row a comes before row b. By memory: more memory first, then more CPU; by CPU: more CPU first,
+; then more memory. Ties go by name (name_order < 0 when a's name comes first).
+pub fn mm_row_before(mode: u32, a_bytes: i64, a_cpu: i64, b_bytes: i64, b_cpu: i64, name_order: i64) -> bool {
+    if (mode == MM_SORT_CPU) {
+        if (a_cpu != b_cpu) { return a_cpu > b_cpu; }
+        if (a_bytes != b_bytes) { return a_bytes > b_bytes; }
+        return name_order < 0;
+    }
+    if (a_bytes != b_bytes) { return a_bytes > b_bytes; }
+    if (a_cpu != b_cpu) { return a_cpu > b_cpu; }
+    return name_order < 0;
+}
+
+; How many rows the panel shows.
+pub fn mm_rows_shown(available: i64) -> i64 {
+    if (available <= 0) { return 0; }
+    if (available > MM_TOP_ROWS) { return MM_TOP_ROWS; }
+    return available;
+}
+
+; The App Store edition runs in the App Sandbox, which hides other processes: it shows the memory totals
+; and says why the list is missing.
+pub fn mm_lists_processes(sandboxed: bool) -> bool {
+    return sandboxed == false;
+}
+
+; Processes of other users (root services, the window server) cannot be read without admin rights; the
+; panel says how many were left out.
+pub fn mm_notes_unreadable(unreadable: i64) -> bool {
+    return unreadable > 0;
+}
+
+; --- How often the numbers refresh ------------------------------------------------------------------------
+; The percentage in the menu bar every 5 s; the open panel, with its list, every 2 s.
+pub const MM_LABEL_REFRESH_MS : i64 = 5000;
+pub const MM_PANEL_REFRESH_MS : i64 = 2000;
+
+pub fn mm_refresh_ms(panel_open: bool) -> i64 {
+    if (panel_open) { return MM_PANEL_REFRESH_MS; }
+    return MM_LABEL_REFRESH_MS;
+}
+
+; --- Monitor mode: only the menu bar item is in use ----------------------------------------------------
+; Once no DiskBloom window is open, only the menu bar monitor is in use. The Disk Map's data (the scanned
+; tree, its navigation history, a running scan) is the app's main memory cost, so it is dropped; the next
+; window starts a fresh scan of the home folder, as at launch. The disk scanner (shared by the Disk Map,
+; App Uninstaller, Possible Leftovers and Caches) frees each entry's temporary objects before it reads the
+; next entry, so they never pile up. Without that, the memory freed by the release stayed with DiskBloom
+; for minutes on macOS 27 (measured 2026-10-28 after a scan of /System/Library).
+; A window on screen or in the Dock is open; the menu bar panel, alerts and sheets are not DiskBloom
+; windows; while DiskBloom is hidden its windows stay open. A running move to the Trash is never
+; interrupted: the release waits and is checked again until the move ends. A cleanup queue with items
+; keeps the map, so the person's choice is not lost. A running scan only reads, so it is cancelled.
+; Only the Disk Map is dropped; the section on screen, the other tools' results and a notice still to show are kept, so a review, move or report in another tool stays reachable.
+pub const MM_MONITOR_KEEP : u32 = 0;
+pub const MM_MONITOR_RELEASE : u32 = 1;
+pub const MM_MONITOR_WAIT : u32 = 2;
+pub const MM_MONITOR_KEEP_QUEUE : u32 = 3;
+; Check again every second while a move runs. 2 s after the release, once the closed window's views have
+; let go of the map, the allocator is asked to return its free pages; on macOS 27 it returns nothing
+; (measured 2026-10-28), so this only helps with allocators that support the request (macOS 14 and 15 not
+; checked).
+pub const MM_MONITOR_RECHECK_MS : i64 = 1000;
+pub const MM_RELIEF_DELAY_MS : i64 = 2000;
+
+pub fn mm_window_open(main_capable: bool, panel: bool, visible: bool, miniaturized: bool) -> bool {
+    return main_capable and panel == false and (visible or miniaturized);
+}
+
+pub fn mm_holds_map(has_snapshot: bool, scanning: bool, history: i64) -> bool {
+    return has_snapshot or scanning or history > 0;
+}
+
+pub fn mm_monitor_action(window_open: bool, app_hidden: bool, map_moving: bool, queued: i64, holds_map: bool) -> u32 {
+    if (window_open or app_hidden) { return MM_MONITOR_KEEP; }
+    if (map_moving) { return MM_MONITOR_WAIT; }
+    if (queued > 0) { return MM_MONITOR_KEEP_QUEUE; }
+    if (holds_map) { return MM_MONITOR_RELEASE; }
+    return MM_MONITOR_KEEP;
+}
+
+; --- Quitting from the panel ---------------------------------------------------------------------------
+; "Quit DiskBloom" in the panel does what Quit in the DiskBloom menu does. It is unavailable while any move
+; to the Trash runs (Disk Map, App Uninstaller, Possible Leftovers, Caches): quitting then would stop the
+; move between two items and lose its report.
+pub fn mm_can_quit(map_moving: bool, uninstaller_moving: bool, leftovers_moving: bool, caches_moving: bool) -> bool {
+    return map_moving == false and uninstaller_moving == false and leftovers_moving == false and caches_moving == false;
+}
+
+test mm_used_memory {
+    assert mm_pages_bytes(3, 16384) == 49152;
+    assert mm_pages_bytes(-3, 16384) == 0;
+    assert mm_pages_bytes(3, 0) == 0;
+    assert mm_app_bytes(10, 4, 100) == 600;
+    assert mm_app_bytes(4, 10, 100) == 0;
+    assert mm_cached_bytes(5, 2, 100) == 700;
+    assert mm_cached_bytes(-5, 2, 100) == 200;
+    assert mm_used_bytes(600, 300, 100, 2000) == 1000;
+    assert mm_used_bytes(1500, 300, 400, 2000) == 2000;
+    assert mm_used_bytes(-1, 300, 100, 2000) == 400;
+    assert mm_free_bytes(2000, 1000, 700) == 300;
+    assert mm_free_bytes(2000, 1500, 700) == 0;
+    assert mm_used_percent(0, 100) == 0;
+    assert mm_used_percent(5, 0) == 0;
+    assert mm_used_percent(1, 3) == 33;
+    assert mm_used_percent(2, 3) == 67;
+    assert mm_used_percent(1, 200) == 1;
+    assert mm_used_percent(150, 100) == 100;
+    assert mm_used_percent(17179869184, 19327352832) == 89;
+}
+
+test mm_pressure_and_units {
+    assert mm_level(1, 99) == MM_LEVEL_NORMAL;
+    assert mm_level(2, 10) == MM_LEVEL_WARNING;
+    assert mm_level(4, 10) == MM_LEVEL_CRITICAL;
+    assert mm_level(0, 79) == MM_LEVEL_NORMAL;
+    assert mm_level(0, 80) == MM_LEVEL_WARNING;
+    assert mm_level(-1, 95) == MM_LEVEL_CRITICAL;
+    assert mm_pressure_known(2) == true;
+    assert mm_pressure_known(3) == false;
+    assert mm_swap_shows(0) == false;
+    assert mm_swap_shows(1) == true;
+    assert mm_memory_unit(1073741823) == MM_UNIT_MB;
+    assert mm_memory_unit(1073741824) == MM_UNIT_GB;
+    assert mm_memory_amount(1073741824, MM_UNIT_GB) == 10;
+    assert mm_memory_amount(19327352832, MM_UNIT_GB) == 180;
+    assert mm_memory_amount(1610612736, MM_UNIT_GB) == 15;
+    assert mm_memory_amount(1127428915, MM_UNIT_GB) == 10;
+    assert mm_memory_amount(1127428916, MM_UNIT_GB) == 11;
+    assert mm_memory_amount(1048576, MM_UNIT_MB) == 1;
+    assert mm_memory_amount(524288, MM_UNIT_MB) == 1;
+    assert mm_memory_amount(524287, MM_UNIT_MB) == 0;
+    assert mm_memory_amount(69730304, MM_UNIT_MB) == 67;
+    assert mm_memory_amount(-7, MM_UNIT_MB) == 0;
+    assert mm_memory_digits(MM_UNIT_GB) == 1;
+    assert mm_memory_digits(MM_UNIT_MB) == 0;
+}
+
+test mm_processor {
+    assert mm_ticks_ns(24, 125, 3) == 1000;
+    assert mm_ticks_ns(25, 125, 3) == 1041;
+    assert mm_ticks_ns(1000, 1, 1) == 1000;
+    assert mm_ticks_ns(2400000000000000, 125, 3) == 100000000000000000;
+    assert mm_ticks_ns(-5, 125, 3) == 0;
+    assert mm_cpu_permille(false, 10, 0, 100) == -1;
+    assert mm_cpu_permille(true, 10, 0, 0) == -1;
+    assert mm_cpu_permille(true, 5, 10, 100) == -1;
+    assert mm_cpu_permille(true, 2000000000, 1000000000, 2000000000) == 500;
+    assert mm_cpu_permille(true, 6000000000, 0, 2000000000) == 3000;
+    assert mm_cpu_sum(-1, -1) == -1;
+    assert mm_cpu_sum(-1, 30) == 30;
+    assert mm_cpu_sum(20, -1) == 20;
+    assert mm_cpu_sum(20, 30) == 50;
+}
+
+test mm_groups {
+    var path: [4096]u8 = [0; 4096];
+    // "/A.app/B"
+    path[0] = 47; path[1] = 65; path[2] = 46; path[3] = 97; path[4] = 112; path[5] = 112; path[6] = 47; path[7] = 66;
+    assert mm_group_end(path, 8) == 6;
+    assert mm_group_end(path, 6) == 6;
+    assert mm_name_start(path, 8) == 7;
+    assert mm_group_end(path, 3) == 0;
+    assert mm_group_end(path, 4097) == 0;
+    // "/.app/B": no bundle name before ".app"
+    var bare: [4096]u8 = [0; 4096];
+    bare[0] = 47; bare[1] = 46; bare[2] = 97; bare[3] = 112; bare[4] = 112; bare[5] = 47; bare[6] = 66;
+    assert mm_group_end(bare, 7) == 0;
+    // "/bin/x"
+    var tool: [4096]u8 = [0; 4096];
+    tool[0] = 47; tool[1] = 98; tool[2] = 105; tool[3] = 110; tool[4] = 47; tool[5] = 120;
+    assert mm_group_end(tool, 6) == 0;
+    assert mm_name_start(tool, 6) == 5;
+    assert mm_name_start(tool, 0) == 0;
+    assert mm_app_name_end(6) == 2;
+    assert mm_app_name_end(4) == 0;
+    assert mm_app_name_end(3) == 0;
+    assert mm_app_name_end(0) == 0;
+}
+
+test mm_list {
+    assert mm_row_shows(1048576, -1) == true;
+    assert mm_row_shows(1048575, 9) == false;
+    assert mm_row_shows(0, 10) == true;
+    assert mm_row_before(MM_SORT_MEMORY, 200, 1, 100, 900, 1) == true;
+    assert mm_row_before(MM_SORT_MEMORY, 100, 5, 100, 1, 1) == true;
+    assert mm_row_before(MM_SORT_MEMORY, 100, 1, 100, 1, -1) == true;
+    assert mm_row_before(MM_SORT_MEMORY, 100, 1, 100, 1, 0) == false;
+    assert mm_row_before(MM_SORT_CPU, 100, 900, 200, 1, 1) == true;
+    assert mm_row_before(MM_SORT_CPU, 300, 5, 100, 5, 1) == true;
+    assert mm_row_before(MM_SORT_CPU, 100, -1, 100, 0, -1) == false;
+    assert mm_rows_shown(0) == 0;
+    assert mm_rows_shown(3) == 3;
+    assert mm_rows_shown(40) == 8;
+    assert mm_lists_processes(true) == false;
+    assert mm_lists_processes(false) == true;
+    assert mm_notes_unreadable(0) == false;
+    assert mm_notes_unreadable(4) == true;
+    assert mm_refresh_ms(true) == 2000;
+    assert mm_refresh_ms(false) == 5000;
+}
+
+test mm_monitor_mode {
+    assert mm_window_open(true, false, true, false) == true;
+    assert mm_window_open(true, false, false, true) == true;
+    assert mm_window_open(true, false, false, false) == false;
+    assert mm_window_open(false, false, true, false) == false;
+    assert mm_window_open(true, true, true, false) == false;
+    assert mm_holds_map(false, false, 0) == false;
+    assert mm_holds_map(true, false, 0) == true;
+    assert mm_holds_map(false, true, 0) == true;
+    assert mm_holds_map(false, false, 1) == true;
+    assert mm_monitor_action(true, false, false, 0, true) == MM_MONITOR_KEEP;
+    assert mm_monitor_action(false, true, false, 0, true) == MM_MONITOR_KEEP;
+    assert mm_monitor_action(true, false, true, 2, true) == MM_MONITOR_KEEP;
+    assert mm_monitor_action(false, false, true, 0, true) == MM_MONITOR_WAIT;
+    assert mm_monitor_action(false, false, true, 2, false) == MM_MONITOR_WAIT;
+    assert mm_monitor_action(false, false, false, 1, true) == MM_MONITOR_KEEP_QUEUE;
+    assert mm_monitor_action(false, false, false, 0, true) == MM_MONITOR_RELEASE;
+    assert mm_monitor_action(false, false, false, -1, true) == MM_MONITOR_RELEASE;
+    assert mm_monitor_action(false, false, false, 0, false) == MM_MONITOR_KEEP;
+    assert mm_can_quit(false, false, false, false) == true;
+    assert mm_can_quit(true, false, false, false) == false;
+    assert mm_can_quit(false, true, false, false) == false;
+    assert mm_can_quit(false, false, true, false) == false;
+    assert mm_can_quit(false, false, false, true) == false;
+}

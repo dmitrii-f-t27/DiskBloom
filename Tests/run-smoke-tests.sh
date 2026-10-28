@@ -66,7 +66,7 @@ build_test() {
     -o "$BUILD_DIR/$name"
 }
 
-for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke UninstallerDifferentialSmoke LeftoversDifferentialSmoke TextRulesDifferentialSmoke ScannerDifferentialSmoke MoveDifferentialSmoke DuplicatesDifferentialSmoke PresentationDifferentialSmoke ModelRulesDifferentialSmoke AssistantDifferentialSmoke; do
+for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke UninstallerDifferentialSmoke LeftoversDifferentialSmoke TextRulesDifferentialSmoke ScannerDifferentialSmoke MoveDifferentialSmoke DuplicatesDifferentialSmoke PresentationDifferentialSmoke ModelRulesDifferentialSmoke AssistantDifferentialSmoke MemoryMonitorSmoke; do
   print "== building $NAME"
   build_test "$NAME"
 done
@@ -104,4 +104,5 @@ print "== running ($ARCH)"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/PresentationDifferentialSmoke"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/ModelRulesDifferentialSmoke"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/AssistantDifferentialSmoke"
+/usr/bin/arch -"$ARCH" "$BUILD_DIR/MemoryMonitorSmoke" "$FIXTURES/memory"
 print "ALL_SMOKE_TESTS_PASSED ($ARCH)"

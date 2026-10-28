@@ -1,3 +1,36 @@
+# DiskBloom 1.6.0
+
+A memory monitor in the menu bar, and disk scans that use less memory. Everything else works as in 1.5. App version: 1.6, build 7.
+
+## Download
+
+- **DiskBloom-1.6.0-macOS-arm64.dmg** — open the image and drag DiskBloom to Applications.
+- **DiskBloom-1.6.0-macOS-arm64.zip** — the same app as a ZIP archive.
+- **SHA256SUMS** — SHA-256 of both files to verify your download.
+
+Requirements: a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later. The prebuilt app does not need Xcode. Intel Macs are not supported by this download.
+
+## What's new
+
+- **Memory in the menu bar**: while DiskBloom runs, the menu bar shows a memory chip and the share of memory in use. Click it to see how full the memory is, counted the way Activity Monitor counts it, the memory pressure macOS reports (normal, warning or critical), app memory, wired, compressed, cached files, free memory and swap.
+- **What uses the memory**: the same panel lists the apps and services that hold the most memory or use the most CPU, each app together with its helper processes. Switch the order between Memory and CPU. Buttons open DiskBloom or Activity Monitor, or quit DiskBloom; Quit is unavailable while a move to the Trash runs.
+- **Monitor mode**: when you close DiskBloom's last window, the app stays in the menu bar and drops the Disk Map's scan results (in our test on macOS 27, after a scan of /System/Library: about 60 MB 45 seconds after the window closed, against 190 MB with it open; after a scan of a home folder: about 240 MB, against about 1 GB). Opening the window again starts the Disk Map from the beginning. The Disk Map is kept while its move to the Trash runs or while items wait in its cleanup queue. The other tools keep their results.
+- **Less memory while scanning**: the disk scanner (used by the Disk Map, App Uninstaller, Possible leftovers and Caches, and by the check before each move to the Trash) frees each item's temporary data before it reads the next item. In our test on macOS 27 (a scan of /System/Library), the scan's peak memory fell from about 1.6 GB to about 320 MB. For a home folder, the peak was about 1.1 GB. The results are the same.
+- The panel only reads; it never stops or changes a process. Processes of other users (system services) need administrator rights to be read, so they are counted but not listed. The Mac App Store edition shows the totals only, because the App Sandbox hides other processes.
+- The monitor's rules are written in t27 like the rest of the app: `Specs/memory_rules.t27`.
+
+## Privacy
+
+The memory monitor reads the names and paths of running processes (to group helpers with their app), their memory use and CPU time, on the Mac only; it keeps no history and sends nothing. The disk tools still never use the network. Only the optional assistant, when you connect an API, sends your questions and the names, paths and sizes it looks up to the provider you chose.
+
+## Signature and first launch
+
+**This release is ad-hoc signed, without a Developer ID and without Apple notarization.** macOS may block the first launch. If you trust this release, try to open the app once, then check the permission for DiskBloom in System Settings → Privacy & Security. Do not turn off protection for the whole system. [Apple's instructions](https://support.apple.com/102445).
+
+## Verification before release
+
+The strict Swift 6 build, the signature integrity check, all seven smoke suites, the eleven differential tests and the 70 spec tests passed on Apple silicon. The Mac App Store project was built as a universal Release binary. The Intel (x86_64) slice was compiled but not tested: Rosetta is not installed on the build Mac, so the x86_64 smoke and spec tests were not run for this release. The ZIP and DMG were checked again after packaging.
+
 # DiskBloom 1.5.0
 
 Caches, an assistant you can chat with, and every decision of the app rewritten in t27. App version: 1.5, build 6.
