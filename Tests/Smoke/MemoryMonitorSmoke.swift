@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 
@@ -253,6 +254,16 @@ private struct MemoryMonitorSmoke {
         print("MEMORY_MONITOR_SCAN_LEFT_BYTES_PER_ENTRY=\(m8PerEntry) entries=\(m8Entries) left=\(m8Left)")
         try require(m8Entries == 3031, "the scan saw \(m8Entries) entries, not 3031")
         try require(m8PerEntry < 300, "the scan kept its temporary objects to the end: \(m8PerEntry) bytes per entry")
+
+        // M9: the Dock icon (mm_dock_shown); only the mapping, this test is not an app and never sets its own policy.
+        try require(DockIcon.policy(windowOpen: true, appHidden: false) == .regular,
+                    "an open window did not keep the Dock icon")
+        try require(DockIcon.policy(windowOpen: false, appHidden: true) == .regular,
+                    "a hidden app lost its Dock icon")
+        try require(DockIcon.policy(windowOpen: true, appHidden: true) == .regular,
+                    "an open window in a hidden app lost the Dock icon")
+        try require(DockIcon.policy(windowOpen: false, appHidden: false) == .accessory,
+                    "an app with no window and not hidden kept the Dock icon")
 
         print("MEMORY_MONITOR_SMOKE_OK")
     }

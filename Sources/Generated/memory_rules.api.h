@@ -67,6 +67,7 @@ int64_t mm_refresh_ms(bool panel_open);
 bool mm_window_open(bool main_capable, bool panel, bool visible, bool miniaturized);
 bool mm_holds_map(bool has_snapshot, bool scanning, int64_t history);
 uint32_t mm_monitor_action(bool window_open, bool app_hidden, bool map_moving, int64_t queued, bool holds_map);
+bool mm_dock_shown(bool window_open, bool app_hidden);
 bool mm_can_quit(bool map_moving, bool uninstaller_moving, bool leftovers_moving, bool caches_moving);
 /* Function bodies: see the full header. */
 #endif
