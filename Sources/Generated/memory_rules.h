@@ -35,6 +35,12 @@
 #define MM_MIN_ROW_CPU_PERMILLE 10
 #define MM_LABEL_REFRESH_MS 5000
 #define MM_PANEL_REFRESH_MS 2000
+#define MM_MONITOR_KEEP 0
+#define MM_MONITOR_RELEASE 1
+#define MM_MONITOR_WAIT 2
+#define MM_MONITOR_KEEP_QUEUE 3
+#define MM_MONITOR_RECHECK_MS 1000
+#define MM_RELIEF_DELAY_MS 2000
 
 /* -------------------------------------------------------
    Function prototypes
@@ -57,12 +63,17 @@ int64_t mm_cpu_permille(bool has_previous, int64_t cpu_ns_now, int64_t cpu_ns_be
 int64_t mm_cpu_sum(int64_t a, int64_t b);
 uint32_t mm_group_end(uint8_t path[static 4096], uint32_t len);
 uint32_t mm_name_start(uint8_t path[static 4096], uint32_t len);
+uint32_t mm_app_name_end(uint32_t group_end);
 bool mm_row_shows(int64_t bytes, int64_t cpu_permille);
 bool mm_row_before(uint32_t mode, int64_t a_bytes, int64_t a_cpu, int64_t b_bytes, int64_t b_cpu, int64_t name_order);
 int64_t mm_rows_shown(int64_t available);
 bool mm_lists_processes(bool sandboxed);
 bool mm_notes_unreadable(int64_t unreadable);
 int64_t mm_refresh_ms(bool panel_open);
+bool mm_window_open(bool main_capable, bool panel, bool visible, bool miniaturized);
+bool mm_holds_map(bool has_snapshot, bool scanning, int64_t history);
+uint32_t mm_monitor_action(bool window_open, bool app_hidden, bool map_moving, int64_t queued, bool holds_map);
+bool mm_can_quit(bool map_moving, bool uninstaller_moving, bool leftovers_moving, bool caches_moving);
 
 /* -------------------------------------------------------
    Function implementations
@@ -236,6 +247,13 @@ uint32_t mm_name_start(uint8_t path[static 4096], uint32_t len) {
     return start;
 }
 
+uint32_t mm_app_name_end(uint32_t group_end) {
+    if ((group_end < 4)) {
+        return 0;
+    }
+    return (group_end - 4);
+}
+
 bool mm_row_shows(int64_t bytes, int64_t cpu_permille) {
     return ((bytes >= MM_MIN_ROW_BYTES) || (cpu_permille >= MM_MIN_ROW_CPU_PERMILLE));
 }
@@ -282,6 +300,34 @@ int64_t mm_refresh_ms(bool panel_open) {
         return MM_PANEL_REFRESH_MS;
     }
     return MM_LABEL_REFRESH_MS;
+}
+
+bool mm_window_open(bool main_capable, bool panel, bool visible, bool miniaturized) {
+    return ((main_capable && (panel == false)) && (visible || miniaturized));
+}
+
+bool mm_holds_map(bool has_snapshot, bool scanning, int64_t history) {
+    return ((has_snapshot || scanning) || (history > 0));
+}
+
+uint32_t mm_monitor_action(bool window_open, bool app_hidden, bool map_moving, int64_t queued, bool holds_map) {
+    if ((window_open || app_hidden)) {
+        return MM_MONITOR_KEEP;
+    }
+    if (map_moving) {
+        return MM_MONITOR_WAIT;
+    }
+    if ((queued > 0)) {
+        return MM_MONITOR_KEEP_QUEUE;
+    }
+    if (holds_map) {
+        return MM_MONITOR_RELEASE;
+    }
+    return MM_MONITOR_KEEP;
+}
+
+bool mm_can_quit(bool map_moving, bool uninstaller_moving, bool leftovers_moving, bool caches_moving) {
+    return ((((map_moving == false) && (uninstaller_moving == false)) && (leftovers_moving == false)) && (caches_moving == false));
 }
 
 /* -------------------------------------------------------
@@ -388,6 +434,10 @@ void test_mm_groups(void) {
     assert((mm_group_end(tool, 6) == 0));
     assert((mm_name_start(tool, 6) == 5));
     assert((mm_name_start(tool, 0) == 0));
+    assert((mm_app_name_end(6) == 2));
+    assert((mm_app_name_end(4) == 0));
+    assert((mm_app_name_end(3) == 0));
+    assert((mm_app_name_end(0) == 0));
 }
 
 void test_mm_list(void) {
@@ -412,6 +462,32 @@ void test_mm_list(void) {
     assert((mm_refresh_ms(false) == 5000));
 }
 
+void test_mm_monitor_mode(void) {
+    assert((mm_window_open(true, false, true, false) == true));
+    assert((mm_window_open(true, false, false, true) == true));
+    assert((mm_window_open(true, false, false, false) == false));
+    assert((mm_window_open(false, false, true, false) == false));
+    assert((mm_window_open(true, true, true, false) == false));
+    assert((mm_holds_map(false, false, 0) == false));
+    assert((mm_holds_map(true, false, 0) == true));
+    assert((mm_holds_map(false, true, 0) == true));
+    assert((mm_holds_map(false, false, 1) == true));
+    assert((mm_monitor_action(true, false, false, 0, true) == MM_MONITOR_KEEP));
+    assert((mm_monitor_action(false, true, false, 0, true) == MM_MONITOR_KEEP));
+    assert((mm_monitor_action(true, false, true, 2, true) == MM_MONITOR_KEEP));
+    assert((mm_monitor_action(false, false, true, 0, true) == MM_MONITOR_WAIT));
+    assert((mm_monitor_action(false, false, true, 2, false) == MM_MONITOR_WAIT));
+    assert((mm_monitor_action(false, false, false, 1, true) == MM_MONITOR_KEEP_QUEUE));
+    assert((mm_monitor_action(false, false, false, 0, true) == MM_MONITOR_RELEASE));
+    assert((mm_monitor_action(false, false, false, -1, true) == MM_MONITOR_RELEASE));
+    assert((mm_monitor_action(false, false, false, 0, false) == MM_MONITOR_KEEP));
+    assert((mm_can_quit(false, false, false, false) == true));
+    assert((mm_can_quit(true, false, false, false) == false));
+    assert((mm_can_quit(false, true, false, false) == false));
+    assert((mm_can_quit(false, false, true, false) == false));
+    assert((mm_can_quit(false, false, false, true) == false));
+}
+
 
 /* -------------------------------------------------------
    Test runner (compile with -DT27_TEST_MAIN to execute)
@@ -425,7 +501,8 @@ int main(void) {
     test_mm_processor();
     test_mm_groups();
     test_mm_list();
-    printf("All %d tests passed.\n", 5);
+    test_mm_monitor_mode();
+    printf("All %d tests passed.\n", 6);
     return 0;
 }
 #endif /* T27_TEST_MAIN */

@@ -157,6 +157,12 @@ pub fn mm_name_start(path: [4096]u8, len: u32) -> u32 {
     return start;
 }
 
+; An app is listed by its bundle's file name without ".app": the name ends 4 bytes before the group end.
+pub fn mm_app_name_end(group_end: u32) -> u32 {
+    if (group_end < 4) { return 0; }
+    return group_end - 4;
+}
+
 ; --- The list in the panel --------------------------------------------------------------------------------
 pub const MM_SORT_MEMORY : u32 = 0;
 pub const MM_SORT_CPU : u32 = 1;
@@ -209,6 +215,53 @@ pub const MM_PANEL_REFRESH_MS : i64 = 2000;
 pub fn mm_refresh_ms(panel_open: bool) -> i64 {
     if (panel_open) { return MM_PANEL_REFRESH_MS; }
     return MM_LABEL_REFRESH_MS;
+}
+
+; --- Monitor mode: only the menu bar item is in use ----------------------------------------------------
+; Once no DiskBloom window is open, only the menu bar monitor is in use. The Disk Map's data (the scanned
+; tree, its navigation history, a running scan) is the app's main memory cost, so it is dropped; the next
+; window starts a fresh scan of the home folder, as at launch. The disk scanner (shared by the Disk Map,
+; App Uninstaller, Possible Leftovers and Caches) frees each entry's temporary objects before it reads the
+; next entry, so they never pile up. Without that, the memory freed by the release stayed with DiskBloom
+; for minutes on macOS 27 (measured 2026-10-28 after a scan of /System/Library).
+; A window on screen or in the Dock is open; the menu bar panel, alerts and sheets are not DiskBloom
+; windows; while DiskBloom is hidden its windows stay open. A running move to the Trash is never
+; interrupted: the release waits and is checked again until the move ends. A cleanup queue with items
+; keeps the map, so the person's choice is not lost. A running scan only reads, so it is cancelled.
+; Only the Disk Map is dropped; the section on screen, the other tools' results and a notice still to show are kept, so a review, move or report in another tool stays reachable.
+pub const MM_MONITOR_KEEP : u32 = 0;
+pub const MM_MONITOR_RELEASE : u32 = 1;
+pub const MM_MONITOR_WAIT : u32 = 2;
+pub const MM_MONITOR_KEEP_QUEUE : u32 = 3;
+; Check again every second while a move runs. 2 s after the release, once the closed window's views have
+; let go of the map, the allocator is asked to return its free pages; on macOS 27 it returns nothing
+; (measured 2026-10-28), so this only helps with allocators that support the request (macOS 14 and 15 not
+; checked).
+pub const MM_MONITOR_RECHECK_MS : i64 = 1000;
+pub const MM_RELIEF_DELAY_MS : i64 = 2000;
+
+pub fn mm_window_open(main_capable: bool, panel: bool, visible: bool, miniaturized: bool) -> bool {
+    return main_capable and panel == false and (visible or miniaturized);
+}
+
+pub fn mm_holds_map(has_snapshot: bool, scanning: bool, history: i64) -> bool {
+    return has_snapshot or scanning or history > 0;
+}
+
+pub fn mm_monitor_action(window_open: bool, app_hidden: bool, map_moving: bool, queued: i64, holds_map: bool) -> u32 {
+    if (window_open or app_hidden) { return MM_MONITOR_KEEP; }
+    if (map_moving) { return MM_MONITOR_WAIT; }
+    if (queued > 0) { return MM_MONITOR_KEEP_QUEUE; }
+    if (holds_map) { return MM_MONITOR_RELEASE; }
+    return MM_MONITOR_KEEP;
+}
+
+; --- Quitting from the panel ---------------------------------------------------------------------------
+; "Quit DiskBloom" in the panel does what Quit in the DiskBloom menu does. It is unavailable while any move
+; to the Trash runs (Disk Map, App Uninstaller, Possible Leftovers, Caches): quitting then would stop the
+; move between two items and lose its report.
+pub fn mm_can_quit(map_moving: bool, uninstaller_moving: bool, leftovers_moving: bool, caches_moving: bool) -> bool {
+    return map_moving == false and uninstaller_moving == false and leftovers_moving == false and caches_moving == false;
 }
 
 test mm_used_memory {
@@ -296,6 +349,10 @@ test mm_groups {
     assert mm_group_end(tool, 6) == 0;
     assert mm_name_start(tool, 6) == 5;
     assert mm_name_start(tool, 0) == 0;
+    assert mm_app_name_end(6) == 2;
+    assert mm_app_name_end(4) == 0;
+    assert mm_app_name_end(3) == 0;
+    assert mm_app_name_end(0) == 0;
 }
 
 test mm_list {
@@ -318,4 +375,30 @@ test mm_list {
     assert mm_notes_unreadable(4) == true;
     assert mm_refresh_ms(true) == 2000;
     assert mm_refresh_ms(false) == 5000;
+}
+
+test mm_monitor_mode {
+    assert mm_window_open(true, false, true, false) == true;
+    assert mm_window_open(true, false, false, true) == true;
+    assert mm_window_open(true, false, false, false) == false;
+    assert mm_window_open(false, false, true, false) == false;
+    assert mm_window_open(true, true, true, false) == false;
+    assert mm_holds_map(false, false, 0) == false;
+    assert mm_holds_map(true, false, 0) == true;
+    assert mm_holds_map(false, true, 0) == true;
+    assert mm_holds_map(false, false, 1) == true;
+    assert mm_monitor_action(true, false, false, 0, true) == MM_MONITOR_KEEP;
+    assert mm_monitor_action(false, true, false, 0, true) == MM_MONITOR_KEEP;
+    assert mm_monitor_action(true, false, true, 2, true) == MM_MONITOR_KEEP;
+    assert mm_monitor_action(false, false, true, 0, true) == MM_MONITOR_WAIT;
+    assert mm_monitor_action(false, false, true, 2, false) == MM_MONITOR_WAIT;
+    assert mm_monitor_action(false, false, false, 1, true) == MM_MONITOR_KEEP_QUEUE;
+    assert mm_monitor_action(false, false, false, 0, true) == MM_MONITOR_RELEASE;
+    assert mm_monitor_action(false, false, false, -1, true) == MM_MONITOR_RELEASE;
+    assert mm_monitor_action(false, false, false, 0, false) == MM_MONITOR_KEEP;
+    assert mm_can_quit(false, false, false, false) == true;
+    assert mm_can_quit(true, false, false, false) == false;
+    assert mm_can_quit(false, true, false, false) == false;
+    assert mm_can_quit(false, false, true, false) == false;
+    assert mm_can_quit(false, false, false, true) == false;
 }

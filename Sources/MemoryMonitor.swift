@@ -200,8 +200,8 @@ enum MemorySampler {
 /// Groups processes into apps and services and orders them, as Specs/memory_rules.t27 says.
 enum MemoryGrouping {
     /// Each process inside an app bundle counts for the outermost bundle; a service outside any app is
-    /// listed by its own name. An app is named by its bundle's file name; the monitor then shows the
-    /// name Finder shows.
+    /// listed by its own name. An app is named by its bundle's file name without ".app"
+    /// (`mm_app_name_end`).
     static func aggregate(
         _ samples: [ProcessSample],
         previousCPU: [Int32: Int64],
@@ -224,7 +224,7 @@ enum MemoryGrouping {
                 let bundle = String(decoding: Array(sample.path.utf8.prefix(Int(groupEnd))), as: UTF8.self)
                 key = "app:" + bundle
                 let start = Int(T27Text.withBytes(bundle) { bytes, length in mm_name_start(bytes, length) })
-                let file = Array(bundle.utf8)[start..<max(start, Int(groupEnd) - 4)]
+                let file = Array(bundle.utf8)[start..<max(start, Int(mm_app_name_end(groupEnd)))]
                 group = groups[key] ?? Group(name: String(decoding: file, as: UTF8.self), bundlePath: bundle)
             } else {
                 let start = T27Text.withBytes(sample.path) { bytes, length in mm_name_start(bytes, length) }
@@ -276,7 +276,6 @@ final class MemoryMonitorModel: ObservableObject {
     private var allRows: [UsageRow] = []
     private var previousCPU: [Int32: Int64] = [:]
     private var previousAt: ContinuousClock.Instant?
-    private var names: [String: String] = [:]
     private var icons: [String: NSImage] = [:]
 
     init() {
@@ -333,29 +332,17 @@ final class MemoryMonitorModel: ObservableObject {
         let sampling = await Task.detached(priority: .utility) { MemorySampler.processes() }.value
         guard panelOpen, !Task.isCancelled else { return }
         let wallNs = previousAt.map { MemoryRules.nanoseconds(sampling.at - $0) } ?? 0
-        let grouped = MemoryGrouping.aggregate(
+        allRows = MemoryGrouping.aggregate(
             sampling.samples,
             previousCPU: previousCPU,
             hasPrevious: previousAt != nil,
             wallNs: wallNs
         )
-        allRows = grouped.map { row in
-            guard let bundle = row.bundlePath else { return row }
-            return UsageRow(id: row.id, name: displayName(bundle), bundlePath: bundle, bytes: row.bytes,
-                            cpuPermille: row.cpuPermille, processes: row.processes)
-        }
         rows = MemoryGrouping.top(allRows, sort: sortMode)
         unreadable = sampling.unreadable
         previousCPU = sampling.samples.reduce(into: [:]) { $0[$1.pid] = $1.cpuNs }
         previousAt = sampling.at
         measuring = false
-    }
-
-    private func displayName(_ bundlePath: String) -> String {
-        if let cached = names[bundlePath] { return cached }
-        let name = FileManager.default.displayName(atPath: bundlePath)
-        names[bundlePath] = name
-        return name
     }
 
     /// Brings the DiskBloom window forward, opening one if it was closed.
@@ -374,3 +361,129 @@ final class MemoryMonitorModel: ObservableObject {
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration(), completionHandler: nil)
     }
 }
+
+/// Asks every malloc zone to return its free pages once the Disk Map's data has been dropped
+/// (Specs/memory_rules.t27, `MM_RELIEF_DELAY_MS`). The delay lets the closed window's views let go of the
+/// map first. On macOS 27 the allocator ignores the request and returns 0 (measured 2026-10-28); there it
+/// is the disk scanner's per-entry autorelease pool (DiskScanner) that keeps the scan's temporary objects
+/// from piling up.
+enum MemoryRelief {
+    static func schedule() {
+        Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .milliseconds(Int(MM_RELIEF_DELAY_MS)))
+            let released = malloc_zone_pressure_relief(nil, 0)
+            #if DEBUG
+            FileHandle.standardError.write(Data("DISKBLOOM_AUTOMATION relief-bytes=\(released)\n".utf8))
+            #else
+            _ = released
+            #endif
+        }
+    }
+}
+
+/// Monitor mode: once no DiskBloom window is open, only the menu bar monitor is in use, so the Disk Map's
+/// data is dropped and the freed memory returned to macOS. Specs/memory_rules.t27 decides when
+/// (`mm_window_open`, `mm_monitor_action`); this class reads the facts and acts on the answer.
+@MainActor
+final class MonitorModeController {
+    private weak var app: AppModel?
+    private var observer: (any NSObjectProtocol)?
+    private var recheck: Task<Void, Never>?
+
+    func attach(app: AppModel) {
+        self.app = app
+        recheck?.cancel()
+        recheck = nil
+        guard observer == nil else { return }
+        observer = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            // Only the window's identity crosses into the main-actor closure.
+            let closing = (note.object as? NSWindow).map(ObjectIdentifier.init)
+            MainActor.assumeIsolated { self?.windowWillClose(closing) }
+        }
+        #if DEBUG
+        MonitorModeAutomation.start(app: app)
+        #endif
+    }
+
+    private func windowWillClose(_ closing: ObjectIdentifier?) {
+        // Runs after the close completes; the closing window is left out in case it still looks open.
+        Task { [weak self] in self?.check(excluding: closing) }
+    }
+
+    private func check(excluding closing: ObjectIdentifier?) {
+        let open = NSApp.windows.contains {
+            ObjectIdentifier($0) != closing
+                && mm_window_open($0.canBecomeMain, $0 is NSPanel, $0.isVisible, $0.isMiniaturized)
+        }
+        apply(windowOpen: open, appHidden: NSApp.isHidden)
+    }
+
+    /// Acts on what `mm_monitor_action` says and returns its code.
+    @discardableResult
+    func apply(windowOpen: Bool, appHidden: Bool) -> UInt32 {
+        guard let app else { return UInt32(MM_MONITOR_KEEP) }
+        let action = mm_monitor_action(windowOpen, appHidden, app.isMovingToTrash,
+                                       Int64(app.collection.count), app.holdsDiskMap)
+        if action == UInt32(MM_MONITOR_RELEASE) {
+            app.releaseDiskMap()
+            MemoryRelief.schedule()
+        } else if action == UInt32(MM_MONITOR_WAIT) {
+            recheck?.cancel()
+            recheck = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(Int(MM_MONITOR_RECHECK_MS)))
+                guard !Task.isCancelled else { return }
+                self?.check(excluding: nil)
+            }
+        }
+        return action
+    }
+}
+
+#if DEBUG
+/// Debug-only hook for the live memory check. Compiled out of every release build (build.sh and the Xcode
+/// Release configuration), like ScreenshotAutomation.
+///   -DiskBloomAutomationMonitorMode YES        waits for the Disk Map scan, closes every window after 60 s,
+///                                              quits 90 s later
+///   -DiskBloomAutomationMonitorRoot <folder>   scans <folder> instead of waiting for the home scan
+/// Progress goes to stderr as `DISKBLOOM_AUTOMATION <marker>` lines.
+/// The scan-finished line also gives the map's root, size, file count, folder count and scan seconds.
+@MainActor
+enum MonitorModeAutomation {
+    static func start(app: AppModel) {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: "DiskBloomAutomationMonitorMode") else { return }
+        if let root = defaults.string(forKey: "DiskBloomAutomationMonitorRoot") {
+            app.startScan(at: URL(fileURLWithPath: root, isDirectory: true))
+        }
+        Task {
+            while app.snapshot == nil || app.isScanning {
+                try? await Task.sleep(for: .seconds(1))
+            }
+            log(scanFinishedLine(app))
+            try? await Task.sleep(for: .seconds(60))
+            for window in NSApp.windows
+            where mm_window_open(window.canBecomeMain, window is NSPanel, window.isVisible, window.isMiniaturized) {
+                window.performClose(nil)
+            }
+            log("windows-closed")
+            try? await Task.sleep(for: .seconds(90))
+            log("quitting")
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// The marker for a finished scan. Built in its own function so no copy of the map lives on in the task
+    /// above, which keeps running through the release.
+    private static func scanFinishedLine(_ app: AppModel) -> String {
+        guard let snapshot = app.snapshot else { return "scan-finished root=none" }
+        let root = snapshot.root
+        return "scan-finished root=\(root.url?.path ?? "none") size=\(root.size) files=\(root.fileCount) folders=\(root.directoryCount) seconds=\(Int(snapshot.duration.rounded()))"
+    }
+
+    private static func log(_ line: String) {
+        FileHandle.standardError.write(Data("DISKBLOOM_AUTOMATION \(line)\n".utf8))
+    }
+}
+#endif

@@ -368,6 +368,26 @@ final class AppModel: ObservableObject {
         isScanning = false
     }
 
+    /// Whether the Disk Map holds data that monitor mode may drop (Specs/memory_rules.t27, mm_holds_map).
+    var holdsDiskMap: Bool { mm_holds_map(snapshot != nil, isScanning, Int64(navigationHistory.count)) }
+
+    /// Monitor mode (Specs/memory_rules.t27, mm_monitor_action): with no DiskBloom window open, drops the Disk
+    /// Map's data, its navigation history and any running scan. The next window starts a fresh scan of the
+    /// home folder, as at launch. A notice still waiting to be shown (the result of a move) is kept.
+    func releaseDiskMap() {
+        cancelScan()
+        invalidatePendingReview()
+        navigationHistory = []
+        snapshot = nil
+        focusStack = []
+        inspectedNode = nil
+        collection = []
+        progress = ScanProgress(itemCount: 0, currentPath: "")
+        currentURL = UserHome.url
+        analysisRootURL = UserHome.url
+        volumeStats = Self.readVolumeStats(for: UserHome.url)
+    }
+
     func rescan() {
         guard !md_needs_permission(FolderAccess.shared.hasAccess(to: currentURL)) else {
             open(source: currentURL)

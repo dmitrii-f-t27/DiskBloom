@@ -25,9 +25,39 @@ private func spin(milliseconds: Int) -> UInt64 {
     return value
 }
 
+/// Waits until the scan the model started has ended (it finishes or is cancelled).
+@MainActor
+private func waitForScan(_ app: AppModel) async throws {
+    let deadline = ContinuousClock.now + .seconds(30)
+    while app.isScanning {
+        if ContinuousClock.now > deadline { throw SmokeFailure.assertion("the scan did not end within 30 s") }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+}
+
+/// Waits until the monitor has measured the processes once.
+@MainActor
+private func waitUntilMeasured(_ m: MemoryMonitorModel) async throws {
+    let deadline = ContinuousClock.now + .seconds(10)
+    while m.measuring {
+        if ContinuousClock.now > deadline { throw SmokeFailure.assertion("the monitor did not measure within 10 s") }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+}
+
+/// Bytes in use in every malloc zone of this process.
+private func mallocInUse() -> Int {
+    var stats = malloc_statistics_t()
+    malloc_zone_statistics(nil, &stats)
+    return Int(stats.size_in_use)
+}
+
 @main
+@MainActor
 private struct MemoryMonitorSmoke {
-    static func main() throws {
+    static func main() async throws {
+        guard CommandLine.arguments.count == 2 else { throw SmokeFailure.assertion("fixture root required") }
+
         // The system totals, as macOS reports them on this Mac.
         guard let system = MemorySampler.system() else { throw SmokeFailure.assertion("no VM statistics") }
         try require(system.total == Int64(ProcessInfo.processInfo.physicalMemory), "total is not the physical memory")
@@ -109,6 +139,120 @@ private struct MemoryMonitorSmoke {
                     && MemoryLevel(code: UInt32(MM_LEVEL_CRITICAL)) == .critical, "level mapping")
         try require(MemoryRules.text(69_730_304) == "67 MB", "MB rounding: \(MemoryRules.text(69_730_304))")
         try require(MemoryRules.text(1_073_741_824) == "1.0 GB", "GB text: \(MemoryRules.text(1_073_741_824))")
+
+        // N1: an app is named by its bundle's file name without ".app".
+        let named = MemoryGrouping.aggregate(
+            [
+                ProcessSample(pid: 11, path: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", footprint: 1_000_000, cpuNs: 0),
+                ProcessSample(pid: 12, path: "/Applications/Foo.Bar.app/Contents/MacOS/Foo", footprint: 1_000_000, cpuNs: 0),
+                ProcessSample(pid: 13, path: "/Applications/Время.app/Contents/MacOS/x", footprint: 1_000_000, cpuNs: 0),
+            ],
+            previousCPU: [:], hasPrevious: false, wallNs: 0
+        )
+        try require(Set(named.map(\.name)) == ["ChatGPT", "Foo.Bar", "Время"], "app names: \(named.map(\.name).sorted())")
+
+        // N2: the live rows of this Mac carry the same names.
+        let live = MemoryMonitorModel()
+        live.panelAppeared()
+        try await waitUntilMeasured(live)
+        for row in live.rows {
+            if let bundlePath = row.bundlePath {
+                let expected = URL(fileURLWithPath: bundlePath).deletingPathExtension().lastPathComponent
+                try require(row.name == expected, "row \(row.name) is not the bundle name \(expected)")
+            }
+            try require(!row.name.hasSuffix(".app"), "row name ends in .app: \(row.name)")
+        }
+        print("MEMORY_MONITOR_APP_ROWS=\(live.rows.filter { $0.bundlePath != nil }.count)")
+        live.panelDisappeared()
+
+        // M1: a small tree to scan.
+        let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true).standardizedFileURL
+        let files = FileManager.default
+        try files.createDirectory(at: root.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        try Data(count: 4096).write(to: root.appendingPathComponent("a.bin"))
+        try Data(count: 2048).write(to: root.appendingPathComponent("sub/b.bin"))
+        try Data(count: 1024).write(to: root.appendingPathComponent("sub/c.bin"))
+
+        // M2: a new model holds no map, and there is nothing to release.
+        let app = AppModel()
+        let mode = MonitorModeController()
+        mode.attach(app: app)
+        try require(!app.holdsDiskMap, "a new model holds a map")
+        try require(mode.apply(windowOpen: false, appHidden: false) == UInt32(MM_MONITOR_KEEP), "release with no map")
+
+        // M3: a scan gives a map.
+        app.startScan(at: root)
+        try await waitForScan(app)
+        try require(app.snapshot != nil && app.holdsDiskMap, "no map after the scan")
+
+        // M4: an open window, or a hidden app, keeps the map.
+        try require(mode.apply(windowOpen: true, appHidden: false) == UInt32(MM_MONITOR_KEEP), "open window did not keep the map")
+        try require(app.snapshot != nil, "open window dropped the map")
+        try require(mode.apply(windowOpen: false, appHidden: true) == UInt32(MM_MONITOR_KEEP), "hidden app did not keep the map")
+        try require(app.snapshot != nil, "hidden app dropped the map")
+
+        // M5: a cleanup queue with items keeps the map.
+        guard let file = app.snapshot?.root.children.first(where: { !$0.isDirectory && !$0.isVirtual }) else {
+            throw SmokeFailure.assertion("no plain file in the fixture")
+        }
+        let reason = app.rejectionReason(for: file)
+        try require(reason == nil, "the fixture file cannot be queued: \(reason ?? "")")
+        app.toggleCollection(file)
+        try require(app.collection.count == 1, "the file was not queued: \(app.collection.count)")
+        try require(mode.apply(windowOpen: false, appHidden: false) == UInt32(MM_MONITOR_KEEP_QUEUE), "queue did not keep the map")
+        try require(app.snapshot != nil, "queue kept no map")
+        app.removeFromCollection(file)
+        try require(app.collection.isEmpty, "the file is still queued")
+
+        // M6: with no window and no queue, the Disk Map is dropped; the section on screen is kept (a review,
+        // move or report in another tool must stay reachable), and the rest of the map's state is as at launch.
+        app.selectWorkspaceSection(.cacheExplorer)
+        try require(mode.apply(windowOpen: false, appHidden: false) == UInt32(MM_MONITOR_RELEASE), "no release")
+        try require(app.snapshot == nil, "snapshot kept")
+        try require(app.focusNode == nil, "focus kept")
+        try require(app.inspectedNode == nil, "inspected node kept")
+        try require(!app.isScanning, "still scanning")
+        try require(app.collection.isEmpty, "queue kept")
+        try require(!app.canGoBack, "history kept")
+        try require(app.workspaceSection == .cacheExplorer, "release changed the section")
+        try require(app.currentURL.path == UserHome.path, "current folder not reset")
+        try require(app.analysisRootURL.path == UserHome.path, "analysis root not reset")
+        try require(!app.holdsDiskMap, "still holds a map")
+        try require(mode.apply(windowOpen: false, appHidden: false) == UInt32(MM_MONITOR_KEEP), "second release was not a no-op")
+
+        // M7: a running scan is cancelled, and it does not land afterwards.
+        app.startScan(at: root)
+        try require(app.isScanning && app.holdsDiskMap, "scan did not start")
+        try require(mode.apply(windowOpen: false, appHidden: false) == UInt32(MM_MONITOR_RELEASE), "running scan not released")
+        try require(!app.isScanning && app.snapshot == nil, "scan still running after release")
+        try await Task.sleep(for: .seconds(1))
+        try require(app.snapshot == nil && !app.isScanning, "a cancelled scan landed after release")
+
+        // M8: the disk scanner frees each entry's temporary objects before the next one (DiskScanner), so a
+        // finished and dropped scan leaves almost nothing behind, even before any outer autorelease pool
+        // drains. This guards the pool of the folder loop. The pool of the measuring loop always runs inside
+        // it, so only the static check and the live check cover that one.
+        let m8Root = root.appendingPathComponent("m8", isDirectory: true)
+        for m8Folder in 0..<30 {
+            let m8Dir = m8Root.appendingPathComponent("d\(m8Folder)", isDirectory: true)
+            try files.createDirectory(at: m8Dir, withIntermediateDirectories: true)
+            for m8File in 0..<100 {
+                try Data([1]).write(to: m8Dir.appendingPathComponent("f\(m8File).bin"))
+            }
+        }
+        // No `await` from here to m8Left: a suspension could drain an outer pool and hide a missing one.
+        let m8Before = mallocInUse()
+        var m8Entries = 0
+        do {
+            var scanner = DiskScanner()
+            let snapshot = try scanner.scan(root: m8Root, counter: ScanCounter())
+            m8Entries = snapshot.root.fileCount + snapshot.root.directoryCount
+        }
+        let m8Left = mallocInUse() - m8Before
+        let m8PerEntry = m8Left / max(m8Entries, 1)
+        print("MEMORY_MONITOR_SCAN_LEFT_BYTES_PER_ENTRY=\(m8PerEntry) entries=\(m8Entries) left=\(m8Left)")
+        try require(m8Entries == 3031, "the scan saw \(m8Entries) entries, not 3031")
+        try require(m8PerEntry < 300, "the scan kept its temporary objects to the end: \(m8PerEntry) bytes per entry")
 
         print("MEMORY_MONITOR_SMOKE_OK")
     }

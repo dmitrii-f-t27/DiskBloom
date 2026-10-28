@@ -54,9 +54,11 @@ While DiskBloom runs, the menu bar shows a memory chip and the share of memory i
 - **how full the memory is**, counted the way Activity Monitor counts it (app memory, wired and compressed memory), with the memory pressure macOS reports: normal, warning or critical;
 - the parts: app memory, wired, compressed, cached files, free, and swap when anything is swapped out;
 - **what uses it**: the apps and services that hold the most memory or use the most CPU, each app together with its helper processes; switch the order between Memory and CPU;
-- buttons to open DiskBloom or Activity Monitor.
+- buttons to open DiskBloom or Activity Monitor, and to quit DiskBloom. Quit is unavailable while a move to the Trash runs.
 
 The panel only reads. It does not stop or change any process. Processes of other users (system services such as the window server) need administrator rights to be read, so the panel counts them but does not list them. The numbers refresh every 2 seconds while the panel is open and every 5 seconds in the menu bar.
+
+**Monitor mode.** When you close DiskBloom's last window, the app stays in the menu bar and drops the Disk Map's scan results. In our test on macOS 27 (a scan of /System/Library), DiskBloom used about 60 MB 45 seconds after its window closed, against 190 MB with the window open. After a scan of a home folder, whose map is much larger, it used about 240 MB 45 seconds after the window closed, against about 1 GB with it open. Opening the window again starts the Disk Map from the beginning, as at launch. The Disk Map is kept while its move to the Trash runs or while items wait in its cleanup queue. The other tools keep their results.
 
 ## App Uninstaller
 

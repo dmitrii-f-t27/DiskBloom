@@ -31,6 +31,12 @@
 #define MM_MIN_ROW_CPU_PERMILLE 10
 #define MM_LABEL_REFRESH_MS 5000
 #define MM_PANEL_REFRESH_MS 2000
+#define MM_MONITOR_KEEP 0
+#define MM_MONITOR_RELEASE 1
+#define MM_MONITOR_WAIT 2
+#define MM_MONITOR_KEEP_QUEUE 3
+#define MM_MONITOR_RECHECK_MS 1000
+#define MM_RELIEF_DELAY_MS 2000
 /* -------------------------------------------------------
    Function prototypes
    ------------------------------------------------------- */
@@ -51,11 +57,16 @@ int64_t mm_cpu_permille(bool has_previous, int64_t cpu_ns_now, int64_t cpu_ns_be
 int64_t mm_cpu_sum(int64_t a, int64_t b);
 uint32_t mm_group_end(uint8_t path[static 4096], uint32_t len);
 uint32_t mm_name_start(uint8_t path[static 4096], uint32_t len);
+uint32_t mm_app_name_end(uint32_t group_end);
 bool mm_row_shows(int64_t bytes, int64_t cpu_permille);
 bool mm_row_before(uint32_t mode, int64_t a_bytes, int64_t a_cpu, int64_t b_bytes, int64_t b_cpu, int64_t name_order);
 int64_t mm_rows_shown(int64_t available);
 bool mm_lists_processes(bool sandboxed);
 bool mm_notes_unreadable(int64_t unreadable);
 int64_t mm_refresh_ms(bool panel_open);
+bool mm_window_open(bool main_capable, bool panel, bool visible, bool miniaturized);
+bool mm_holds_map(bool has_snapshot, bool scanning, int64_t history);
+uint32_t mm_monitor_action(bool window_open, bool app_hidden, bool map_moving, int64_t queued, bool holds_map);
+bool mm_can_quit(bool map_moving, bool uninstaller_moving, bool leftovers_moving, bool caches_moving);
 /* Function bodies: see the full header. */
 #endif

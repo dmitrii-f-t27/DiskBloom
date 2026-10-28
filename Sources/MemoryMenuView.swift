@@ -18,6 +18,8 @@ struct MemoryMenuLabel: View {
 /// The panel under the menu bar item: how full the memory is, and which apps and services use it.
 struct MemoryMenuPanel: View {
     @ObservedObject var monitor: MemoryMonitorModel
+    /// False while a move to the Trash runs (Specs/memory_rules.t27, mm_can_quit).
+    let canQuit: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -184,6 +186,9 @@ struct MemoryMenuPanel: View {
             Button("Open DiskBloom") { monitor.openMainWindow() }
             Button("Activity Monitor") { monitor.openActivityMonitor() }
             Spacer()
+            Button("Quit DiskBloom") { NSApp.terminate(nil) }
+                .disabled(!canQuit)
+                .help(canQuit ? "Quit DiskBloom, as Quit in the DiskBloom menu does." : "Wait for the move to the Trash to finish.")
         }
         .controlSize(.small)
     }
