@@ -73,6 +73,7 @@ int64_t mm_refresh_ms(bool panel_open);
 bool mm_window_open(bool main_capable, bool panel, bool visible, bool miniaturized);
 bool mm_holds_map(bool has_snapshot, bool scanning, int64_t history);
 uint32_t mm_monitor_action(bool window_open, bool app_hidden, bool map_moving, int64_t queued, bool holds_map);
+bool mm_dock_shown(bool window_open, bool app_hidden);
 bool mm_can_quit(bool map_moving, bool uninstaller_moving, bool leftovers_moving, bool caches_moving);
 
 /* -------------------------------------------------------
@@ -303,7 +304,13 @@ int64_t mm_refresh_ms(bool panel_open) {
 }
 
 bool mm_window_open(bool main_capable, bool panel, bool visible, bool miniaturized) {
-    return ((main_capable && (panel == false)) && (visible || miniaturized));
+    if (panel) {
+        return false;
+    }
+    if (miniaturized) {
+        return true;
+    }
+    return (main_capable && visible);
 }
 
 bool mm_holds_map(bool has_snapshot, bool scanning, int64_t history) {
@@ -324,6 +331,10 @@ uint32_t mm_monitor_action(bool window_open, bool app_hidden, bool map_moving, i
         return MM_MONITOR_RELEASE;
     }
     return MM_MONITOR_KEEP;
+}
+
+bool mm_dock_shown(bool window_open, bool app_hidden) {
+    return (window_open || app_hidden);
 }
 
 bool mm_can_quit(bool map_moving, bool uninstaller_moving, bool leftovers_moving, bool caches_moving) {
@@ -468,6 +479,10 @@ void test_mm_monitor_mode(void) {
     assert((mm_window_open(true, false, false, false) == false));
     assert((mm_window_open(false, false, true, false) == false));
     assert((mm_window_open(true, true, true, false) == false));
+    assert((mm_window_open(false, false, false, true) == true));
+    assert((mm_window_open(false, true, false, true) == false));
+    assert((mm_window_open(true, true, false, true) == false));
+    assert((mm_window_open(false, false, false, false) == false));
     assert((mm_holds_map(false, false, 0) == false));
     assert((mm_holds_map(true, false, 0) == true));
     assert((mm_holds_map(false, true, 0) == true));
@@ -481,6 +496,10 @@ void test_mm_monitor_mode(void) {
     assert((mm_monitor_action(false, false, false, 0, true) == MM_MONITOR_RELEASE));
     assert((mm_monitor_action(false, false, false, -1, true) == MM_MONITOR_RELEASE));
     assert((mm_monitor_action(false, false, false, 0, false) == MM_MONITOR_KEEP));
+    assert((mm_dock_shown(true, false) == true));
+    assert((mm_dock_shown(false, true) == true));
+    assert((mm_dock_shown(true, true) == true));
+    assert((mm_dock_shown(false, false) == false));
     assert((mm_can_quit(false, false, false, false) == true));
     assert((mm_can_quit(true, false, false, false) == false));
     assert((mm_can_quit(false, true, false, false) == false));

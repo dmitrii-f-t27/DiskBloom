@@ -240,8 +240,13 @@ pub const MM_MONITOR_KEEP_QUEUE : u32 = 3;
 pub const MM_MONITOR_RECHECK_MS : i64 = 1000;
 pub const MM_RELIEF_DELAY_MS : i64 = 2000;
 
+; main_capable is what macOS reports (NSWindow canBecomeMain). It is false for a window minimized to the
+; Dock (seen on macOS 27, 2026-10-28), so a minimized window that is not a panel counts as open on its
+; own; a window on screen counts when it can become the main window.
 pub fn mm_window_open(main_capable: bool, panel: bool, visible: bool, miniaturized: bool) -> bool {
-    return main_capable and panel == false and (visible or miniaturized);
+    if (panel) { return false; }
+    if (miniaturized) { return true; }
+    return main_capable and visible;
 }
 
 pub fn mm_holds_map(has_snapshot: bool, scanning: bool, history: i64) -> bool {
@@ -254,6 +259,14 @@ pub fn mm_monitor_action(window_open: bool, app_hidden: bool, map_moving: bool, 
     if (queued > 0) { return MM_MONITOR_KEEP_QUEUE; }
     if (holds_map) { return MM_MONITOR_RELEASE; }
     return MM_MONITOR_KEEP;
+}
+
+; While no DiskBloom window is open, only the menu bar item is in use: DiskBloom leaves the Dock and the
+; Command-Tab switcher and has no menu bar of its own. It comes back with the next window ("Open DiskBloom"
+; in the panel, or opening the app again from the Finder, Spotlight or Launchpad). A hidden DiskBloom keeps
+; its Dock icon, which is how a person shows it again. Whether the Disk Map is kept does not matter here.
+pub fn mm_dock_shown(window_open: bool, app_hidden: bool) -> bool {
+    return window_open or app_hidden;
 }
 
 ; --- Quitting from the panel ---------------------------------------------------------------------------
@@ -383,6 +396,10 @@ test mm_monitor_mode {
     assert mm_window_open(true, false, false, false) == false;
     assert mm_window_open(false, false, true, false) == false;
     assert mm_window_open(true, true, true, false) == false;
+    assert mm_window_open(false, false, false, true) == true;
+    assert mm_window_open(false, true, false, true) == false;
+    assert mm_window_open(true, true, false, true) == false;
+    assert mm_window_open(false, false, false, false) == false;
     assert mm_holds_map(false, false, 0) == false;
     assert mm_holds_map(true, false, 0) == true;
     assert mm_holds_map(false, true, 0) == true;
@@ -396,6 +413,10 @@ test mm_monitor_mode {
     assert mm_monitor_action(false, false, false, 0, true) == MM_MONITOR_RELEASE;
     assert mm_monitor_action(false, false, false, -1, true) == MM_MONITOR_RELEASE;
     assert mm_monitor_action(false, false, false, 0, false) == MM_MONITOR_KEEP;
+    assert mm_dock_shown(true, false) == true;
+    assert mm_dock_shown(false, true) == true;
+    assert mm_dock_shown(true, true) == true;
+    assert mm_dock_shown(false, false) == false;
     assert mm_can_quit(false, false, false, false) == true;
     assert mm_can_quit(true, false, false, false) == false;
     assert mm_can_quit(false, true, false, false) == false;

@@ -28,7 +28,10 @@ struct DiskBloomApp: App {
                         orphans: orphanedData
                     )
                 }
-                .onAppear { monitorController.attach(app: model) }
+                .onAppear {
+                    monitorController.attach(app: model)
+                    monitorController.windowAppeared()
+                }
                 #if DEBUG
                 .onAppear { ScreenshotAutomation.apply(model: model, duplicateFinder: duplicateFinder) }
                 #endif

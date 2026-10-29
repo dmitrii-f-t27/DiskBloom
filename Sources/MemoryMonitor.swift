@@ -345,8 +345,10 @@ final class MemoryMonitorModel: ObservableObject {
         measuring = false
     }
 
-    /// Brings the DiskBloom window forward, opening one if it was closed.
+    /// Brings the DiskBloom window forward, opening one if it was closed. A window is about to open, so the
+    /// Dock icon and the menu bar come back before the app activates.
     func openMainWindow() {
+        DockIcon.update(windowOpen: true, appHidden: NSApp.isHidden)
         NSApp.activate()
         if let window = NSApp.windows.first(where: { $0.canBecomeMain && !($0 is NSPanel) }) {
             window.makeKeyAndOrderFront(nil)
@@ -382,8 +384,9 @@ enum MemoryRelief {
 }
 
 /// Monitor mode: once no DiskBloom window is open, only the menu bar monitor is in use, so the Disk Map's
-/// data is dropped and the freed memory returned to macOS. Specs/memory_rules.t27 decides when
-/// (`mm_window_open`, `mm_monitor_action`); this class reads the facts and acts on the answer.
+/// data is dropped and the freed memory returned to macOS. DiskBloom also leaves the Dock (`mm_dock_shown`,
+/// `DockIcon`). Specs/memory_rules.t27 decides when (`mm_window_open`, `mm_monitor_action`); this class reads
+/// the facts and acts on the answer.
 @MainActor
 final class MonitorModeController {
     private weak var app: AppModel?
@@ -407,17 +410,29 @@ final class MonitorModeController {
         #endif
     }
 
-    private func windowWillClose(_ closing: ObjectIdentifier?) {
-        // Runs after the close completes; the closing window is left out in case it still looks open.
-        Task { [weak self] in self?.check(excluding: closing) }
+    /// A DiskBloom window appeared (each WindowGroup window's onAppear): the Dock icon and the menu bar come back.
+    func windowAppeared() {
+        if DockIcon.update(windowOpen: true, appHidden: NSApp.isHidden) { NSApp.activate() }
     }
 
-    private func check(excluding closing: ObjectIdentifier?) {
+    private func windowWillClose(_ closing: ObjectIdentifier?) {
+        // Only a DiskBloom window closing can move the Dock icon; the panel, sheets and alerts cannot.
+        let closingCounts = NSApp.windows.contains {
+            ObjectIdentifier($0) == closing
+                && mm_window_open($0.canBecomeMain, $0 is NSPanel, $0.isVisible, $0.isMiniaturized)
+        }
+        // Runs after the close completes; the closing window is left out in case it still looks open.
+        Task { [weak self] in self?.check(excluding: closing, updatesDock: closingCounts) }
+    }
+
+    private func check(excluding closing: ObjectIdentifier?, updatesDock: Bool = false) {
         let open = NSApp.windows.contains {
             ObjectIdentifier($0) != closing
                 && mm_window_open($0.canBecomeMain, $0 is NSPanel, $0.isVisible, $0.isMiniaturized)
         }
-        apply(windowOpen: open, appHidden: NSApp.isHidden)
+        let hidden = NSApp.isHidden
+        if updatesDock { DockIcon.update(windowOpen: open, appHidden: hidden) }
+        apply(windowOpen: open, appHidden: hidden)
     }
 
     /// Acts on what `mm_monitor_action` says and returns its code.
@@ -438,6 +453,36 @@ final class MonitorModeController {
             }
         }
         return action
+    }
+}
+
+/// DiskBloom's Dock icon (Specs/memory_rules.t27, `mm_dock_shown`): shown while a DiskBloom window is open or
+/// the app is hidden, gone otherwise, so a DiskBloom with only its menu bar item leaves the Dock.
+@MainActor
+enum DockIcon {
+    /// Pure: reads nothing from the app, so the smoke test can check it.
+    static func policy(windowOpen: Bool, appHidden: Bool) -> NSApplication.ActivationPolicy {
+        mm_dock_shown(windowOpen, appHidden) ? .regular : .accessory
+    }
+
+    /// Sets the policy only when it differs from the current one. Returns true when it changed.
+    @discardableResult
+    static func update(windowOpen: Bool, appHidden: Bool) -> Bool {
+        let wanted = policy(windowOpen: windowOpen, appHidden: appHidden)
+        guard NSApp.activationPolicy() != wanted else { return false }
+        #if DEBUG
+        let wasActive = NSApp.isActive
+        #endif
+        let changed = NSApp.setActivationPolicy(wanted)
+        #if DEBUG
+        let name = wanted == .regular ? "regular" : "accessory"
+        let active = wasActive ? 1 : 0
+        let line = changed
+            ? "DISKBLOOM_AUTOMATION activation-policy=\(name) active=\(active)\n"
+            : "DISKBLOOM_AUTOMATION activation-policy-refused=\(name) active=\(active)\n"
+        FileHandle.standardError.write(Data(line.utf8))
+        #endif
+        return changed
     }
 }
 
