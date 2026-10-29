@@ -1,3 +1,4 @@
+import CoreServices
 import Foundation
 
 /// Runs the checks around a move to the Trash in the order Specs/move_rules.t27 gives, and reads
@@ -50,6 +51,78 @@ enum MoveSteps {
     static func stopsAfterFailure(_ kind: Int32) -> Bool {
         mv_stop_after_failure(UInt32(kind))
     }
+}
+
+/// An open handle on the reviewed item that follows it when it is renamed or moved, so the place it ends
+/// up in can be read afterwards. It never follows a symlink and does not keep the volume busy.
+/// Not Sendable: use it on one thread only.
+final class HeldItem {
+    private let fd: Int32
+
+    init?(url: URL) {
+        let descriptor = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else { return -1 }
+            return open(path, O_EVTONLY | O_NOFOLLOW | O_CLOEXEC)
+        }
+        guard descriptor >= 0 else { return nil }
+        fd = descriptor
+    }
+
+    deinit {
+        close(fd)
+    }
+
+    var identity: String? { FileIdentity.relocationIdentifier(descriptor: fd) }
+
+    var isDirectory: Bool? { FileIdentity.isDirectory(descriptor: fd) }
+
+    /// Where the item is now (F_GETPATH), as the spike verified.
+    var currentPath: String? {
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard fcntl(fd, F_GETPATH, &buffer) != -1 else { return nil }
+        return buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+    }
+}
+
+/// What DiskBloom asks of Finder when macOS refuses to move a reviewed application: the Automation
+/// permission check and one `core/delo` Apple Event. Both return a status (0 = OK) and block, so call
+/// them from a background queue only. Tests pass stand-ins; they never reference `live`.
+struct FinderTrashRequest: Sendable {
+    let permission: @Sendable () -> Int64
+    let send: @Sendable (URL) -> Int64
+
+    static let sendTimeout: TimeInterval = 600
+
+    /// The form the spike used: work/admin-removal-2026-10-29/spike-probe.log lines 14-32.
+    static let live = FinderTrashRequest(
+        permission: {
+            dispatchPrecondition(condition: .notOnQueue(.main))
+            let finder = NSAppleEventDescriptor(bundleIdentifier: "com.apple.finder")
+            return Int64(AEDeterminePermissionToAutomateTarget(finder.aeDesc, AEEventClass(0x636F7265) /* 'core' */, AEEventID(0x64656C6F) /* 'delo' */, true))
+        },
+        send: { url in
+            dispatchPrecondition(condition: .notOnQueue(.main))
+            let finder = NSAppleEventDescriptor(bundleIdentifier: "com.apple.finder")
+            let event = NSAppleEventDescriptor(
+                eventClass: 0x636F7265,
+                eventID: 0x64656C6F,
+                targetDescriptor: finder,
+                returnID: AEReturnID(kAutoGenerateReturnID),
+                transactionID: AETransactionID(kAnyTransactionID)
+            )
+            event.setParam(NSAppleEventDescriptor(fileURL: url), forKeyword: AEKeyword(0x2D2D2D2D) /* '----' */)
+            do {
+                let reply = try event.sendEvent(options: [.waitForReply, .canInteract], timeout: FinderTrashRequest.sendTimeout)
+                if let errn = reply.paramDescriptor(forKeyword: AEKeyword(0x6572726E) /* 'errn' */)?.int32Value, errn != 0 {
+                    return Int64(errn)
+                }
+                return 0
+            } catch {
+                let code = (error as NSError).code
+                return code == 0 ? -1 : Int64(code)
+            }
+        }
+    )
 }
 
 struct DiskMapMoveOutcome: Sendable {

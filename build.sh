@@ -1,7 +1,7 @@
 #!/bin/zsh
-# Build DiskBloom.app for direct download (ad-hoc signed, not sandboxed).
+# Build DiskBloom.app for direct download (ad-hoc signed with the hardened runtime, not sandboxed).
 #
-#   ./build.sh            -> ./DiskBloom.app (the GitHub release build)
+#   ./build.sh            -> ./DiskBloom.app (the GitHub release build; hardened runtime, only the Apple Events entitlement)
 #   ./build.sh --sandbox  -> ./.build/Sandbox/DiskBloom.app, ad-hoc signed with the
 #                            Mac App Store entitlements, for testing the sandboxed flow locally
 #
@@ -71,6 +71,9 @@ if /usr/bin/grep -q '\$(' "$APP_PATH/Contents/Info.plist"; then
   print -u2 "Unresolved build variable in Info.plist"
   exit 2
 fi
+if [[ "$MODE" == direct ]]; then
+  /usr/bin/plutil -insert NSAppleEventsUsageDescription -string "DiskBloom asks Finder to move an application you reviewed to the Trash when macOS needs your administrator password for it. DiskBloom never sees the password." "$APP_PATH/Contents/Info.plist"
+fi
 /usr/bin/plutil -lint "$APP_PATH/Contents/Info.plist" >/dev/null
 
 # The icon PNGs are shared with the Xcode asset catalog.
@@ -85,7 +88,7 @@ if [[ "$MODE" == "--sandbox" ]]; then
   /usr/bin/codesign --force --sign - --timestamp=none \
     --entitlements "$ROOT_DIR/Config/DiskBloom-AppStore.entitlements" "$APP_PATH"
 else
-  /usr/bin/codesign --force --sign - --timestamp=none "$APP_PATH"
+  /usr/bin/codesign --force --sign - --timestamp=none --options runtime --entitlements "$ROOT_DIR/Config/DiskBloom-Direct.entitlements" "$APP_PATH"
 fi
 /usr/bin/codesign --verify --strict --verbose=2 "$APP_PATH"
 

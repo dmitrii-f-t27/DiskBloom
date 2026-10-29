@@ -21,6 +21,9 @@
 #define MV_PHASE_QUEUE 0
 #define MV_PHASE_ITEM 1
 #define MV_PHASE_SIGNATURE 2
+#define MV_PHASE_ADMIN_QUEUE 3
+#define MV_PHASE_ADMIN_ITEM 4
+#define MV_PHASE_ADMIN_SEND 5
 #define MV_STEP_END 0
 #define MV_STEP_OVERLAP 1
 #define MV_STEP_OWNERS 2
@@ -35,12 +38,33 @@
 #define MV_STEP_SNAPSHOT 11
 #define MV_STEP_SIGNATURE_UNCHANGED 12
 #define MV_STEP_OWNERS_AND_VALIDATE_EACH 13
+#define MV_STEP_AUTOMATION 14
+#define MV_STEP_OPEN_HANDLE 15
+#define MV_STEP_HANDLE_UNCHANGED 16
+#define MV_STEP_TRASH_READY 17
 #define MV_NOTHING 0
 #define MV_MOVED 1
 #define MV_FAILED 2
 #define MV_FAILED_UNCONFIRMED 0
 #define MV_FAILED_THREW 1
 #define MV_FAILED_COORDINATOR 2
+#define MV_ERR_OTHER 0
+#define MV_ERR_PERMISSION 1
+#define MV_CAUSE_NONE 0
+#define MV_CAUSE_ROOT_OWNER 1
+#define MV_CAUSE_PARENT_LOCKED 2
+#define MV_OFFER_NONE 0
+#define MV_OFFER_FINDER_ADMIN 1
+#define MV_OFFER_REVEAL 2
+#define MV_REPLY_OK 0
+#define MV_REPLY_REFUSED 1
+#define MV_REPLY_NOT_ALLOWED 2
+#define MV_REPLY_TIMEOUT 3
+#define MV_REPLY_NO_FINDER 4
+#define MV_ADMIN_UNCERTAIN 0
+#define MV_ADMIN_MOVED 1
+#define MV_ADMIN_MOVED_PATH_REUSED 2
+#define MV_ADMIN_NOT_MOVED 3
 /* -------------------------------------------------------
    Function prototypes
    ------------------------------------------------------- */
@@ -49,5 +73,14 @@ bool mv_confirmed(uint32_t kind, bool moved_path_returned, bool identity_matches
 uint32_t mv_result(bool coordination_error, bool failure, bool moved);
 bool mv_uncertain(uint32_t kind, uint32_t how, bool source_still_exists);
 bool mv_stop_after_failure(uint32_t kind);
+uint32_t mv_error_kind(bool cocoa_domain, bool posix_domain, int64_t code, bool underlying_posix, int64_t underlying_code);
+uint32_t mv_admin_cause(bool owner_is_self, bool owner_is_root, bool parent_writable);
+bool mv_admin_root_ok(int64_t depth, bool intermediate_plain);
+uint32_t mv_admin_offer(uint32_t kind, bool required, uint32_t error_kind, bool source_still_exists, bool uncertain, bool application_eligible, bool in_application_root, bool protected_flags, uint32_t cause, bool sandboxed);
+bool mv_trash_ready(bool exists, bool is_directory, bool is_symlink, bool owned_by_self, bool same_volume);
+uint32_t mv_admin_reply(int64_t status);
+uint32_t mv_admin_verdict(bool moved_confirmed, bool in_user_trash, bool original_exists, bool original_identity_matches);
+bool mv_admin_retry_allowed(uint32_t verdict);
+bool mv_admin_continue_related(uint32_t verdict);
 /* Function bodies: see the full header. */
 #endif

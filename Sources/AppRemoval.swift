@@ -227,11 +227,284 @@ struct ValidatedCodeSignature: Sendable, Equatable {
     let applicationGroups: [String]
 }
 
+/// What the result sheet offers when the plain move of the application bundle was refused for lack of
+/// permission (Specs/move_rules.t27, mv_admin_offer).
+enum AppRemovalAdminOffer: Sendable, Equatable {
+    case unavailable
+    case finderWithPassword
+    case revealInFinder
+
+    init(t27 code: UInt32) {
+        switch code {
+        case UInt32(MV_OFFER_FINDER_ADMIN): self = .finderWithPassword
+        case UInt32(MV_OFFER_REVEAL): self = .revealInFinder
+        default: self = .unavailable
+        }
+    }
+}
+
+/// Why macOS refused: the application belongs to root, or its folder is protected.
+enum AppRemovalAdminCause: Sendable, Equatable {
+    case unrelated
+    case rootOwner
+    case parentLocked
+
+    init(t27 code: UInt32) {
+        switch code {
+        case UInt32(MV_CAUSE_ROOT_OWNER): self = .rootOwner
+        case UInt32(MV_CAUSE_PARENT_LOCKED): self = .parentLocked
+        default: self = .unrelated
+        }
+    }
+}
+
 struct AppRemovalOutcome: Sendable {
     let movedPaths: [String]
     let uncertainPaths: [String]
     let failure: String?
     let unattemptedPaths: [String]
+    var adminOffer: AppRemovalAdminOffer = .unavailable
+    var adminCause: AppRemovalAdminCause = .unrelated
+}
+
+/// The facts about this Mac that decide whether an administrator move is offered. Reading them changes
+/// nothing, so `live` is a safe default; tests pass their own.
+struct AdminMoveEnvironment: Sendable {
+    var applicationRoots: [URL]
+    var sandboxed: Bool
+    var owner: @Sendable (URL) -> uid_t?
+    var writable: @Sendable (URL) -> Bool
+
+    static var live: AdminMoveEnvironment {
+        AdminMoveEnvironment(
+            applicationRoots: [
+                URL(fileURLWithPath: "/Applications", isDirectory: true),
+                UserHome.url.appendingPathComponent("Applications", isDirectory: true)
+            ],
+            sandboxed: AppSandbox.isActive,
+            owner: { url in
+                var info = stat()
+                let result = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+                    guard let path else { return -1 }
+                    return lstat(path, &info)
+                }
+                return result == 0 ? info.st_uid : nil
+            },
+            writable: { url in
+                url.withUnsafeFileSystemRepresentation { path -> Bool in
+                    guard let path else { return false }
+                    return access(path, W_OK) == 0
+                }
+            }
+        )
+    }
+}
+
+/// Reads the facts for Specs/move_rules.t27's administrator-move rules (mv_admin_*, mv_trash_ready).
+enum AdminMoveFacts {
+    static func errorKind(_ error: Error) -> UInt32 {
+        let nsError = error as NSError
+        let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+        return mv_error_kind(
+            nsError.domain == NSCocoaErrorDomain,
+            nsError.domain == NSPOSIXErrorDomain,
+            Int64(nsError.code),
+            underlying?.domain == NSPOSIXErrorDomain,
+            Int64(underlying?.code ?? 0)
+        )
+    }
+
+    /// The bundle carries a flag that stops a move or a delete. A failed lstat counts as protected.
+    static func protectedFlags(_ url: URL) -> Bool {
+        var info = stat()
+        let result = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else { return -1 }
+            return lstat(path, &info)
+        }
+        guard result == 0 else { return true }
+        let mask = UInt32(UF_IMMUTABLE) | UInt32(UF_APPEND) | UInt32(SF_IMMUTABLE)
+            | UInt32(SF_APPEND) | UInt32(SF_RESTRICTED) | UInt32(SF_NOUNLINK)
+        return info.st_flags & mask != 0
+    }
+
+    /// The bundle sits directly in an application root, or in one plain folder inside it.
+    static func inApplicationRoot(_ url: URL, roots: [URL]) -> Bool {
+        let parent = url.standardizedFileURL.deletingLastPathComponent()
+        let grandparent = parent.deletingLastPathComponent()
+        let rootPaths = roots.map { $0.standardizedFileURL.path }
+        var depth: Int64 = 0
+        if rootPaths.contains(where: { T27Text.same(parent.path, $0) }) {
+            depth = 1
+        } else if rootPaths.contains(where: { T27Text.same(grandparent.path, $0) }) {
+            depth = 2
+        }
+        var intermediatePlain = false
+        if depth == 2 {
+            var info = stat()
+            let result = parent.withUnsafeFileSystemRepresentation { path -> Int32 in
+                guard let path else { return -1 }
+                return lstat(path, &info)
+            }
+            let isFolder = result == 0 && (info.st_mode & S_IFMT) == S_IFDIR
+            let isPackage = try? parent.resourceValues(forKeys: [.isPackageKey]).isPackage
+            intermediatePlain = isFolder && isPackage == false && !T27Text.hasAppExtension(parent.path)
+        }
+        return mv_admin_root_ok(depth, intermediatePlain)
+    }
+
+    static func cause(_ url: URL, environment: AdminMoveEnvironment) -> UInt32 {
+        let uid = environment.owner(url)
+        return mv_admin_cause(
+            uid == getuid(),
+            uid == 0,
+            environment.writable(url.deletingLastPathComponent())
+        )
+    }
+
+    /// What to offer for the application bundle at `url`, and why macOS needs more than the user's rights.
+    /// The cause is kept only when something is offered.
+    static func offer(
+        errorKind: UInt32,
+        required: Bool,
+        sourceStillExists: Bool,
+        uncertain: Bool,
+        plan: AppRemovalPlan,
+        url: URL,
+        environment: AdminMoveEnvironment
+    ) -> (AppRemovalAdminOffer, AppRemovalAdminCause) {
+        let causeCode = Self.cause(url, environment: environment)
+        let code = mv_admin_offer(
+            UInt32(MV_UNINSTALLER),
+            required,
+            errorKind,
+            sourceStillExists,
+            uncertain,
+            AppRemovalPolicy.applicationEligibilityReason(for: plan.application) == nil,
+            inApplicationRoot(url, roots: environment.applicationRoots),
+            protectedFlags(url),
+            causeCode,
+            environment.sandboxed
+        )
+        let offer = AppRemovalAdminOffer(t27: code)
+        return (offer, offer == .unavailable ? .unrelated : AppRemovalAdminCause(t27: causeCode))
+    }
+
+    /// The Trash is a real folder of the user on the application's volume.
+    static func trashReady(_ trash: URL, bundle: URL, environment: AdminMoveEnvironment) -> Bool {
+        var info = stat()
+        let result = trash.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else { return -1 }
+            return lstat(path, &info)
+        }
+        let exists = result == 0
+        let kind = info.st_mode & S_IFMT
+        let trashDevice = FileIdentity.deviceID(for: trash)
+        let bundleDevice = FileIdentity.deviceID(for: bundle)
+        return mv_trash_ready(
+            exists,
+            exists && kind == S_IFDIR,
+            exists && kind == S_IFLNK,
+            environment.owner(trash) == getuid(),
+            trashDevice != nil && trashDevice == bundleDevice
+        )
+    }
+}
+
+/// Every text of the administrator move. None promises Put Back or says what Cancel returns.
+enum AdminMoveText {
+    // The spike owner saw "password/Touch ID", but another Mac may not offer Touch ID.
+    static let credential = "your administrator password (or Touch ID, if this Mac offers it)"
+
+    static let sourceGone = "The application is no longer at its path. It may already be in the Trash; check the Trash and choose the application again."
+    static let notAvailable = "Administrator move is not available for this item."
+    static let finderNotRunning = "Finder is not running. Open Finder and try again."
+    static let pathReused = "The application went to the Trash, but a new item now exists at the same path. Related items were not moved; choose the application again."
+    static let uncertain = "The reviewed application is no longer at its path and DiskBloom could not find it in your Trash. Something changed while macOS waited for the password. Automatic retry is blocked; check the Trash."
+    static let uncertainAfterTimeout = " Finder did not answer within 10 minutes; if its password dialog is still open, answer or cancel it, then use Re-check Original Paths."
+    static let missingSnapshot = "The plan is missing the required application snapshot."
+
+    static let waiting = "Waiting for Finder. If macOS asks whether DiskBloom may control Finder, answer it. If Finder asks for \(credential), confirm it there, or click Cancel to stop the request; DiskBloom then checks where the application is. If Finder says the item will be deleted immediately, click Cancel: DiskBloom only moves items to the Trash."
+
+    static func trashNotReady(_ trashPath: String) -> String {
+        "Your Trash folder (\(trashPath)) is missing, is not a normal folder that belongs to you, or is on another volume. Nothing was sent to Finder."
+    }
+
+    static func changedBeforeSend(_ path: String) -> String {
+        "The item at \(path) changed after the last check. Nothing was sent to Finder."
+    }
+
+    static func handle(_ path: String) -> String {
+        "Could not hold the reviewed item to follow it: \(path)"
+    }
+
+    static func causeSentence(_ cause: AppRemovalAdminCause) -> String {
+        switch cause {
+        case .rootOwner:
+            "macOS refused the move because this application belongs to the system administrator account (root). Apps from the App Store and from installer packages are usually installed this way."
+        case .parentLocked:
+            "macOS refused the move because the folder that contains this application is protected."
+        case .unrelated:
+            "macOS refused the move."
+        }
+    }
+
+    /// The paragraphs under ADMINISTRATOR PASSWORD NEEDED, in order (without the footer).
+    static func passwordParagraphs(cause: AppRemovalAdminCause, relatedCount: Int) -> [String] {
+        var paragraphs = [
+            "\(causeSentence(cause)) DiskBloom can ask Finder to move the same reviewed application to the Trash. Finder then asks macOS for \(credential). DiskBloom does not see or store the password and runs nothing as administrator.",
+            "The first time, macOS asks whether DiskBloom may control Finder. If you click Allow, this permission stays until you turn it off in System Settings › Privacy & Security › Automation. DiskBloom sends Finder only this request and checks the application again right before it."
+        ]
+        if relatedCount > 0 {
+            paragraphs.append("After the application, the \(relatedCount) related \(Plural.objects(relatedCount)) you reviewed are moved as usual.")
+        }
+        paragraphs.append("Apps installed with an installer package can leave system-wide helpers that DiskBloom does not remove. Use the developer's uninstaller if there is one; you can turn leftover background items off in System Settings › General › Login Items & Extensions.")
+        return paragraphs
+    }
+
+    /// Said only for an application that belongs to root. When the user owns the application and only
+    /// its folder is protected, the application stays the user's in the Trash.
+    static func passwordFooter(cause: AppRemovalAdminCause) -> String? {
+        switch cause {
+        case .rootOwner:
+            "The application stays owned by the administrator account in the Trash, so emptying the Trash may ask for the password again."
+        case .parentLocked, .unrelated:
+            nil
+        }
+    }
+
+    static func revealInFinderParagraph(cause: AppRemovalAdminCause) -> String {
+        "\(causeSentence(cause)) The App Store edition of DiskBloom cannot ask for administrator rights. Click Reveal in Finder, press Command-Delete in Finder and confirm with \(credential). Related data stays in place; after the application is in the Trash, Possible Leftovers can show what remains."
+    }
+
+    /// The Automation permission step failed (or the send came back with the same class of status).
+    static func automation(status: Int64) -> String {
+        switch mv_admin_reply(status) {
+        case UInt32(MV_REPLY_NOT_ALLOWED):
+            "macOS did not allow DiskBloom to control Finder. Turn on Finder for DiskBloom in System Settings › Privacy & Security › Automation and try again, or use Reveal in Finder. If Finder is already on there, run `tccutil reset AppleEvents io.github.dmitrii-f-t27.DiskBloom` in Terminal and try again."
+        case UInt32(MV_REPLY_NO_FINDER):
+            finderNotRunning
+        default:
+            "macOS did not confirm that DiskBloom may ask Finder (code \(status)). Nothing was sent to Finder."
+        }
+    }
+
+    /// The original is still in place after the request. The reply only chooses the words.
+    static func notMoved(path: String, reply: UInt32, status: Int64) -> String {
+        let body: String
+        switch reply {
+        case UInt32(MV_REPLY_OK):
+            body = "Finder answered, but the application is still in place. You can try again."
+        case UInt32(MV_REPLY_TIMEOUT):
+            body = "Finder did not answer within 10 minutes. The application is still in place. If a Finder password dialog is still open, cancel it before you try again."
+        case UInt32(MV_REPLY_NOT_ALLOWED):
+            body = automation(status: status)
+        case UInt32(MV_REPLY_NO_FINDER):
+            body = finderNotRunning
+        default:
+            body = "Finder did not move the application: the request was cancelled or refused by Finder (code \(status)). The application is still in place. You can try again."
+        }
+        return "\(path): \(body)"
+    }
 }
 
 private struct AppCandidateSpec: Sendable {
@@ -846,11 +1119,44 @@ enum AppRemovalPolicy {
 }
 
 enum AppRemovalCoordinator {
+    private static func queueStep(
+        _ step: Int32,
+        ordered: [AppRemovalItem],
+        plan: AppRemovalPlan,
+        applicationAlreadyMoved: Bool,
+        homeURL: URL
+    ) -> String? {
+        switch step {
+        case MV_STEP_OVERLAP:
+            return AppRemovalPolicy.overlappingSelectionReason(ordered)
+        case MV_STEP_RUNNING:
+            return AppRunningDetector.reason(for: plan.application)
+        case MV_STEP_SIGNATURE:
+            return AppRemovalPolicy.validateTrustedSignature(for: plan)
+        case MV_STEP_CONTINUATION:
+            return AppRemovalPolicy.continuationEligibilityReason(for: plan)
+        case MV_STEP_VALIDATE_ALL:
+            for item in ordered {
+                if let reason = AppRemovalPolicy.validate(
+                    item,
+                    application: plan.application,
+                    homeURL: homeURL,
+                    requireApplicationPresence: !applicationAlreadyMoved
+                ) { return reason }
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+
     static func moveToTrash(
         items: [AppRemovalItem],
         plan: AppRemovalPlan,
         applicationAlreadyMoved: Bool,
-        mover: MoveSteps.Mover = MoveSteps.systemTrashMover
+        mover: MoveSteps.Mover = MoveSteps.systemTrashMover,
+        homeURL: URL = UserHome.url,
+        adminEnvironment: AdminMoveEnvironment = .live
     ) -> AppRemovalOutcome {
         let ordered = items.sorted {
             switch Int32(un_queue_order($0.isRequired, $1.isRequired)) {
@@ -860,27 +1166,7 @@ enum AppRemovalCoordinator {
             }
         }
         let queueFailure = MoveSteps.run(MV_UNINSTALLER, MV_PHASE_QUEUE, appMoved: applicationAlreadyMoved) { step, _ in
-            switch step {
-            case MV_STEP_OVERLAP:
-                return AppRemovalPolicy.overlappingSelectionReason(ordered)
-            case MV_STEP_RUNNING:
-                return AppRunningDetector.reason(for: plan.application)
-            case MV_STEP_SIGNATURE:
-                return AppRemovalPolicy.validateTrustedSignature(for: plan)
-            case MV_STEP_CONTINUATION:
-                return AppRemovalPolicy.continuationEligibilityReason(for: plan)
-            case MV_STEP_VALIDATE_ALL:
-                for item in ordered {
-                    if let reason = AppRemovalPolicy.validate(
-                        item,
-                        application: plan.application,
-                        requireApplicationPresence: !applicationAlreadyMoved
-                    ) { return reason }
-                }
-                return nil
-            default:
-                return nil
-            }
+            queueStep(step, ordered: ordered, plan: plan, applicationAlreadyMoved: applicationAlreadyMoved, homeURL: homeURL)
         }
         if let queueFailure {
             return AppRemovalOutcome(movedPaths: [], uncertainPaths: [], failure: queueFailure, unattemptedPaths: ordered.map { $0.url.path })
@@ -893,6 +1179,7 @@ enum AppRemovalCoordinator {
             let coordinator = NSFileCoordinator(filePresenter: nil)
             var coordinationError: NSError?
             var localFailure: String?
+            var adminFacts: (AppRemovalAdminOffer, AppRemovalAdminCause) = (.unavailable, .unrelated)
             var didMove = false
             var moveResultIsUncertain = false
             let applicationMovedBefore = appHasMoved
@@ -908,6 +1195,7 @@ enum AppRemovalCoordinator {
                         return AppRemovalPolicy.validate(
                             item,
                             application: plan.application,
+                            homeURL: homeURL,
                             candidateURL: coordinatedURL,
                             requireApplicationPresence: !applicationMovedBefore
                         )
@@ -937,7 +1225,19 @@ enum AppRemovalCoordinator {
                         ? ""
                         : " The original path disappeared, so the move result is unconfirmed and automatic retry is blocked."
                     localFailure = "\(url.path): \(error.localizedDescription)\(uncertainty)"
+                    adminFacts = AdminMoveFacts.offer(
+                        errorKind: AdminMoveFacts.errorKind(error),
+                        required: item.isRequired,
+                        sourceStillExists: sourceStillExists,
+                        uncertain: moveResultIsUncertain,
+                        plan: plan,
+                        url: coordinatedURL,
+                        environment: adminEnvironment
+                    )
                 }
+            }
+            if coordinationError != nil {
+                adminFacts = (.unavailable, .unrelated)
             }
             if coordinationError != nil, MoveSteps.uncertain(MV_UNINSTALLER, MV_FAILED_COORDINATOR, sourcePath: url.path) {
                 moveResultIsUncertain = true
@@ -950,7 +1250,9 @@ enum AppRemovalCoordinator {
                         movedPaths: moved,
                         uncertainPaths: moveResultIsUncertain ? [url.path] : [],
                         failure: failure,
-                        unattemptedPaths: ordered.dropFirst(index + 1).map { $0.url.path }
+                        unattemptedPaths: ordered.dropFirst(index + 1).map { $0.url.path },
+                        adminOffer: adminFacts.0,
+                        adminCause: adminFacts.1
                     )
                 }
             case MV_MOVED:
@@ -961,6 +1263,256 @@ enum AppRemovalCoordinator {
             }
         }
         return AppRemovalOutcome(movedPaths: moved, uncertainPaths: [], failure: nil, unattemptedPaths: [])
+    }
+
+    /// Finishes a move that macOS refused for lack of permission: asks Finder (which asks macOS for the
+    /// administrator password) to move the application bundle, then reads from the file system where it
+    /// went. Finder's reply code only chooses the message. Runs on the caller's thread and blocks until
+    /// Finder answers, so call it from a background queue. The order of checks is Specs/move_rules.t27.
+    /// `openHandle` opens the descriptor that follows the item; only tests pass their own.
+    static func moveApplicationWithFinder(
+        items: [AppRemovalItem],
+        plan: AppRemovalPlan,
+        finder: FinderTrashRequest,
+        mover: @escaping MoveSteps.Mover,
+        trashDirectory: URL,
+        homeURL: URL = UserHome.url,
+        adminEnvironment: AdminMoveEnvironment = .live,
+        openHandle: (URL) -> HeldItem? = { HeldItem(url: $0) }
+    ) -> AppRemovalOutcome {
+        let ordered = items.sorted {
+            switch Int32(un_queue_order($0.isRequired, $1.isRequired)) {
+            case UN_ORDER_FIRST: return true
+            case UN_ORDER_SECOND: return false
+            default: return T27Text.less($0.url.path, $1.url.path)
+            }
+        }
+        let allPaths = ordered.map { $0.url.path }
+        guard let bundle = ordered.first(where: \.isRequired) else {
+            return AppRemovalOutcome(movedPaths: [], uncertainPaths: [], failure: AdminMoveText.missingSnapshot, unattemptedPaths: allPaths)
+        }
+        let related = ordered.filter { $0.id != bundle.id }
+        let path = bundle.url.path
+
+        // Gate: the same rules as the offer, read again now.
+        guard FileIdentity.relocationIdentifier(for: bundle.url) != nil else {
+            return AppRemovalOutcome(movedPaths: [], uncertainPaths: [], failure: "\(path): \(AdminMoveText.sourceGone)", unattemptedPaths: allPaths)
+        }
+        let gate = AdminMoveFacts.offer(
+            errorKind: UInt32(MV_ERR_PERMISSION),
+            required: true,
+            sourceStillExists: true,
+            uncertain: false,
+            plan: plan,
+            url: bundle.url,
+            environment: adminEnvironment
+        )
+        guard gate.0 == .finderWithPassword else {
+            return AppRemovalOutcome(
+                movedPaths: [], uncertainPaths: [],
+                failure: "\(path): \(AdminMoveText.notAvailable)",
+                unattemptedPaths: allPaths,
+                adminOffer: gate.0 == .revealInFinder ? .revealInFinder : .unavailable,
+                adminCause: gate.1
+            )
+        }
+        let cause = gate.1
+        func stopped(_ failure: String) -> AppRemovalOutcome {
+            AppRemovalOutcome(
+                movedPaths: [], uncertainPaths: [], failure: failure, unattemptedPaths: allPaths,
+                adminOffer: .finderWithPassword, adminCause: cause
+            )
+        }
+
+        // ADMIN_QUEUE: the whole reviewed selection, the Trash, then the Automation permission.
+        let queueFailure = MoveSteps.run(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, required: true) { step, _ in
+            switch step {
+            case MV_STEP_OVERLAP:
+                return AppRemovalPolicy.overlappingSelectionReason(ordered)
+            case MV_STEP_RUNNING:
+                return AppRunningDetector.reason(for: plan.application)
+            case MV_STEP_SIGNATURE:
+                return AppRemovalPolicy.validateTrustedSignature(for: plan)
+            case MV_STEP_VALIDATE_ALL:
+                for item in ordered {
+                    if let reason = AppRemovalPolicy.validate(
+                        item,
+                        application: plan.application,
+                        homeURL: homeURL,
+                        requireApplicationPresence: true
+                    ) { return reason }
+                }
+                return nil
+            case MV_STEP_TRASH_READY:
+                return AdminMoveFacts.trashReady(trashDirectory, bundle: bundle.url, environment: adminEnvironment)
+                    ? nil
+                    : "\(path): \(AdminMoveText.trashNotReady(trashDirectory.path))"
+            case MV_STEP_AUTOMATION:
+                let status = finder.permission()
+                return mv_admin_reply(status) == UInt32(MV_REPLY_OK)
+                    ? nil
+                    : "\(path): \(AdminMoveText.automation(status: status))"
+            default:
+                return nil
+            }
+        }
+        if let queueFailure { return stopped(queueFailure) }
+
+        // ADMIN_ITEM: inside file coordination, for the bundle. The handle and the URL are made here;
+        // coordination is released before Finder is asked, because Finder may coordinate on the same URL.
+        var held: HeldItem?
+        var targetURL: URL?
+        var capturedIdentity: String?
+        var itemFailure: String?
+        var coordinationError: NSError?
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        coordinator.coordinate(writingItemAt: bundle.url, options: .forMoving, error: &coordinationError) { coordinatedURL in
+            itemFailure = MoveSteps.run(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, required: true) { step, _ in
+                switch step {
+                case MV_STEP_RUNNING:
+                    return AppRunningDetector.reason(for: plan.application)
+                case MV_STEP_SIGNATURE:
+                    return AppRemovalPolicy.validateTrustedSignature(for: plan, candidateURL: coordinatedURL)
+                case MV_STEP_VALIDATE:
+                    return AppRemovalPolicy.validate(
+                        bundle,
+                        application: plan.application,
+                        homeURL: homeURL,
+                        candidateURL: coordinatedURL,
+                        requireApplicationPresence: true
+                    )
+                case MV_STEP_CAPTURE_IDENTITY:
+                    capturedIdentity = FileIdentity.relocationIdentifier(for: coordinatedURL)
+                    return capturedIdentity == nil ? "Could not capture the identity before moving: \(path)" : nil
+                case MV_STEP_OPEN_HANDLE:
+                    // The reference URL is exactly the spike's variant R (spike-probe.log line 21).
+                    guard let expectedIdentity = capturedIdentity,
+                          let opened = openHandle(coordinatedURL),
+                          let openedIdentity = opened.identity,
+                          T27Text.same(openedIdentity, expectedIdentity),
+                          let reference = (coordinatedURL as NSURL).fileReferenceURL() else {
+                        return AdminMoveText.handle(path)
+                    }
+                    held = opened
+                    targetURL = reference
+                    return nil
+                default:
+                    return nil
+                }
+            }
+        }
+        if let coordinationError {
+            let uncertain = MoveSteps.uncertain(MV_UNINSTALLER, MV_FAILED_COORDINATOR, sourcePath: path)
+            return AppRemovalOutcome(
+                movedPaths: [],
+                uncertainPaths: uncertain ? [path] : [],
+                failure: "\(path): \(coordinationError.localizedDescription)",
+                unattemptedPaths: allPaths,
+                adminOffer: uncertain ? .unavailable : .finderWithPassword,
+                adminCause: cause
+            )
+        }
+        if let itemFailure { return stopped(itemFailure) }
+        guard let target = targetURL, let expectedIdentity = capturedIdentity, held != nil else {
+            return stopped(AdminMoveText.handle(path))
+        }
+
+        // ADMIN_SEND: after coordination, immediately before Finder is asked.
+        let sendFailure = MoveSteps.run(MV_UNINSTALLER, MV_PHASE_ADMIN_SEND, required: true) { step, _ in
+            switch step {
+            case MV_STEP_RUNNING:
+                return AppRunningDetector.reason(for: plan.application)
+            case MV_STEP_TRASH_READY:
+                return AdminMoveFacts.trashReady(trashDirectory, bundle: bundle.url, environment: adminEnvironment)
+                    ? nil
+                    : "\(path): \(AdminMoveText.trashNotReady(trashDirectory.path))"
+            case MV_STEP_HANDLE_UNCHANGED:
+                func matches(_ identity: String?) -> Bool {
+                    identity.map { T27Text.same($0, expectedIdentity) } ?? false
+                }
+                let unchanged = matches(FileIdentity.relocationIdentifier(for: bundle.url))
+                    && matches(held?.identity)
+                    && !AppRemovalPathSafety.pathHasSymlinkedComponent(bundle.url)
+                    && matches((target as NSURL).filePathURL.flatMap { FileIdentity.relocationIdentifier(for: $0) })
+                return unchanged ? nil : AdminMoveText.changedBeforeSend(path)
+            default:
+                return nil
+            }
+        }
+        if let sendFailure { return stopped(sendFailure) }
+
+        // One event, for the bundle only.
+        let status = finder.send(target)
+        let reply = mv_admin_reply(status)
+
+        // The outcome comes from the file system, not from the reply.
+        let currentPath = held?.currentPath
+        let heldIsDirectory = held?.isDirectory
+        let movedConfirmed = mv_confirmed(
+            UInt32(MV_UNINSTALLER),
+            currentPath != nil,
+            (held?.identity).map { T27Text.same($0, expectedIdentity) } ?? false,
+            heldIsDirectory != nil,
+            heldIsDirectory == true,
+            bundle.node.isDirectory
+        )
+        var inTrash = false
+        if let currentPath,
+           let trashID = FileIdentity.volumeAndInode(for: trashDirectory),
+           let parentID = FileIdentity.volumeAndInode(for: URL(fileURLWithPath: currentPath).deletingLastPathComponent()) {
+            inTrash = parentID == trashID
+        }
+        let originalNow = FileIdentity.relocationIdentifier(for: bundle.url)
+        let originalMatches = originalNow.map { T27Text.same($0, expectedIdentity) } ?? false
+        let verdict = mv_admin_verdict(movedConfirmed, inTrash, originalNow != nil, originalMatches)
+        held = nil
+
+        if mv_admin_continue_related(verdict) {
+            guard !related.isEmpty else {
+                return AppRemovalOutcome(movedPaths: [path], uncertainPaths: [], failure: nil, unattemptedPaths: [], adminOffer: .unavailable, adminCause: cause)
+            }
+            let sub = moveToTrash(
+                items: related,
+                plan: plan,
+                applicationAlreadyMoved: true,
+                mover: mover,
+                homeURL: homeURL,
+                adminEnvironment: adminEnvironment
+            )
+            return AppRemovalOutcome(
+                movedPaths: [path] + sub.movedPaths,
+                uncertainPaths: sub.uncertainPaths,
+                failure: sub.failure,
+                unattemptedPaths: sub.unattemptedPaths,
+                adminOffer: .unavailable,
+                adminCause: cause
+            )
+        }
+        switch verdict {
+        case UInt32(MV_ADMIN_MOVED_PATH_REUSED):
+            return AppRemovalOutcome(
+                movedPaths: [path], uncertainPaths: [],
+                failure: "\(path): \(AdminMoveText.pathReused)",
+                unattemptedPaths: related.map { $0.url.path },
+                adminOffer: .unavailable, adminCause: cause
+            )
+        case UInt32(MV_ADMIN_NOT_MOVED):
+            return AppRemovalOutcome(
+                movedPaths: [], uncertainPaths: [],
+                failure: AdminMoveText.notMoved(path: path, reply: reply, status: status),
+                unattemptedPaths: allPaths,
+                adminOffer: mv_admin_retry_allowed(verdict) ? .finderWithPassword : .unavailable,
+                adminCause: cause
+            )
+        default:
+            return AppRemovalOutcome(
+                movedPaths: [], uncertainPaths: [path],
+                failure: "\(path): \(AdminMoveText.uncertain)"
+                    + (reply == UInt32(MV_REPLY_TIMEOUT) ? AdminMoveText.uncertainAfterTimeout : ""),
+                unattemptedPaths: related.map { $0.url.path },
+                adminOffer: .unavailable, adminCause: cause
+            )
+        }
     }
 }
 
@@ -976,6 +1528,7 @@ final class AppUninstallerModel: ObservableObject {
     @Published private(set) var isInspecting = false
     @Published private(set) var isReviewing = false
     @Published private(set) var isMovingToTrash = false
+    @Published private(set) var isWaitingForAdministrator = false
     @Published private(set) var applicationWasMoved = false
     @Published private(set) var lastOutcome: AppRemovalOutcome?
     @Published private(set) var lastApplicationName: String?
@@ -989,6 +1542,8 @@ final class AppUninstallerModel: ObservableObject {
     private var reviewTask: Task<Void, Never>?
     private var inspectionGeneration = UUID()
     private var reviewGeneration = UUID()
+    /// The reviewed selection of the move that macOS refused; the administrator move uses exactly this.
+    private var adminCandidates: [AppRemovalItem]?
 
     var filteredApplications: [InstalledApplication] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1016,6 +1571,22 @@ final class AppUninstallerModel: ObservableObject {
 
     var hasUncertainOutcome: Bool {
         md_uncertain_open(!(lastOutcome?.uncertainPaths.isEmpty ?? true), false)
+    }
+
+    var canMoveWithAdministrator: Bool {
+        md_uninstall_can_admin_move(
+            plan != nil,
+            isMovingToTrash,
+            isReviewing,
+            hasUncertainOutcome,
+            applicationWasMoved,
+            lastOutcome?.adminOffer == .finderWithPassword && adminCandidates != nil
+        )
+    }
+
+    /// How many related items follow the application in the administrator move.
+    var adminRelatedCount: Int {
+        adminCandidates?.filter { !$0.isRequired }.count ?? 0
     }
 
     func loadApplicationsIfNeeded() {
@@ -1098,6 +1669,7 @@ final class AppUninstallerModel: ObservableObject {
         confirmedMovedItemIDs = []
         applicationWasMoved = false
         lastOutcome = nil
+        adminCandidates = nil
         lastApplicationName = nil
         showingOutcomeReport = false
         isInspecting = true
@@ -1156,6 +1728,7 @@ final class AppUninstallerModel: ObservableObject {
     func toggle(_ item: AppRemovalItem) {
         guard md_uninstall_can_toggle(isMovingToTrash, item.isRequired, item.isSelectable, confirmedMovedItemIDs.contains(item.id)) else { return }
         invalidateReview()
+        adminCandidates = nil
         if selectedItemIDs.contains(item.id) {
             selectedItemIDs.remove(item.id)
         } else {
@@ -1283,33 +1856,84 @@ final class AppUninstallerModel: ObservableObject {
                     applicationAlreadyMoved: appAlreadyMoved
                 )
             }.value
-            isMovingToTrash = false
-            lastOutcome = outcome
-            lastApplicationName = plan.application.name
-            let movedSet = Set(outcome.movedPaths)
-            let movedIDs = plan.items.filter { movedSet.contains($0.url.path) }.map(\.id)
-            selectedItemIDs.subtract(movedIDs)
-            confirmedMovedItemIDs.formUnion(movedIDs)
-            if appAlreadyMoved || outcome.movedPaths.contains(plan.application.url.path) {
-                applicationWasMoved = true
-            }
-            if outcome.failure == nil {
-                let moved = outcome.movedPaths.joined(separator: "\n")
-                notice = AppNotice(
-                    title: "Selected items moved to Trash",
-                    message: "Moved: \(outcome.movedPaths.count). Space is freed only after the Trash is emptied.\n\n\(moved)"
-                )
-                selectedApplication = nil
-                self.plan = nil
-                selectedItemIDs = []
-                confirmedMovedItemIDs = []
-                applicationWasMoved = false
-            } else {
-                notice = nil
-                showingOutcomeReport = true
-            }
-            refreshApplications()
+            apply(outcome, plan: plan, appAlreadyMoved: appAlreadyMoved, candidates: candidates)
         }
+    }
+
+    /// Takes over the result of a move: what moved, what stopped, and whether the administrator move is offered.
+    private func apply(_ outcome: AppRemovalOutcome, plan: AppRemovalPlan, appAlreadyMoved: Bool, candidates: [AppRemovalItem]) {
+        isMovingToTrash = false
+        lastOutcome = outcome
+        adminCandidates = outcome.adminOffer == .finderWithPassword ? candidates : nil
+        lastApplicationName = plan.application.name
+        let movedSet = Set(outcome.movedPaths)
+        let movedIDs = plan.items.filter { movedSet.contains($0.url.path) }.map(\.id)
+        selectedItemIDs.subtract(movedIDs)
+        confirmedMovedItemIDs.formUnion(movedIDs)
+        if appAlreadyMoved || outcome.movedPaths.contains(plan.application.url.path) {
+            applicationWasMoved = true
+        }
+        if outcome.failure == nil {
+            let moved = outcome.movedPaths.joined(separator: "\n")
+            notice = AppNotice(
+                title: "Selected items moved to Trash",
+                message: "Moved: \(outcome.movedPaths.count). Space is freed only after the Trash is emptied.\n\n\(moved)"
+            )
+            showingOutcomeReport = false
+            adminCandidates = nil
+            selectedApplication = nil
+            self.plan = nil
+            selectedItemIDs = []
+            confirmedMovedItemIDs = []
+            applicationWasMoved = false
+        } else {
+            notice = nil
+            showingOutcomeReport = true
+        }
+        refreshApplications()
+    }
+
+    /// Asks Finder to finish the move that macOS refused for lack of permission. Finder shows its own
+    /// administrator dialog; DiskBloom never sees the password.
+    func moveApplicationWithAdministrator() {
+        guard canMoveWithAdministrator, let plan, let candidates = adminCandidates else { return }
+        // Close the result sheet first, like moveReviewedItemsToTrash closes the review sheet: an alert
+        // set while the sheet is open may not show. The reviewed selection and the offer stay, and
+        // "Open Full Report" brings the sheet back for a retry after the application is quit.
+        showingOutcomeReport = false
+        if !applicationWasMoved, let running = runningReason() {
+            notice = AppNotice(title: "Application is running", message: running)
+            return
+        }
+        isMovingToTrash = true
+        isWaitingForAdministrator = true
+        Task {
+            // The Automation prompt and Finder's dialog may block for minutes: keep that wait off the
+            // main thread and off the Swift cooperative pool.
+            let outcome: AppRemovalOutcome = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    continuation.resume(returning: AppRemovalCoordinator.moveApplicationWithFinder(
+                        items: candidates,
+                        plan: plan,
+                        finder: .live,
+                        mover: MoveSteps.systemTrashMover,
+                        trashDirectory: UserHome.url.appendingPathComponent(".Trash", isDirectory: true)
+                    ))
+                }
+            }
+            isWaitingForAdministrator = false
+            apply(outcome, plan: plan, appAlreadyMoved: false, candidates: candidates)
+        }
+    }
+
+    func openAutomationSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func revealApplicationForManualMove() {
+        guard let item = plan?.items.first(where: \.isRequired) else { return }
+        reveal(item)
     }
 
     func recheckUncertainPaths() {
@@ -1344,6 +1968,7 @@ final class AppUninstallerModel: ObservableObject {
             isReviewing = false
             if md_review_passes(Int64(failures.count)) {
                 lastOutcome = nil
+                adminCandidates = nil
                 lastApplicationName = nil
                 showingOutcomeReport = false
                 notice = AppNotice(
@@ -1367,6 +1992,7 @@ final class AppUninstallerModel: ObservableObject {
     func clearLastOutcome() {
         guard md_can_clear_outcome(isMovingToTrash, hasUncertainOutcome) else { return }
         lastOutcome = nil
+        adminCandidates = nil
         lastApplicationName = nil
         showingOutcomeReport = false
     }
