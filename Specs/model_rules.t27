@@ -224,6 +224,11 @@ pub fn md_uninstall_can_move(has_plan: bool, moving: bool, uncertain: bool) -> b
     return has_plan and moving == false and uncertain == false;
 }
 
+; The administrator move is offered for the same reviewed selection after the bundle's own move was refused.
+pub fn md_uninstall_can_admin_move(has_plan: bool, moving: bool, reviewing: bool, uncertain: bool, app_moved: bool, offered: bool) -> bool {
+    return has_plan and moving == false and reviewing == false and uncertain == false and app_moved == false and offered;
+}
+
 ; The checks before the uninstall review opens, in order; Swift runs them one at a time.
 pub const MD_REVIEW_END : u32 = 0;
 pub const MD_REVIEW_UNCERTAIN : u32 = 1;
@@ -463,4 +468,14 @@ test md_small_decisions {
     assert md_worth_listing(0) == false;
     assert md_renew_grant(true, true) == true;
     assert md_renew_grant(true, false) == false;
+}
+
+test md_admin_move {
+    assert md_uninstall_can_admin_move(true, false, false, false, false, true) == true;
+    assert md_uninstall_can_admin_move(false, false, false, false, false, true) == false;
+    assert md_uninstall_can_admin_move(true, true, false, false, false, true) == false;
+    assert md_uninstall_can_admin_move(true, false, true, false, false, true) == false;
+    assert md_uninstall_can_admin_move(true, false, false, true, false, true) == false;
+    assert md_uninstall_can_admin_move(true, false, false, false, true, true) == false;
+    assert md_uninstall_can_admin_move(true, false, false, false, false, false) == false;
 }

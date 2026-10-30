@@ -100,6 +100,7 @@ bool md_uninstall_can_reanalyse(bool has_application, bool moving, bool app_move
 bool md_uninstall_can_toggle(bool moving, bool required, bool selectable, bool already_moved);
 bool md_uninstall_can_reveal(bool moving, bool already_moved);
 bool md_uninstall_can_move(bool has_plan, bool moving, bool uncertain);
+bool md_uninstall_can_admin_move(bool has_plan, bool moving, bool reviewing, bool uncertain, bool app_moved, bool offered);
 uint32_t md_review_step(uint32_t index, bool app_moved, bool sandboxed);
 bool md_can_open_uninstall_review(bool has_plan, bool reviewing, bool moving);
 bool md_running_check_applies(bool app_moved, bool has_application);
@@ -322,6 +323,10 @@ bool md_uninstall_can_reveal(bool moving, bool already_moved) {
 
 bool md_uninstall_can_move(bool has_plan, bool moving, bool uncertain) {
     return ((has_plan && (moving == false)) && (uncertain == false));
+}
+
+bool md_uninstall_can_admin_move(bool has_plan, bool moving, bool reviewing, bool uncertain, bool app_moved, bool offered) {
+    return (((((has_plan && (moving == false)) && (reviewing == false)) && (uncertain == false)) && (app_moved == false)) && offered);
 }
 
 uint32_t md_review_step(uint32_t index, bool app_moved, bool sandboxed) {
@@ -559,6 +564,16 @@ void test_md_small_decisions(void) {
     assert((md_renew_grant(true, false) == false));
 }
 
+void test_md_admin_move(void) {
+    assert((md_uninstall_can_admin_move(true, false, false, false, false, true) == true));
+    assert((md_uninstall_can_admin_move(false, false, false, false, false, true) == false));
+    assert((md_uninstall_can_admin_move(true, true, false, false, false, true) == false));
+    assert((md_uninstall_can_admin_move(true, false, true, false, false, true) == false));
+    assert((md_uninstall_can_admin_move(true, false, false, true, false, true) == false));
+    assert((md_uninstall_can_admin_move(true, false, false, false, true, true) == false));
+    assert((md_uninstall_can_admin_move(true, false, false, false, false, false) == false));
+}
+
 
 /* -------------------------------------------------------
    Test runner (compile with -DT27_TEST_MAIN to execute)
@@ -572,7 +587,8 @@ int main(void) {
     test_md_screens();
     test_md_review_steps_and_assistant();
     test_md_small_decisions();
-    printf("All %d tests passed.\n", 5);
+    test_md_admin_move();
+    printf("All %d tests passed.\n", 6);
     return 0;
 }
 #endif /* T27_TEST_MAIN */

@@ -76,11 +76,12 @@ For the selected application DiskBloom:
 - blocks system applications, `com.apple.*`, DiskBloom itself, network, read-only and cloud paths, symlinked paths, a running app or helper and any running copy with the same bundle ID;
 - re-checks the whole selection before review and every item inside `NSFileCoordinator`; for a trusted plan it re-verifies the bundle snapshot, the Apple-anchored signature, Team ID, signing identifier and App Groups;
 - moves the `.app` first; if that fails, related data is left untouched, and a later failure stops the remaining queue and keeps a report;
+- if macOS refuses to move the `.app` because it belongs to the system administrator account (root) or its folder is protected, the direct edition offers **Move with Administrator Password…**: DiskBloom checks the same reviewed selection and your Trash again and asks Finder to move the application; Finder asks macOS for your administrator password (or Touch ID, if this Mac offers it), and after that check Finder moves the application to the Trash. An open handle confirms that the application is in your Trash and that the original path is gone. DiskBloom never sees the password and runs nothing as administrator. The App Store edition explains the cause and offers Reveal in Finder instead;
 - if the system Trash does not return a result with a confirmable identity, marks the path as unconfirmed and blocks automatic retry until the original path is checked separately;
 - after a partial failure keeps the plan, marks the rows that were already moved, shows the full report and lets you start a new analysis explicitly;
 - before continuing an old plan after the `.app` was moved, checks the standard application folders, LaunchServices registration, the original path and running processes; if another copy appears, a new analysis is required.
 
-Potentially important or shared data needs a separate checkbox in the final review. A move of several paths is not an atomic transaction. The app does not ask for `sudo` or Full Disk Access, does not quit processes and does not unload LaunchAgents automatically.
+Potentially important or shared data needs a separate checkbox in the final review. A move of several paths is not an atomic transaction. The app never runs `sudo` or code as administrator and does not ask for Full Disk Access; for a protected application the direct edition can ask Finder, which asks macOS for your administrator password. It does not quit processes and does not unload LaunchAgents automatically.
 
 ## Possible leftovers of removed apps
 
@@ -155,7 +156,7 @@ The Mac App Store build is produced by `DiskBloom.xcodeproj`, which is generated
 ARCH=x86_64 ./Tests/run-smoke-tests.sh   # Intel slice, runs under Rosetta
 ```
 
-Seven smoke suites cover the scanner, cleanup safety, app removal, possible leftovers, the duplicate finder, the cache explorer and the memory monitor. The script also runs every t27 spec's own tests and eleven differential tests that compare the t27 rules with the Swift rules they replaced. Tests build their own fixtures inside `.build/` and never call the real Trash: the move coordinators use an injected mover.
+Eight smoke suites cover the scanner, cleanup safety, app removal, possible leftovers, the duplicate finder, the cache explorer, the memory monitor and the administrator move through Finder (with a stand-in for Finder). The script also runs every t27 spec's own tests and eleven differential tests that compare the t27 rules with the Swift rules they replaced. Tests build their own fixtures inside `.build/` and never call the real Trash or Finder: the move coordinators use an injected mover and an injected Finder request.
 
 ## Important limitations
 
@@ -167,6 +168,10 @@ Seven smoke suites cover the scanner, cleanup safety, app removal, possible left
 - Nothing is moved to the Trash without being added to the queue and a separate confirmation.
 - An Apple trust anchor and a Team ID are not a notarization/Gatekeeper check and do not prove by themselves that a developer exclusively owns a bundle ID. The strict signature check deliberately fails closed: a modified bundle can require manual selection of related paths.
 - It is impossible to find every arbitrarily named leftover of a third-party app. DiskBloom shows only confirmed exact relations and clearly marked possible ones; apps with a privileged helper or a system extension may need the vendor's official uninstaller.
+- The first administrator move asks you to allow DiskBloom to control Finder. This permission stays until you turn it off in System Settings › Privacy & Security › Automation › DiskBloom › Finder. After an update macOS may ask again or may need `tccutil reset AppleEvents io.github.dmitrii-f-t27.DiskBloom`.
+- An application that belongs to the administrator (root) account still belongs to root in the Trash after Finder moved it with the administrator password. Emptying the Trash may ask for the password again. Put Back has not been verified for such an application; restoring it may need the administrator password.
+- Applications that belong to another user account on this Mac are not offered the administrator move.
+- The direct build is ad-hoc signed with the hardened runtime; its only entitlement allows Apple Events, used only for the Finder request.
 
 ## Decisions written in t27
 

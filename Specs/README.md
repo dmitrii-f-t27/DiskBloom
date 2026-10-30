@@ -11,11 +11,11 @@ Every decision DiskBloom makes is written in [t27](https://github.com/gHashTag/t
 | `text_rules.t27` | bundle identifiers and their canonical form, vendor namespace, display names, how two paths relate, Library areas, hidden/Trash/external paths, extension kinds, string order | `T27Text` (`T27Text.swift`), used everywhere |
 | `fingerprint.t27` | the FNV-1a folder fingerprint and how child fingerprints combine | `DiskScanner.swift` |
 | `scan_rules.t27` | what the scanner maps and measures, allocated size, which children it keeps, child order, when a folder snapshot still holds, snapshot comparison | `DiskScanner`, `SnapshotValidator` |
-| `move_rules.t27` | the order of every check around a Trash move (queue, each item, signature), what counts as confirmed or uncertain, the result, whether to stop after a failure | `MoveSteps` (`MoveSteps.swift`) and the three coordinators |
+| `move_rules.t27` | the order of every check around a Trash move (queue, each item, signature), what counts as confirmed or uncertain, the result, whether to stop after a failure; when a refused bundle move may be retried through Finder, the checks around that request, the verdict read from the file system after Finder's reply, and whether to retry | `MoveSteps` (`MoveSteps.swift`) and the three coordinators |
 | `duplicate_rules.t27` | which entries the duplicate finder examines, blocked folders, when metadata matches, size groups, SHA-256 itself, byte comparison | `DuplicateFinder.swift` |
 | `format_rules.t27` | compact sizes, singular/plural, disk usage and fraction, progress cadence | `ByteFormat`, `Plural`, `VolumeStats` (`Models.swift`) |
 | `sunburst_rules.t27` | ring map layout, palette, radii, sector inset, which ring and angle the pointer is on | `SunburstLayout`, `SunburstGeometry` (`SunburstView.swift`) |
-| `model_rules.t27` | navigation, the cleanup queue, volume labels, which buttons each screen allows, uninstall review steps, folder grants, when the assistant is busy, API settings status, tool limits | `AppModel`, `CacheExplorerModel`, `OrphanedAppDataModel`, `AppUninstallerModel`, `DuplicateFinderModel`, `FolderAccess` |
+| `model_rules.t27` | navigation, the cleanup queue, volume labels, which buttons each screen allows, the administrator-move button, uninstall review steps, folder grants, when the assistant is busy, API settings status, tool limits | `AppModel`, `CacheExplorerModel`, `OrphanedAppDataModel`, `AppUninstallerModel`, `DuplicateFinderModel`, `FolderAccess` |
 | `memory_rules.t27` | the memory monitor in the menu bar: used memory as Activity Monitor counts it, the pressure level, binary sizes, CPU use from two samples, which app a process belongs to, app names without ".app", list order and length, the sandbox and unreadable-process notes, refresh times, when the menu bar figure changes or shows the unknown mark, the menu bar watchdog, when DiskBloom reopens itself, how Open DiskBloom and opening DiskBloom again bring back a window without adding a second one in a copy started without its window, when closing the last window frees the Disk Map (monitor mode), when DiskBloom leaves the Dock, when Quit is available | `MemoryRules`, `MemorySampler`, `MemoryGrouping`, `MonitorModeController`, `DockIcon`, `MenuBarController`, `MenuBarWatchdog`, `MenuBarPressure`, `MenuBarLabel`, `MainWindow` (`MemoryMonitor.swift`), `AppModel.releaseDiskMap`, `MemoryMenuPanel`, `MenuBarLabelModel`, `DiskBloomAppDelegate` |
 | `assistant_rules.t27` | section/verdict words the model may use, path forms, base URL and local hosts, chat and recommended models, HTTP hints, history cut, stripping `<think>` blocks, the app catalog walk, when to send and when a reply is final, each tool's plan | `Assistant.swift`, `AssistantBackends.swift` |
 
@@ -24,7 +24,7 @@ Expensive checks stay lazy: a spec returns the id of the next step (`mv_step`, `
 ## What stays in Swift, and why
 
 - Views and their texts (SwiftUI); the codes a spec returns are mapped to messages in Swift.
-- System calls: FileManager, NSWorkspace, Security and Keychain, URLSession, FoundationModels, NSFileCoordinator; for the memory monitor, `host_statistics64`, `sysctlbyname` and libproc (`proc_listallpids`, `proc_pid_rusage`, `proc_pidpath`).
+- System calls: FileManager, NSWorkspace, Security and Keychain, URLSession, FoundationModels, NSFileCoordinator, Apple Events to Finder (`NSAppleEventDescriptor`, `AEDeterminePermissionToAutomateTarget`) and the event-only descriptor (`O_EVTONLY`, `F_GETPATH`); for the memory monitor, `host_statistics64`, `sysctlbyname` and libproc (`proc_listallpids`, `proc_pid_rusage`, `proc_pidpath`).
 - Unicode work the OS owns: lowercasing and trimming, NFC/NFD normalization, localized compare, `ByteCountFormatter`, `String(format:)`; `atan2` and `hypot` from the maths library.
 - Concurrency bookkeeping (task generations, cancellation) and JSON shaping; tool specs and prompts for the model.
 
@@ -45,7 +45,7 @@ Do not run `generate.sh` while the test suite runs: the suite's precompiled brid
 
 ## Tests
 
-`Tests/run-smoke-tests.sh` runs every spec's own tests (75 in all) from the committed C, the behaviour smoke tests, and eleven differential tests. Each differential test compares the t27 rules with the Swift they replaced, kept only as the oracle (`Tests/Smoke/*Legacy.swift`, or inline in `ModelRulesDifferentialSmoke`):
+`Tests/run-smoke-tests.sh` runs every spec's own tests (80 in all) from the committed C, the behaviour smoke tests, and eleven differential tests. Each differential test compares the t27 rules with the Swift they replaced, kept only as the oracle (`Tests/Smoke/*Legacy.swift`, or inline in `ModelRulesDifferentialSmoke`):
 
 | Test | Compared |
 |---|---|

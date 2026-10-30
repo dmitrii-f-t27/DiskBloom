@@ -353,6 +353,11 @@ private struct AppRemovalPlanView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 12)
         }
+        if model.isWaitingForAdministrator {
+            WarningStrip(text: AdminMoveText.waiting, icon: "key.fill", color: .orange)
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+        }
         if model.applicationWasMoved {
             WarningStrip(
                 text: "The application bundle has already been moved to the Trash. Only unprocessed related paths remain below; you can exclude or re-check them.",
@@ -709,6 +714,66 @@ private struct AppRemovalResultView: View {
     let outcome: AppRemovalOutcome
     let clearsOutcomeOnDone: Bool
 
+    private var administratorSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("ADMINISTRATOR PASSWORD NEEDED")
+                .font(.system(size: 9.5, weight: .bold))
+                .tracking(1)
+                .foregroundStyle(Color.orange)
+            ForEach(AdminMoveText.passwordParagraphs(cause: outcome.adminCause, relatedCount: model.adminRelatedCount), id: \.self) { paragraph in
+                Text(paragraph)
+                    .font(.system(size: 10.5))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if model.plan?.hasPrivilegedComponents == true {
+                Text("A system extension, helper or Login Item was found in the bundle. A complete uninstall may require the developer’s official uninstaller.")
+                    .font(.system(size: 10.5))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let footer = AdminMoveText.passwordFooter(cause: outcome.adminCause) {
+                Text(footer)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(Color.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                Button("Move with Administrator Password…") {
+                    model.moveApplicationWithAdministrator()
+                }
+                .buttonStyle(DangerButtonStyle())
+                .disabled(!model.canMoveWithAdministrator)
+                Button("Reveal in Finder") {
+                    model.revealApplicationForManualMove()
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                Button("Open Automation Settings") {
+                    model.openAutomationSettings()
+                }
+                .buttonStyle(SecondaryButtonStyle())
+            }
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var revealSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("MOVE IT IN FINDER")
+                .font(.system(size: 9.5, weight: .bold))
+                .tracking(1)
+                .foregroundStyle(Color.orange)
+            Text(AdminMoveText.revealInFinderParagraph(cause: outcome.adminCause))
+                .font(.system(size: 10.5))
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Reveal in Finder") {
+                model.revealApplicationForManualMove()
+            }
+            .buttonStyle(SecondaryButtonStyle())
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 12) {
@@ -757,6 +822,12 @@ private struct AppRemovalResultView: View {
                         }
                         .padding(12)
                         .background(Color.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    if outcome.adminOffer == .finderWithPassword {
+                        administratorSection
+                    }
+                    if outcome.adminOffer == .revealInFinder {
+                        revealSection
                     }
                     if !outcome.unattemptedPaths.isEmpty {
                         ResultPathSection(

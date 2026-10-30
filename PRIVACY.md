@@ -36,6 +36,8 @@ To show when the menu bar figure stops updating, DiskBloom writes short status l
 
 DiskBloom never deletes anything permanently. After you review and confirm a plan, the selected items are moved to the macOS Trash, where you can restore them until you empty the Trash yourself.
 
+The direct (GitHub) edition can ask Finder to move a reviewed application that macOS protects to the Trash, for example one that belongs to the system administrator account (root) or one in a protected folder. The first time, macOS asks whether DiskBloom may control Finder; you can turn this off in System Settings › Privacy & Security › Automation, and macOS may ask again after DiskBloom is updated. Finder then asks macOS for your administrator password; the password goes to macOS, never to DiskBloom. An application that belongs to the administrator account still belongs to it in the Trash, so restoring it or emptying the Trash may ask for the password again. The Mac App Store edition does not do this.
+
 ## Contact
 
 Questions or problems: [open an issue on GitHub](https://github.com/dmitrii-f-t27/DiskBloom/issues).

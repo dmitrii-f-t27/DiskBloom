@@ -66,12 +66,12 @@ build_test() {
     -o "$BUILD_DIR/$name"
 }
 
-for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke UninstallerDifferentialSmoke LeftoversDifferentialSmoke TextRulesDifferentialSmoke ScannerDifferentialSmoke MoveDifferentialSmoke DuplicatesDifferentialSmoke PresentationDifferentialSmoke ModelRulesDifferentialSmoke AssistantDifferentialSmoke MemoryMonitorSmoke; do
+for NAME in ScannerRegressionSmoke SafetySmoke AppRemovalSmoke OrphanLeftoversSmoke DuplicateFinderSmoke CacheExplorerSmoke CacheVerdictDifferentialSmoke DeletionPolicyDifferentialSmoke UninstallerDifferentialSmoke LeftoversDifferentialSmoke TextRulesDifferentialSmoke ScannerDifferentialSmoke MoveDifferentialSmoke DuplicatesDifferentialSmoke PresentationDifferentialSmoke ModelRulesDifferentialSmoke AssistantDifferentialSmoke MemoryMonitorSmoke AdminMoveSmoke; do
   print "== building $NAME"
   build_test "$NAME"
 done
 
-/bin/mkdir -p "$FIXTURES/scanner" "$FIXTURES/safety-root" "$FIXTURES/safety-mutation/Candidate" "$FIXTURES/app-removal" "$FIXTURES/orphans" "$FIXTURES/caches" "$FIXTURES/deletion-policy" "$FIXTURES/uninstaller" "$FIXTURES/leftovers" "$FIXTURES/text" "$FIXTURES/scanner-diff" "$FIXTURES/move" "$FIXTURES/duplicates"
+/bin/mkdir -p "$FIXTURES/scanner" "$FIXTURES/safety-root" "$FIXTURES/safety-mutation/Candidate" "$FIXTURES/app-removal" "$FIXTURES/orphans" "$FIXTURES/caches" "$FIXTURES/deletion-policy" "$FIXTURES/uninstaller" "$FIXTURES/leftovers" "$FIXTURES/text" "$FIXTURES/scanner-diff" "$FIXTURES/move" "$FIXTURES/duplicates" "$FIXTURES/admin-move"
 print "child fixture" > "$FIXTURES/safety-root/child.txt"
 print "candidate state" > "$FIXTURES/safety-mutation/Candidate/state.txt"
 
@@ -105,4 +105,5 @@ print "== running ($ARCH)"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/ModelRulesDifferentialSmoke"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/AssistantDifferentialSmoke"
 /usr/bin/arch -"$ARCH" "$BUILD_DIR/MemoryMonitorSmoke" "$FIXTURES/memory"
+/usr/bin/arch -"$ARCH" "$BUILD_DIR/AdminMoveSmoke" "$FIXTURES/admin-move"
 print "ALL_SMOKE_TESTS_PASSED ($ARCH)"

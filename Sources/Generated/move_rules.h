@@ -25,6 +25,9 @@
 #define MV_PHASE_QUEUE 0
 #define MV_PHASE_ITEM 1
 #define MV_PHASE_SIGNATURE 2
+#define MV_PHASE_ADMIN_QUEUE 3
+#define MV_PHASE_ADMIN_ITEM 4
+#define MV_PHASE_ADMIN_SEND 5
 #define MV_STEP_END 0
 #define MV_STEP_OVERLAP 1
 #define MV_STEP_OWNERS 2
@@ -39,12 +42,33 @@
 #define MV_STEP_SNAPSHOT 11
 #define MV_STEP_SIGNATURE_UNCHANGED 12
 #define MV_STEP_OWNERS_AND_VALIDATE_EACH 13
+#define MV_STEP_AUTOMATION 14
+#define MV_STEP_OPEN_HANDLE 15
+#define MV_STEP_HANDLE_UNCHANGED 16
+#define MV_STEP_TRASH_READY 17
 #define MV_NOTHING 0
 #define MV_MOVED 1
 #define MV_FAILED 2
 #define MV_FAILED_UNCONFIRMED 0
 #define MV_FAILED_THREW 1
 #define MV_FAILED_COORDINATOR 2
+#define MV_ERR_OTHER 0
+#define MV_ERR_PERMISSION 1
+#define MV_CAUSE_NONE 0
+#define MV_CAUSE_ROOT_OWNER 1
+#define MV_CAUSE_PARENT_LOCKED 2
+#define MV_OFFER_NONE 0
+#define MV_OFFER_FINDER_ADMIN 1
+#define MV_OFFER_REVEAL 2
+#define MV_REPLY_OK 0
+#define MV_REPLY_REFUSED 1
+#define MV_REPLY_NOT_ALLOWED 2
+#define MV_REPLY_TIMEOUT 3
+#define MV_REPLY_NO_FINDER 4
+#define MV_ADMIN_UNCERTAIN 0
+#define MV_ADMIN_MOVED 1
+#define MV_ADMIN_MOVED_PATH_REUSED 2
+#define MV_ADMIN_NOT_MOVED 3
 
 /* -------------------------------------------------------
    Function prototypes
@@ -55,6 +79,15 @@ bool mv_confirmed(uint32_t kind, bool moved_path_returned, bool identity_matches
 uint32_t mv_result(bool coordination_error, bool failure, bool moved);
 bool mv_uncertain(uint32_t kind, uint32_t how, bool source_still_exists);
 bool mv_stop_after_failure(uint32_t kind);
+uint32_t mv_error_kind(bool cocoa_domain, bool posix_domain, int64_t code, bool underlying_posix, int64_t underlying_code);
+uint32_t mv_admin_cause(bool owner_is_self, bool owner_is_root, bool parent_writable);
+bool mv_admin_root_ok(int64_t depth, bool intermediate_plain);
+uint32_t mv_admin_offer(uint32_t kind, bool required, uint32_t error_kind, bool source_still_exists, bool uncertain, bool application_eligible, bool in_application_root, bool protected_flags, uint32_t cause, bool sandboxed);
+bool mv_trash_ready(bool exists, bool is_directory, bool is_symlink, bool owned_by_self, bool same_volume);
+uint32_t mv_admin_reply(int64_t status);
+uint32_t mv_admin_verdict(bool moved_confirmed, bool in_user_trash, bool original_exists, bool original_identity_matches);
+bool mv_admin_retry_allowed(uint32_t verdict);
+bool mv_admin_continue_related(uint32_t verdict);
 
 /* -------------------------------------------------------
    Function implementations
@@ -175,6 +208,60 @@ uint32_t mv_step(uint32_t kind, uint32_t phase, uint32_t index, bool required, b
         }
         return MV_STEP_END;
     }
+    if ((((phase == MV_PHASE_ADMIN_QUEUE) || (phase == MV_PHASE_ADMIN_ITEM)) || (phase == MV_PHASE_ADMIN_SEND))) {
+        if ((((kind != MV_UNINSTALLER) || (required == false)) || app_moved)) {
+            return MV_STEP_END;
+        }
+        if ((phase == MV_PHASE_ADMIN_QUEUE)) {
+            if ((index == 0)) {
+                return MV_STEP_OVERLAP;
+            }
+            if ((index == 1)) {
+                return MV_STEP_RUNNING;
+            }
+            if ((index == 2)) {
+                return MV_STEP_SIGNATURE;
+            }
+            if ((index == 3)) {
+                return MV_STEP_VALIDATE_ALL;
+            }
+            if ((index == 4)) {
+                return MV_STEP_TRASH_READY;
+            }
+            if ((index == 5)) {
+                return MV_STEP_AUTOMATION;
+            }
+            return MV_STEP_END;
+        }
+        if ((phase == MV_PHASE_ADMIN_ITEM)) {
+            if ((index == 0)) {
+                return MV_STEP_RUNNING;
+            }
+            if ((index == 1)) {
+                return MV_STEP_SIGNATURE;
+            }
+            if ((index == 2)) {
+                return MV_STEP_VALIDATE;
+            }
+            if ((index == 3)) {
+                return MV_STEP_CAPTURE_IDENTITY;
+            }
+            if ((index == 4)) {
+                return MV_STEP_OPEN_HANDLE;
+            }
+            return MV_STEP_END;
+        }
+        if ((index == 0)) {
+            return MV_STEP_RUNNING;
+        }
+        if ((index == 1)) {
+            return MV_STEP_TRASH_READY;
+        }
+        if ((index == 2)) {
+            return MV_STEP_HANDLE_UNCHANGED;
+        }
+        return MV_STEP_END;
+    }
     return MV_STEP_END;
 }
 
@@ -216,6 +303,117 @@ bool mv_uncertain(uint32_t kind, uint32_t how, bool source_still_exists) {
 
 bool mv_stop_after_failure(uint32_t kind) {
     return ((kind == MV_LEFTOVERS) || (kind == MV_UNINSTALLER));
+}
+
+uint32_t mv_error_kind(bool cocoa_domain, bool posix_domain, int64_t code, bool underlying_posix, int64_t underlying_code) {
+    if (posix_domain) {
+        if (((code == 13) || (code == 1))) {
+            return MV_ERR_PERMISSION;
+        }
+        return MV_ERR_OTHER;
+    }
+    if ((cocoa_domain && (code == 513))) {
+        if (underlying_posix) {
+            if (((underlying_code == 13) || (underlying_code == 1))) {
+                return MV_ERR_PERMISSION;
+            }
+            return MV_ERR_OTHER;
+        }
+        return MV_ERR_PERMISSION;
+    }
+    return MV_ERR_OTHER;
+}
+
+uint32_t mv_admin_cause(bool owner_is_self, bool owner_is_root, bool parent_writable) {
+    if (owner_is_self) {
+        if (parent_writable) {
+            return MV_CAUSE_NONE;
+        }
+        return MV_CAUSE_PARENT_LOCKED;
+    }
+    if (owner_is_root) {
+        return MV_CAUSE_ROOT_OWNER;
+    }
+    return MV_CAUSE_NONE;
+}
+
+bool mv_admin_root_ok(int64_t depth, bool intermediate_plain) {
+    return ((depth == 1) || ((depth == 2) && intermediate_plain));
+}
+
+uint32_t mv_admin_offer(uint32_t kind, bool required, uint32_t error_kind, bool source_still_exists, bool uncertain, bool application_eligible, bool in_application_root, bool protected_flags, uint32_t cause, bool sandboxed) {
+    if ((kind != MV_UNINSTALLER)) {
+        return MV_OFFER_NONE;
+    }
+    if ((required == false)) {
+        return MV_OFFER_NONE;
+    }
+    if ((error_kind != MV_ERR_PERMISSION)) {
+        return MV_OFFER_NONE;
+    }
+    if ((source_still_exists == false)) {
+        return MV_OFFER_NONE;
+    }
+    if (uncertain) {
+        return MV_OFFER_NONE;
+    }
+    if ((application_eligible == false)) {
+        return MV_OFFER_NONE;
+    }
+    if ((in_application_root == false)) {
+        return MV_OFFER_NONE;
+    }
+    if (protected_flags) {
+        return MV_OFFER_NONE;
+    }
+    if ((cause == MV_CAUSE_NONE)) {
+        return MV_OFFER_NONE;
+    }
+    if (sandboxed) {
+        return MV_OFFER_REVEAL;
+    }
+    return MV_OFFER_FINDER_ADMIN;
+}
+
+bool mv_trash_ready(bool exists, bool is_directory, bool is_symlink, bool owned_by_self, bool same_volume) {
+    return ((((exists && is_directory) && (is_symlink == false)) && owned_by_self) && same_volume);
+}
+
+uint32_t mv_admin_reply(int64_t status) {
+    if ((status == 0)) {
+        return MV_REPLY_OK;
+    }
+    if (((status == -1743) || (status == -1744))) {
+        return MV_REPLY_NOT_ALLOWED;
+    }
+    if ((status == -1712)) {
+        return MV_REPLY_TIMEOUT;
+    }
+    if ((status == -600)) {
+        return MV_REPLY_NO_FINDER;
+    }
+    return MV_REPLY_REFUSED;
+}
+
+uint32_t mv_admin_verdict(bool moved_confirmed, bool in_user_trash, bool original_exists, bool original_identity_matches) {
+    if ((moved_confirmed && in_user_trash)) {
+        if (original_exists) {
+            return MV_ADMIN_MOVED_PATH_REUSED;
+        }
+        return MV_ADMIN_MOVED;
+    }
+    if ((original_exists && original_identity_matches)) {
+        return MV_ADMIN_NOT_MOVED;
+    }
+    return MV_ADMIN_UNCERTAIN;
+}
+
+bool mv_admin_retry_allowed(uint32_t verdict) {
+    return (verdict == MV_ADMIN_NOT_MOVED);
+}
+
+bool mv_admin_continue_related(uint32_t verdict) {
+    return (verdict == MV_ADMIN_MOVED);
 }
 
 /* -------------------------------------------------------
@@ -288,6 +486,109 @@ void test_mv_results(void) {
     assert((mv_stop_after_failure(MV_UNINSTALLER) == true));
 }
 
+void test_mv_admin_error_cause_root(void) {
+    assert((mv_error_kind(false, true, 13, false, 0) == MV_ERR_PERMISSION));
+    assert((mv_error_kind(false, true, 1, false, 0) == MV_ERR_PERMISSION));
+    assert((mv_error_kind(false, true, 2, false, 0) == MV_ERR_OTHER));
+    assert((mv_error_kind(true, false, 513, true, 13) == MV_ERR_PERMISSION));
+    assert((mv_error_kind(true, false, 513, true, 1) == MV_ERR_PERMISSION));
+    assert((mv_error_kind(true, false, 513, true, 2) == MV_ERR_OTHER));
+    assert((mv_error_kind(true, false, 513, false, 0) == MV_ERR_PERMISSION));
+    assert((mv_error_kind(true, false, 4, true, 13) == MV_ERR_OTHER));
+    assert((mv_error_kind(false, false, 7, false, 0) == MV_ERR_OTHER));
+    assert((mv_error_kind(true, false, 640, false, 0) == MV_ERR_OTHER));
+    assert((mv_admin_cause(false, true, true) == MV_CAUSE_ROOT_OWNER));
+    assert((mv_admin_cause(false, true, false) == MV_CAUSE_ROOT_OWNER));
+    assert((mv_admin_cause(true, false, false) == MV_CAUSE_PARENT_LOCKED));
+    assert((mv_admin_cause(true, false, true) == MV_CAUSE_NONE));
+    assert((mv_admin_cause(false, false, true) == MV_CAUSE_NONE));
+    assert((mv_admin_cause(false, false, false) == MV_CAUSE_NONE));
+    assert((mv_admin_cause(true, true, true) == MV_CAUSE_NONE));
+    assert((mv_admin_root_ok(1, false) == true));
+    assert((mv_admin_root_ok(1, true) == true));
+    assert((mv_admin_root_ok(2, true) == true));
+    assert((mv_admin_root_ok(2, false) == false));
+    assert((mv_admin_root_ok(0, true) == false));
+    assert((mv_admin_root_ok(3, true) == false));
+}
+
+void test_mv_admin_offers_and_trash(void) {
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_FINDER_ADMIN));
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_PARENT_LOCKED, false) == MV_OFFER_FINDER_ADMIN));
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_ROOT_OWNER, true) == MV_OFFER_REVEAL));
+    assert((mv_admin_offer(MV_DISK_MAP, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE));
+    assert((mv_admin_offer(MV_UNINSTALLER, false, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE));
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_OTHER, true, false, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE));
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, false, false, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE));
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, true, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE));
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, false, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE));
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, false, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE));
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, true, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE));
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_NONE, false) == MV_OFFER_NONE));
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, false, true, false, MV_CAUSE_ROOT_OWNER, true) == MV_OFFER_NONE));
+    assert((mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_NONE, true) == MV_OFFER_NONE));
+    assert((mv_trash_ready(true, true, false, true, true) == true));
+    assert((mv_trash_ready(false, true, false, true, true) == false));
+    assert((mv_trash_ready(true, false, false, true, true) == false));
+    assert((mv_trash_ready(true, true, true, true, true) == false));
+    assert((mv_trash_ready(true, true, false, false, true) == false));
+    assert((mv_trash_ready(true, true, false, true, false) == false));
+}
+
+void test_mv_admin_steps(void) {
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 0, true, false, false) == MV_STEP_OVERLAP));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 1, true, false, false) == MV_STEP_RUNNING));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 2, true, false, false) == MV_STEP_SIGNATURE));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 3, true, false, false) == MV_STEP_VALIDATE_ALL));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 4, true, false, false) == MV_STEP_TRASH_READY));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 5, true, false, false) == MV_STEP_AUTOMATION));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 6, true, false, false) == MV_STEP_END));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 0, true, false, false) == MV_STEP_RUNNING));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 1, true, false, false) == MV_STEP_SIGNATURE));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 2, true, false, false) == MV_STEP_VALIDATE));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 3, true, false, false) == MV_STEP_CAPTURE_IDENTITY));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 4, true, false, false) == MV_STEP_OPEN_HANDLE));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 5, true, false, false) == MV_STEP_END));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_SEND, 0, true, false, false) == MV_STEP_RUNNING));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_SEND, 1, true, false, false) == MV_STEP_TRASH_READY));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_SEND, 2, true, false, false) == MV_STEP_HANDLE_UNCHANGED));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_SEND, 3, true, false, false) == MV_STEP_END));
+    assert((mv_step(MV_DISK_MAP, MV_PHASE_ADMIN_QUEUE, 0, true, false, false) == MV_STEP_END));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 0, false, false, false) == MV_STEP_END));
+    assert((mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_SEND, 0, true, true, false) == MV_STEP_END));
+}
+
+void test_mv_admin_replies_and_verdicts(void) {
+    assert((mv_admin_reply(0) == MV_REPLY_OK));
+    assert((mv_admin_reply(-128) == MV_REPLY_REFUSED));
+    assert((mv_admin_reply(-1743) == MV_REPLY_NOT_ALLOWED));
+    assert((mv_admin_reply(-1744) == MV_REPLY_NOT_ALLOWED));
+    assert((mv_admin_reply(-1712) == MV_REPLY_TIMEOUT));
+    assert((mv_admin_reply(-600) == MV_REPLY_NO_FINDER));
+    assert((mv_admin_reply(-10000) == MV_REPLY_REFUSED));
+    assert((mv_admin_reply(1) == MV_REPLY_REFUSED));
+    assert((mv_admin_reply(-1708) == MV_REPLY_REFUSED));
+    assert((mv_admin_verdict(true, true, false, false) == MV_ADMIN_MOVED));
+    assert((mv_admin_verdict(true, true, true, false) == MV_ADMIN_MOVED_PATH_REUSED));
+    assert((mv_admin_verdict(true, false, true, true) == MV_ADMIN_NOT_MOVED));
+    assert((mv_admin_verdict(false, false, true, true) == MV_ADMIN_NOT_MOVED));
+    assert((mv_admin_verdict(false, true, true, true) == MV_ADMIN_NOT_MOVED));
+    assert((mv_admin_verdict(true, false, false, false) == MV_ADMIN_UNCERTAIN));
+    assert((mv_admin_verdict(true, false, true, false) == MV_ADMIN_UNCERTAIN));
+    assert((mv_admin_verdict(false, true, false, false) == MV_ADMIN_UNCERTAIN));
+    assert((mv_admin_verdict(false, false, true, false) == MV_ADMIN_UNCERTAIN));
+    assert((mv_admin_verdict(false, false, false, true) == MV_ADMIN_UNCERTAIN));
+    assert((mv_admin_verdict(false, false, false, false) == MV_ADMIN_UNCERTAIN));
+    assert((mv_admin_retry_allowed(MV_ADMIN_NOT_MOVED) == true));
+    assert((mv_admin_retry_allowed(MV_ADMIN_MOVED) == false));
+    assert((mv_admin_retry_allowed(MV_ADMIN_MOVED_PATH_REUSED) == false));
+    assert((mv_admin_retry_allowed(MV_ADMIN_UNCERTAIN) == false));
+    assert((mv_admin_continue_related(MV_ADMIN_MOVED) == true));
+    assert((mv_admin_continue_related(MV_ADMIN_NOT_MOVED) == false));
+    assert((mv_admin_continue_related(MV_ADMIN_MOVED_PATH_REUSED) == false));
+    assert((mv_admin_continue_related(MV_ADMIN_UNCERTAIN) == false));
+}
+
 
 /* -------------------------------------------------------
    Test runner (compile with -DT27_TEST_MAIN to execute)
@@ -299,7 +600,11 @@ int main(void) {
     test_mv_queue_steps();
     test_mv_item_and_signature_steps();
     test_mv_results();
-    printf("All %d tests passed.\n", 3);
+    test_mv_admin_error_cause_root();
+    test_mv_admin_offers_and_trash();
+    test_mv_admin_steps();
+    test_mv_admin_replies_and_verdicts();
+    printf("All %d tests passed.\n", 7);
     return 0;
 }
 #endif /* T27_TEST_MAIN */
