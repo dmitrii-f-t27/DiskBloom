@@ -208,13 +208,146 @@ pub fn mm_notes_unreadable(unreadable: i64) -> bool {
 }
 
 ; --- How often the numbers refresh ------------------------------------------------------------------------
-; The percentage in the menu bar every 5 s; the open panel, with its list, every 2 s.
-pub const MM_LABEL_REFRESH_MS : i64 = 5000;
+; Measured 2026-10-29 (menu bar spike U5, macOS 27): one change of the menu bar figure costs about 40 ms of
+; CPU, about 33 ms of it in macOS's MenuBarAgent and 7 ms in the app; a sample that changes nothing costs
+; almost nothing. So the figure is sampled every second and shown only when it changes, and a change of
+; the number alone is shown at most every 2 s: at worst about 20 ms of CPU per second, while a change
+; after a quiet moment shows within a second. The open panel lists processes every 2 s.
+pub const MM_LABEL_REFRESH_MS : i64 = 1000;
+pub const MM_LABEL_MIN_CHANGE_MS : i64 = 2000;
 pub const MM_PANEL_REFRESH_MS : i64 = 2000;
+pub const MM_TIMER_TOLERANCE_PERMILLE : i64 = 100;
 
-pub fn mm_refresh_ms(panel_open: bool) -> i64 {
-    if (panel_open) { return MM_PANEL_REFRESH_MS; }
-    return MM_LABEL_REFRESH_MS;
+; How far the timer may drift from its interval: 10 % of it, so macOS can group wake-ups.
+pub fn mm_timer_tolerance_ms(interval_ms: i64) -> i64 {
+    if (interval_ms <= 0) { return 0; }
+    return interval_ms * MM_TIMER_TOLERANCE_PERMILLE / 1000;
+}
+
+; The open panel lists processes only where the list exists (not in the App Sandbox).
+pub fn mm_lists_now(panel_open: bool, lists_processes: bool) -> bool {
+    return panel_open and lists_processes;
+}
+
+; --- The figure in the menu bar ---------------------------------------------------------------------------
+; The figure is never an old number that looks current: before the first good sample, and after
+; MM_SAMPLE_MISSES_MAX failed samples in a row, the menu bar shows the unknown mark instead.
+pub const MM_SAMPLE_MISSES_MAX : i64 = 3;
+
+pub fn mm_label_known(misses: i64, has_value: bool) -> bool {
+    return has_value and misses < MM_SAMPLE_MISSES_MAX;
+}
+
+; Whether the figure now differs from the one on screen: the percent, the pressure level, or whether it is
+; known at all. Two unknown figures are the same.
+pub fn mm_label_changes(shown_percent: i64, shown_level: u32, shown_known: bool, percent: i64, level: u32, known: bool) -> bool {
+    if (shown_known != known) { return true; }
+    if (known == false) { return false; }
+    if (shown_percent != percent) { return true; }
+    return shown_level != level;
+}
+
+; Whether a change may be shown now. Pressure, wake, panel and watchdog ticks are forced; a change of the
+; level or of the unknown mark shows at once; only the timer's change of the number alone waits until
+; MM_LABEL_MIN_CHANGE_MS after the previous change.
+pub fn mm_label_due(forced: bool, shown_level: u32, shown_known: bool, level: u32, known: bool, since_shown_ms: i64) -> bool {
+    if (forced) { return true; }
+    if (known != shown_known) { return true; }
+    if (level != shown_level) { return true; }
+    return since_shown_ms >= MM_LABEL_MIN_CHANGE_MS;
+}
+
+; The panel's numbers are published when the panel is open or the menu bar figure was just shown.
+pub fn mm_snapshot_publishes(panel_open: bool, label_shown: bool) -> bool {
+    return panel_open or label_shown;
+}
+
+; --- The menu bar watchdog -----------------------------------------------------------------------------------
+; The watchdog runs on its own thread (spike U2, 2026-10-29). It reads the age of the last tick and of the
+; last answer from the main queue. A check that runs very late means the whole process was throttled, not
+; stalled. Throttling also shows up in the field as throttled lines. DiskBloom holds no activity (spike U3).
+pub const MM_WATCHDOG_MS : i64 = 5000;
+pub const MM_STALE_MS : i64 = 10000;
+pub const MM_WATCHDOG_LATE_MS : i64 = 5000;
+pub const MM_RENUDGE_CHECKS : i64 = 12;
+pub const MM_STALE_NONE : u32 = 0;
+pub const MM_STALE_TICK : u32 = 1;
+pub const MM_STALE_QUEUE : u32 = 2;
+pub const MM_WATCHDOG_NONE : u32 = 0;
+pub const MM_WATCHDOG_NUDGE : u32 = 1;
+pub const MM_WATCHDOG_RECOVERED : u32 = 2;
+pub const MM_WATCHDOG_THROTTLED : u32 = 3;
+
+; Why the figure is stale: the tick has not run, or the main queue has not answered.
+pub fn mm_stale_reason(tick_age_ms: i64, echo_age_ms: i64) -> u32 {
+    if (tick_age_ms > MM_STALE_MS) { return MM_STALE_TICK; }
+    if (echo_age_ms > MM_STALE_MS) { return MM_STALE_QUEUE; }
+    return MM_STALE_NONE;
+}
+
+; What a check does. A late check is throttling and does nothing. While stale it nudges on the first stale
+; check and again every MM_RENUDGE_CHECKS stale checks. It reports recovery once the figure is fresh again.
+pub fn mm_watchdog_action(reason: u32, late_ms: i64, stale_checks: i64) -> u32 {
+    if (late_ms > MM_WATCHDOG_LATE_MS) { return MM_WATCHDOG_THROTTLED; }
+    if (reason != MM_STALE_NONE) {
+        if (stale_checks % MM_RENUDGE_CHECKS == 0) { return MM_WATCHDOG_NUDGE; }
+        return MM_WATCHDOG_NONE;
+    }
+    if (stale_checks > 0) { return MM_WATCHDOG_RECOVERED; }
+    return MM_WATCHDOG_NONE;
+}
+
+; The stale checks in a row after this check: a late check or a fresh figure starts again at 0.
+pub fn mm_stale_checks_next(reason: u32, late_ms: i64, stale_checks: i64) -> i64 {
+    if (late_ms > MM_WATCHDOG_LATE_MS) { return 0; }
+    if (reason != MM_STALE_NONE) { return stale_checks + 1; }
+    return 0;
+}
+
+; --- DiskBloom reopens itself --------------------------------------------------------------------------------
+; Owner yes 2026-10-29 (Q1). DiskBloom relaunches only after the figure or the main queue has been stuck for
+; more than 2 minutes, and only if all of these hold: no window is open; DiskBloom is not hidden (a hidden
+; DiskBloom keeps its windows); no move to the Trash runs; the cleanup queue is empty; no tool holds a
+; selection, a review, an open outcome report or a notice still to show (monitor mode keeps these reachable,
+; and a relaunch would lose them); outside the App Sandbox; macOS 15 or later.
+; A relaunch does not keep: a result the person can still open after a move that fully succeeded (the App
+; Uninstaller's result view, the Possible Leftovers report), and the assistant's conversation and draft. The
+; moved items stay in the Trash. The new copy starts fresh, as after a quit.
+; The watchdog acts only while its own thread runs on time: a check more than MM_WATCHDOG_LATE_MS late does
+; nothing. During a stall of the whole process it does nothing, and the first check after such a stall is
+; throttling (see the watchdog section above).
+; On macOS 14, SwiftUI cannot start the app without its window (SceneLaunchBehavior needs macOS 15), so the
+; new copy would open a window and scan the home folder. Relaunch is off there.
+; A copy that was itself relaunched waits 10 minutes before it may relaunch again. /usr/bin/open starts the
+; new copy. The old copy waits up to 3 s for open to finish (spike U4: open finished in 0.1 s). It quits
+; unless open reported a failure. If open is still running, it quits anyway, because a missing figure is more
+; honest than a stuck one.
+; Once open has run in a copy and reported a failure, that copy never runs open again: the failed open may
+; still have started a copy, and each further try could add one more.
+pub const MM_RELAUNCH_STALE_MS : i64 = 120000;
+pub const MM_RELAUNCH_MIN_UPTIME_MS : i64 = 600000;
+pub const MM_RELAUNCH_OPEN_WAIT_MS : i64 = 3000;
+
+pub fn mm_can_relaunch(sandboxed: bool, launch_suppressible: bool) -> bool {
+    return sandboxed == false and launch_suppressible;
+}
+
+pub fn mm_relaunches(tick_age_ms: i64, echo_age_ms: i64, window_open: bool, app_hidden: bool, can_quit: bool, queued: i64, keeps_tool_state: bool, can_relaunch: bool, relaunched: bool, uptime_ms: i64, open_tried: bool) -> bool {
+    if (tick_age_ms <= MM_RELAUNCH_STALE_MS and echo_age_ms <= MM_RELAUNCH_STALE_MS) { return false; }
+    if (window_open) { return false; }
+    if (app_hidden) { return false; }
+    if (can_quit == false) { return false; }
+    if (queued > 0) { return false; }
+    if (keeps_tool_state) { return false; }
+    if (can_relaunch == false) { return false; }
+    if (relaunched and uptime_ms < MM_RELAUNCH_MIN_UPTIME_MS) { return false; }
+    if (open_tried) { return false; }
+    return true;
+}
+
+; The old copy quits when open started (return code 0) and either is still running or finished with status 0.
+pub fn mm_relaunch_exits(spawn_rc: i64, open_exited: bool, open_status: i64) -> bool {
+    return spawn_rc == 0 and (open_exited == false or open_status == 0);
 }
 
 ; --- Monitor mode: only the menu bar item is in use ----------------------------------------------------
@@ -267,6 +400,53 @@ pub fn mm_monitor_action(window_open: bool, app_hidden: bool, map_moving: bool, 
 ; its Dock icon, which is how a person shows it again. Whether the Disk Map is kept does not matter here.
 pub fn mm_dock_shown(window_open: bool, app_hidden: bool) -> bool {
     return window_open or app_hidden;
+}
+
+; --- Opening the DiskBloom window ---------------------------------------------------------------------
+; "Open DiskBloom" in the panel, and opening DiskBloom again from the Finder, an alias, Spotlight or the
+; Dock, bring a DiskBloom window forward and never add a second one.
+; A copy that started with its window (every copy on macOS 14, and every copy the watchdog did not start)
+; does what DiskBloom 1.6 did: a window that can become the main window comes forward; otherwise DiskBloom
+; asks macOS to open DiskBloom, and macOS brings back a minimized window or opens a new one.
+; A copy whose window was suppressed at launch (started by the watchdog, macOS 15 and later) gets no window
+; that way: macOS only sends it a reopen request, and SwiftUI presents no suppressed window (live check
+; 2026-10-30). Such a copy decides itself, in this order: a window on screen comes forward; a hidden
+; DiskBloom is shown again; a window minimized to the Dock is restored (macOS reports it as unable to
+; become the main window, see mm_window_open); a window macOS still keeps comes forward; a request less
+; than MM_OPEN_PENDING_MS after the last new window was asked for waits for that window; otherwise the
+; main window scene opens a new window, once SwiftUI has handed DiskBloom its open-window action (the menu
+; bar item hands it over when it appears). Without that action the copy does nothing: asking macOS would
+; only send the reopen request back to DiskBloom, again and again.
+; When such a copy is opened again, DiskBloom brings its window up the same way, unless a window is
+; already on screen. Every other copy keeps the macOS default.
+pub const MM_OPEN_SHOWN : u32 = 0;
+pub const MM_OPEN_MINIMIZED : u32 = 1;
+pub const MM_OPEN_KEPT : u32 = 2;
+pub const MM_OPEN_SCENE : u32 = 3;
+pub const MM_OPEN_LAUNCH : u32 = 4;
+pub const MM_OPEN_NONE : u32 = 5;
+pub const MM_OPEN_UNHIDE : u32 = 6;
+pub const MM_OPEN_PENDING : u32 = 7;
+pub const MM_OPEN_PENDING_MS : i64 = 1000;
+
+pub fn mm_open_route(shown: bool, hidden: bool, minimized: bool, kept: bool, launch_suppressed: bool, scene_pending: bool, scene_ready: bool) -> u32 {
+    if (shown) { return MM_OPEN_SHOWN; }
+    if (launch_suppressed == false and kept) { return MM_OPEN_KEPT; }
+    if (launch_suppressed == false) { return MM_OPEN_LAUNCH; }
+    if (hidden) { return MM_OPEN_UNHIDE; }
+    if (minimized) { return MM_OPEN_MINIMIZED; }
+    if (kept) { return MM_OPEN_KEPT; }
+    if (scene_pending) { return MM_OPEN_PENDING; }
+    if (scene_ready) { return MM_OPEN_SCENE; }
+    return MM_OPEN_NONE;
+}
+
+pub fn mm_open_pending(since_scene_ms: i64) -> bool {
+    return since_scene_ms >= 0 and since_scene_ms < MM_OPEN_PENDING_MS;
+}
+
+pub fn mm_reopen_opens(launch_suppressed: bool, window_shown: bool) -> bool {
+    return launch_suppressed and window_shown == false;
 }
 
 ; --- Quitting from the panel ---------------------------------------------------------------------------
@@ -386,8 +566,6 @@ test mm_list {
     assert mm_lists_processes(false) == true;
     assert mm_notes_unreadable(0) == false;
     assert mm_notes_unreadable(4) == true;
-    assert mm_refresh_ms(true) == 2000;
-    assert mm_refresh_ms(false) == 5000;
 }
 
 test mm_monitor_mode {
@@ -422,4 +600,112 @@ test mm_monitor_mode {
     assert mm_can_quit(false, true, false, false) == false;
     assert mm_can_quit(false, false, true, false) == false;
     assert mm_can_quit(false, false, false, true) == false;
+}
+
+test mm_refresh {
+    assert MM_LABEL_REFRESH_MS == 1000;
+    assert MM_LABEL_MIN_CHANGE_MS == 2000;
+    assert MM_PANEL_REFRESH_MS == 2000;
+    assert mm_timer_tolerance_ms(1000) == 100;
+    assert mm_timer_tolerance_ms(2000) == 200;
+    assert mm_timer_tolerance_ms(0) == 0;
+    assert mm_timer_tolerance_ms(-5) == 0;
+    assert mm_lists_now(true, true) == true;
+    assert mm_lists_now(true, false) == false;
+    assert mm_lists_now(false, true) == false;
+    assert mm_lists_now(false, false) == false;
+}
+
+test mm_label {
+    assert mm_label_known(0, true) == true;
+    assert mm_label_known(2, true) == true;
+    assert mm_label_known(3, true) == false;
+    assert mm_label_known(0, false) == false;
+    assert mm_label_changes(85, 0, true, 85, 0, true) == false;
+    assert mm_label_changes(85, 0, true, 79, 0, true) == true;
+    assert mm_label_changes(85, 0, true, 85, 1, true) == true;
+    assert mm_label_changes(85, 0, true, 85, 0, false) == true;
+    assert mm_label_changes(0, 0, false, 79, 0, false) == false;
+    assert mm_label_changes(0, 0, false, 79, 0, true) == true;
+    assert mm_label_due(true, 0, true, 0, true, 0) == true;
+    assert mm_label_due(false, 0, true, 0, true, 1999) == false;
+    assert mm_label_due(false, 0, true, 0, true, 2000) == true;
+    assert mm_label_due(false, 0, true, 1, true, 0) == true;
+    assert mm_label_due(false, 0, true, 0, false, 0) == true;
+    assert mm_label_due(false, 0, false, 0, true, 0) == true;
+    assert mm_label_due(false, 0, true, 0, true, -1) == false;
+    assert mm_snapshot_publishes(false, false) == false;
+    assert mm_snapshot_publishes(true, false) == true;
+    assert mm_snapshot_publishes(false, true) == true;
+}
+
+test mm_watchdog {
+    assert mm_stale_reason(500, 500) == MM_STALE_NONE;
+    assert mm_stale_reason(10001, 0) == MM_STALE_TICK;
+    assert mm_stale_reason(0, 10001) == MM_STALE_QUEUE;
+    assert mm_stale_reason(10000, 10000) == MM_STALE_NONE;
+    assert mm_stale_reason(10001, 10001) == MM_STALE_TICK;
+    assert mm_watchdog_action(MM_STALE_TICK, 0, 0) == MM_WATCHDOG_NUDGE;
+    assert mm_watchdog_action(MM_STALE_TICK, 0, 1) == MM_WATCHDOG_NONE;
+    assert mm_watchdog_action(MM_STALE_TICK, 0, 12) == MM_WATCHDOG_NUDGE;
+    assert mm_watchdog_action(MM_STALE_TICK, 0, 24) == MM_WATCHDOG_NUDGE;
+    assert mm_watchdog_action(MM_STALE_QUEUE, 0, 0) == MM_WATCHDOG_NUDGE;
+    assert mm_watchdog_action(MM_STALE_NONE, 0, 0) == MM_WATCHDOG_NONE;
+    assert mm_watchdog_action(MM_STALE_NONE, 0, 3) == MM_WATCHDOG_RECOVERED;
+    assert mm_watchdog_action(MM_STALE_TICK, 5001, 0) == MM_WATCHDOG_THROTTLED;
+    assert mm_watchdog_action(MM_STALE_NONE, 5000, 3) == MM_WATCHDOG_RECOVERED;
+    assert mm_stale_checks_next(MM_STALE_TICK, 0, 0) == 1;
+    assert mm_stale_checks_next(MM_STALE_QUEUE, 0, 11) == 12;
+    assert mm_stale_checks_next(MM_STALE_NONE, 0, 7) == 0;
+    assert mm_stale_checks_next(MM_STALE_TICK, 5001, 7) == 0;
+}
+
+test mm_relaunch {
+    assert MM_RELAUNCH_OPEN_WAIT_MS == 3000;
+    assert mm_can_relaunch(false, true) == true;
+    assert mm_can_relaunch(true, true) == false;
+    assert mm_can_relaunch(false, false) == false;
+    assert mm_can_relaunch(true, false) == false;
+    assert mm_relaunches(120001, 0, false, false, true, 0, false, true, false, 0, false) == true;
+    assert mm_relaunches(0, 120001, false, false, true, 0, false, true, false, 0, false) == true;
+    assert mm_relaunches(120000, 120000, false, false, true, 0, false, true, false, 0, false) == false;
+    assert mm_relaunches(120001, 0, true, false, true, 0, false, true, false, 0, false) == false;
+    assert mm_relaunches(120001, 0, false, true, true, 0, false, true, false, 0, false) == false;
+    assert mm_relaunches(120001, 0, false, false, false, 0, false, true, false, 0, false) == false;
+    assert mm_relaunches(120001, 0, false, false, true, 1, false, true, false, 0, false) == false;
+    assert mm_relaunches(120001, 0, false, false, true, -1, false, true, false, 0, false) == true;
+    assert mm_relaunches(120001, 0, false, false, true, 0, true, true, false, 0, false) == false;
+    assert mm_relaunches(120001, 0, false, false, true, 0, false, false, false, 0, false) == false;
+    assert mm_relaunches(120001, 0, false, false, true, 0, false, true, true, 599999, false) == false;
+    assert mm_relaunches(120001, 0, false, false, true, 0, false, true, true, 600000, false) == true;
+    assert mm_relaunches(120001, 0, false, false, true, 0, false, true, false, 0, true) == false;
+    assert mm_relaunch_exits(0, true, 0) == true;
+    assert mm_relaunch_exits(0, false, 0) == true;
+    assert mm_relaunch_exits(0, true, 3) == false;
+    assert mm_relaunch_exits(1, false, 0) == false;
+    assert mm_relaunch_exits(1, true, 0) == false;
+}
+
+test mm_open_window {
+    assert mm_open_route(true, false, false, true, false, false, false) == MM_OPEN_SHOWN;
+    assert mm_open_route(false, false, false, true, false, false, true) == MM_OPEN_KEPT;
+    assert mm_open_route(false, false, true, false, false, false, true) == MM_OPEN_LAUNCH;
+    assert mm_open_route(false, true, false, false, false, false, true) == MM_OPEN_LAUNCH;
+    assert mm_open_route(false, false, false, false, false, true, true) == MM_OPEN_LAUNCH;
+    assert mm_open_route(true, true, true, true, true, true, true) == MM_OPEN_SHOWN;
+    assert mm_open_route(false, true, true, true, true, true, true) == MM_OPEN_UNHIDE;
+    assert mm_open_route(false, false, true, true, true, true, true) == MM_OPEN_MINIMIZED;
+    assert mm_open_route(false, false, false, true, true, true, true) == MM_OPEN_KEPT;
+    assert mm_open_route(false, false, false, false, true, true, true) == MM_OPEN_PENDING;
+    assert mm_open_route(false, false, false, false, true, true, false) == MM_OPEN_PENDING;
+    assert mm_open_route(false, false, false, false, true, false, true) == MM_OPEN_SCENE;
+    assert mm_open_route(false, false, false, false, true, false, false) == MM_OPEN_NONE;
+    assert mm_open_pending(0) == true;
+    assert mm_open_pending(999) == true;
+    assert mm_open_pending(1000) == false;
+    assert mm_open_pending(-1) == false;
+    assert mm_reopen_opens(true, false) == true;
+    assert mm_reopen_opens(true, true) == false;
+    assert mm_reopen_opens(false, false) == false;
+    assert mm_reopen_opens(false, true) == false;
 }

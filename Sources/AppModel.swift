@@ -226,6 +226,15 @@ final class AppModel: ObservableObject {
     var canGoBack: Bool { md_can_go_back(Int64(focusStack.count), Int64(navigationHistory.count)) }
 
     func startInitialScan() {
+        #if DEBUG
+        // Live checks scan a small fixture folder instead of the home folder (MonitorModeAutomation).
+        if let root = UserDefaults.standard.string(forKey: "DiskBloomAutomationMonitorRoot") {
+            let url = URL(fileURLWithPath: root, isDirectory: true)
+            guard md_starts_initial_scan(snapshot != nil, isScanning, FolderAccess.shared.hasAccess(to: url)) else { return }
+            startScan(at: url)
+            return
+        }
+        #endif
         // The sandboxed build waits on the welcome screen until the person grants a folder.
         guard md_starts_initial_scan(snapshot != nil, isScanning, FolderAccess.shared.hasAccess(to: currentURL)) else { return }
         startScan(at: currentURL)

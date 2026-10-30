@@ -1,6 +1,6 @@
 # DiskBloom Privacy Policy
 
-Last updated: October 29, 2026
+Last updated: October 30, 2026
 
 DiskBloom is a disk space analyzer and cleanup tool for macOS. It is built to work entirely on your Mac.
 
@@ -23,12 +23,14 @@ The assistant is optional and answers only when you write to it.
 
 ## The memory monitor
 
-The memory monitor in the menu bar reads, on your Mac only, how much memory is in use and the names, paths, memory use and CPU time of the running processes it is allowed to read. The paths are used only to group helper processes with their app. It shows them while the app runs and keeps nothing: no history is saved and nothing is sent anywhere. It never stops or changes a process.
+The memory monitor in the menu bar reads, on your Mac only, how much memory is in use and the names, paths, memory use and CPU time of the running processes it is allowed to read. The paths are used only to group helper processes with their app. It shows them while the app runs. It saves no memory amounts, percentages, process names or paths, and it sends nothing anywhere. It never stops or changes a process.
+
+To show when the menu bar figure stops updating, DiskBloom writes short status lines to the macOS system log on your Mac, in every edition. A line is written when DiskBloom starts, when it first reads the memory pressure level (normal, warning or critical, or that the level could not be read) and whenever that level changes, when memory cannot be read, when the Mac wakes, when the panel opens or closes, and when the figure stops updating, updates again or DiskBloom reopens itself. Besides the event, its reason and the pressure level, a line holds only times in milliseconds, yes/no states of DiskBloom (for example, whether a window is open), the number of items in the cleanup queue and status codes. The lines contain no memory amounts or percentages and no file, folder, app or process names. DiskBloom sends them nowhere; macOS keeps them for a limited time and deletes them on its own schedule.
 
 ## What DiskBloom stores on your Mac
 
 - The Mac App Store edition runs in the App Sandbox. When you grant access to a folder in the system open panel, macOS gives DiskBloom a security-scoped bookmark for that folder, and DiskBloom saves it in its own preferences so the permission survives a relaunch. You can revoke it by removing the app's container data.
-- No other data is written, except the items you explicitly move to the Trash.
+- No other data is written, except the items you explicitly move to the Trash and the status lines in the macOS system log described above.
 
 ## What DiskBloom changes
 
