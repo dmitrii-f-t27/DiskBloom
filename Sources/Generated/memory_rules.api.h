@@ -29,14 +29,40 @@
 #define MM_TOP_ROWS 8
 #define MM_MIN_ROW_BYTES 1048576
 #define MM_MIN_ROW_CPU_PERMILLE 10
-#define MM_LABEL_REFRESH_MS 5000
+#define MM_LABEL_REFRESH_MS 1000
+#define MM_LABEL_MIN_CHANGE_MS 2000
 #define MM_PANEL_REFRESH_MS 2000
+#define MM_TIMER_TOLERANCE_PERMILLE 100
+#define MM_SAMPLE_MISSES_MAX 3
+#define MM_WATCHDOG_MS 5000
+#define MM_STALE_MS 10000
+#define MM_WATCHDOG_LATE_MS 5000
+#define MM_RENUDGE_CHECKS 12
+#define MM_STALE_NONE 0
+#define MM_STALE_TICK 1
+#define MM_STALE_QUEUE 2
+#define MM_WATCHDOG_NONE 0
+#define MM_WATCHDOG_NUDGE 1
+#define MM_WATCHDOG_RECOVERED 2
+#define MM_WATCHDOG_THROTTLED 3
+#define MM_RELAUNCH_STALE_MS 120000
+#define MM_RELAUNCH_MIN_UPTIME_MS 600000
+#define MM_RELAUNCH_OPEN_WAIT_MS 3000
 #define MM_MONITOR_KEEP 0
 #define MM_MONITOR_RELEASE 1
 #define MM_MONITOR_WAIT 2
 #define MM_MONITOR_KEEP_QUEUE 3
 #define MM_MONITOR_RECHECK_MS 1000
 #define MM_RELIEF_DELAY_MS 2000
+#define MM_OPEN_SHOWN 0
+#define MM_OPEN_MINIMIZED 1
+#define MM_OPEN_KEPT 2
+#define MM_OPEN_SCENE 3
+#define MM_OPEN_LAUNCH 4
+#define MM_OPEN_NONE 5
+#define MM_OPEN_UNHIDE 6
+#define MM_OPEN_PENDING 7
+#define MM_OPEN_PENDING_MS 1000
 /* -------------------------------------------------------
    Function prototypes
    ------------------------------------------------------- */
@@ -63,11 +89,25 @@ bool mm_row_before(uint32_t mode, int64_t a_bytes, int64_t a_cpu, int64_t b_byte
 int64_t mm_rows_shown(int64_t available);
 bool mm_lists_processes(bool sandboxed);
 bool mm_notes_unreadable(int64_t unreadable);
-int64_t mm_refresh_ms(bool panel_open);
+int64_t mm_timer_tolerance_ms(int64_t interval_ms);
+bool mm_lists_now(bool panel_open, bool lists_processes);
+bool mm_label_known(int64_t misses, bool has_value);
+bool mm_label_changes(int64_t shown_percent, uint32_t shown_level, bool shown_known, int64_t percent, uint32_t level, bool known);
+bool mm_label_due(bool forced, uint32_t shown_level, bool shown_known, uint32_t level, bool known, int64_t since_shown_ms);
+bool mm_snapshot_publishes(bool panel_open, bool label_shown);
+uint32_t mm_stale_reason(int64_t tick_age_ms, int64_t echo_age_ms);
+uint32_t mm_watchdog_action(uint32_t reason, int64_t late_ms, int64_t stale_checks);
+int64_t mm_stale_checks_next(uint32_t reason, int64_t late_ms, int64_t stale_checks);
+bool mm_can_relaunch(bool sandboxed, bool launch_suppressible);
+bool mm_relaunches(int64_t tick_age_ms, int64_t echo_age_ms, bool window_open, bool app_hidden, bool can_quit, int64_t queued, bool keeps_tool_state, bool can_relaunch, bool relaunched, int64_t uptime_ms, bool open_tried);
+bool mm_relaunch_exits(int64_t spawn_rc, bool open_exited, int64_t open_status);
 bool mm_window_open(bool main_capable, bool panel, bool visible, bool miniaturized);
 bool mm_holds_map(bool has_snapshot, bool scanning, int64_t history);
 uint32_t mm_monitor_action(bool window_open, bool app_hidden, bool map_moving, int64_t queued, bool holds_map);
 bool mm_dock_shown(bool window_open, bool app_hidden);
+uint32_t mm_open_route(bool shown, bool hidden, bool minimized, bool kept, bool launch_suppressed, bool scene_pending, bool scene_ready);
+bool mm_open_pending(int64_t since_scene_ms);
+bool mm_reopen_opens(bool launch_suppressed, bool window_shown);
 bool mm_can_quit(bool map_moving, bool uninstaller_moving, bool leftovers_moving, bool caches_moving);
 /* Function bodies: see the full header. */
 #endif

@@ -33,14 +33,40 @@
 #define MM_TOP_ROWS 8
 #define MM_MIN_ROW_BYTES 1048576
 #define MM_MIN_ROW_CPU_PERMILLE 10
-#define MM_LABEL_REFRESH_MS 5000
+#define MM_LABEL_REFRESH_MS 1000
+#define MM_LABEL_MIN_CHANGE_MS 2000
 #define MM_PANEL_REFRESH_MS 2000
+#define MM_TIMER_TOLERANCE_PERMILLE 100
+#define MM_SAMPLE_MISSES_MAX 3
+#define MM_WATCHDOG_MS 5000
+#define MM_STALE_MS 10000
+#define MM_WATCHDOG_LATE_MS 5000
+#define MM_RENUDGE_CHECKS 12
+#define MM_STALE_NONE 0
+#define MM_STALE_TICK 1
+#define MM_STALE_QUEUE 2
+#define MM_WATCHDOG_NONE 0
+#define MM_WATCHDOG_NUDGE 1
+#define MM_WATCHDOG_RECOVERED 2
+#define MM_WATCHDOG_THROTTLED 3
+#define MM_RELAUNCH_STALE_MS 120000
+#define MM_RELAUNCH_MIN_UPTIME_MS 600000
+#define MM_RELAUNCH_OPEN_WAIT_MS 3000
 #define MM_MONITOR_KEEP 0
 #define MM_MONITOR_RELEASE 1
 #define MM_MONITOR_WAIT 2
 #define MM_MONITOR_KEEP_QUEUE 3
 #define MM_MONITOR_RECHECK_MS 1000
 #define MM_RELIEF_DELAY_MS 2000
+#define MM_OPEN_SHOWN 0
+#define MM_OPEN_MINIMIZED 1
+#define MM_OPEN_KEPT 2
+#define MM_OPEN_SCENE 3
+#define MM_OPEN_LAUNCH 4
+#define MM_OPEN_NONE 5
+#define MM_OPEN_UNHIDE 6
+#define MM_OPEN_PENDING 7
+#define MM_OPEN_PENDING_MS 1000
 
 /* -------------------------------------------------------
    Function prototypes
@@ -69,11 +95,25 @@ bool mm_row_before(uint32_t mode, int64_t a_bytes, int64_t a_cpu, int64_t b_byte
 int64_t mm_rows_shown(int64_t available);
 bool mm_lists_processes(bool sandboxed);
 bool mm_notes_unreadable(int64_t unreadable);
-int64_t mm_refresh_ms(bool panel_open);
+int64_t mm_timer_tolerance_ms(int64_t interval_ms);
+bool mm_lists_now(bool panel_open, bool lists_processes);
+bool mm_label_known(int64_t misses, bool has_value);
+bool mm_label_changes(int64_t shown_percent, uint32_t shown_level, bool shown_known, int64_t percent, uint32_t level, bool known);
+bool mm_label_due(bool forced, uint32_t shown_level, bool shown_known, uint32_t level, bool known, int64_t since_shown_ms);
+bool mm_snapshot_publishes(bool panel_open, bool label_shown);
+uint32_t mm_stale_reason(int64_t tick_age_ms, int64_t echo_age_ms);
+uint32_t mm_watchdog_action(uint32_t reason, int64_t late_ms, int64_t stale_checks);
+int64_t mm_stale_checks_next(uint32_t reason, int64_t late_ms, int64_t stale_checks);
+bool mm_can_relaunch(bool sandboxed, bool launch_suppressible);
+bool mm_relaunches(int64_t tick_age_ms, int64_t echo_age_ms, bool window_open, bool app_hidden, bool can_quit, int64_t queued, bool keeps_tool_state, bool can_relaunch, bool relaunched, int64_t uptime_ms, bool open_tried);
+bool mm_relaunch_exits(int64_t spawn_rc, bool open_exited, int64_t open_status);
 bool mm_window_open(bool main_capable, bool panel, bool visible, bool miniaturized);
 bool mm_holds_map(bool has_snapshot, bool scanning, int64_t history);
 uint32_t mm_monitor_action(bool window_open, bool app_hidden, bool map_moving, int64_t queued, bool holds_map);
 bool mm_dock_shown(bool window_open, bool app_hidden);
+uint32_t mm_open_route(bool shown, bool hidden, bool minimized, bool kept, bool launch_suppressed, bool scene_pending, bool scene_ready);
+bool mm_open_pending(int64_t since_scene_ms);
+bool mm_reopen_opens(bool launch_suppressed, bool window_shown);
 bool mm_can_quit(bool map_moving, bool uninstaller_moving, bool leftovers_moving, bool caches_moving);
 
 /* -------------------------------------------------------
@@ -296,11 +336,124 @@ bool mm_notes_unreadable(int64_t unreadable) {
     return (unreadable > 0);
 }
 
-int64_t mm_refresh_ms(bool panel_open) {
-    if (panel_open) {
-        return MM_PANEL_REFRESH_MS;
+int64_t mm_timer_tolerance_ms(int64_t interval_ms) {
+    if ((interval_ms <= 0)) {
+        return 0;
     }
-    return MM_LABEL_REFRESH_MS;
+    return ((interval_ms * MM_TIMER_TOLERANCE_PERMILLE) / 1000);
+}
+
+bool mm_lists_now(bool panel_open, bool lists_processes) {
+    return (panel_open && lists_processes);
+}
+
+bool mm_label_known(int64_t misses, bool has_value) {
+    return (has_value && (misses < MM_SAMPLE_MISSES_MAX));
+}
+
+bool mm_label_changes(int64_t shown_percent, uint32_t shown_level, bool shown_known, int64_t percent, uint32_t level, bool known) {
+    if ((shown_known != known)) {
+        return true;
+    }
+    if ((known == false)) {
+        return false;
+    }
+    if ((shown_percent != percent)) {
+        return true;
+    }
+    return (shown_level != level);
+}
+
+bool mm_label_due(bool forced, uint32_t shown_level, bool shown_known, uint32_t level, bool known, int64_t since_shown_ms) {
+    if (forced) {
+        return true;
+    }
+    if ((known != shown_known)) {
+        return true;
+    }
+    if ((level != shown_level)) {
+        return true;
+    }
+    return (since_shown_ms >= MM_LABEL_MIN_CHANGE_MS);
+}
+
+bool mm_snapshot_publishes(bool panel_open, bool label_shown) {
+    return (panel_open || label_shown);
+}
+
+uint32_t mm_stale_reason(int64_t tick_age_ms, int64_t echo_age_ms) {
+    if ((tick_age_ms > MM_STALE_MS)) {
+        return MM_STALE_TICK;
+    }
+    if ((echo_age_ms > MM_STALE_MS)) {
+        return MM_STALE_QUEUE;
+    }
+    return MM_STALE_NONE;
+}
+
+uint32_t mm_watchdog_action(uint32_t reason, int64_t late_ms, int64_t stale_checks) {
+    if ((late_ms > MM_WATCHDOG_LATE_MS)) {
+        return MM_WATCHDOG_THROTTLED;
+    }
+    if ((reason != MM_STALE_NONE)) {
+        if (((stale_checks % MM_RENUDGE_CHECKS) == 0)) {
+            return MM_WATCHDOG_NUDGE;
+        }
+        return MM_WATCHDOG_NONE;
+    }
+    if ((stale_checks > 0)) {
+        return MM_WATCHDOG_RECOVERED;
+    }
+    return MM_WATCHDOG_NONE;
+}
+
+int64_t mm_stale_checks_next(uint32_t reason, int64_t late_ms, int64_t stale_checks) {
+    if ((late_ms > MM_WATCHDOG_LATE_MS)) {
+        return 0;
+    }
+    if ((reason != MM_STALE_NONE)) {
+        return (stale_checks + 1);
+    }
+    return 0;
+}
+
+bool mm_can_relaunch(bool sandboxed, bool launch_suppressible) {
+    return ((sandboxed == false) && launch_suppressible);
+}
+
+bool mm_relaunches(int64_t tick_age_ms, int64_t echo_age_ms, bool window_open, bool app_hidden, bool can_quit, int64_t queued, bool keeps_tool_state, bool can_relaunch, bool relaunched, int64_t uptime_ms, bool open_tried) {
+    if (((tick_age_ms <= MM_RELAUNCH_STALE_MS) && (echo_age_ms <= MM_RELAUNCH_STALE_MS))) {
+        return false;
+    }
+    if (window_open) {
+        return false;
+    }
+    if (app_hidden) {
+        return false;
+    }
+    if ((can_quit == false)) {
+        return false;
+    }
+    if ((queued > 0)) {
+        return false;
+    }
+    if (keeps_tool_state) {
+        return false;
+    }
+    if ((can_relaunch == false)) {
+        return false;
+    }
+    if ((relaunched && (uptime_ms < MM_RELAUNCH_MIN_UPTIME_MS))) {
+        return false;
+    }
+    if (open_tried) {
+        return false;
+    }
+    return true;
+}
+
+bool mm_relaunch_exits(int64_t spawn_rc, bool open_exited, int64_t open_status) {
+    return ((spawn_rc == 0) && ((open_exited == false) || (open_status == 0)));
 }
 
 bool mm_window_open(bool main_capable, bool panel, bool visible, bool miniaturized) {
@@ -335,6 +488,42 @@ uint32_t mm_monitor_action(bool window_open, bool app_hidden, bool map_moving, i
 
 bool mm_dock_shown(bool window_open, bool app_hidden) {
     return (window_open || app_hidden);
+}
+
+uint32_t mm_open_route(bool shown, bool hidden, bool minimized, bool kept, bool launch_suppressed, bool scene_pending, bool scene_ready) {
+    if (shown) {
+        return MM_OPEN_SHOWN;
+    }
+    if (((launch_suppressed == false) && kept)) {
+        return MM_OPEN_KEPT;
+    }
+    if ((launch_suppressed == false)) {
+        return MM_OPEN_LAUNCH;
+    }
+    if (hidden) {
+        return MM_OPEN_UNHIDE;
+    }
+    if (minimized) {
+        return MM_OPEN_MINIMIZED;
+    }
+    if (kept) {
+        return MM_OPEN_KEPT;
+    }
+    if (scene_pending) {
+        return MM_OPEN_PENDING;
+    }
+    if (scene_ready) {
+        return MM_OPEN_SCENE;
+    }
+    return MM_OPEN_NONE;
+}
+
+bool mm_open_pending(int64_t since_scene_ms) {
+    return ((since_scene_ms >= 0) && (since_scene_ms < MM_OPEN_PENDING_MS));
+}
+
+bool mm_reopen_opens(bool launch_suppressed, bool window_shown) {
+    return (launch_suppressed && (window_shown == false));
 }
 
 bool mm_can_quit(bool map_moving, bool uninstaller_moving, bool leftovers_moving, bool caches_moving) {
@@ -469,8 +658,6 @@ void test_mm_list(void) {
     assert((mm_lists_processes(false) == true));
     assert((mm_notes_unreadable(0) == false));
     assert((mm_notes_unreadable(4) == true));
-    assert((mm_refresh_ms(true) == 2000));
-    assert((mm_refresh_ms(false) == 5000));
 }
 
 void test_mm_monitor_mode(void) {
@@ -507,6 +694,114 @@ void test_mm_monitor_mode(void) {
     assert((mm_can_quit(false, false, false, true) == false));
 }
 
+void test_mm_refresh(void) {
+    assert((MM_LABEL_REFRESH_MS == 1000));
+    assert((MM_LABEL_MIN_CHANGE_MS == 2000));
+    assert((MM_PANEL_REFRESH_MS == 2000));
+    assert((mm_timer_tolerance_ms(1000) == 100));
+    assert((mm_timer_tolerance_ms(2000) == 200));
+    assert((mm_timer_tolerance_ms(0) == 0));
+    assert((mm_timer_tolerance_ms(-5) == 0));
+    assert((mm_lists_now(true, true) == true));
+    assert((mm_lists_now(true, false) == false));
+    assert((mm_lists_now(false, true) == false));
+    assert((mm_lists_now(false, false) == false));
+}
+
+void test_mm_label(void) {
+    assert((mm_label_known(0, true) == true));
+    assert((mm_label_known(2, true) == true));
+    assert((mm_label_known(3, true) == false));
+    assert((mm_label_known(0, false) == false));
+    assert((mm_label_changes(85, 0, true, 85, 0, true) == false));
+    assert((mm_label_changes(85, 0, true, 79, 0, true) == true));
+    assert((mm_label_changes(85, 0, true, 85, 1, true) == true));
+    assert((mm_label_changes(85, 0, true, 85, 0, false) == true));
+    assert((mm_label_changes(0, 0, false, 79, 0, false) == false));
+    assert((mm_label_changes(0, 0, false, 79, 0, true) == true));
+    assert((mm_label_due(true, 0, true, 0, true, 0) == true));
+    assert((mm_label_due(false, 0, true, 0, true, 1999) == false));
+    assert((mm_label_due(false, 0, true, 0, true, 2000) == true));
+    assert((mm_label_due(false, 0, true, 1, true, 0) == true));
+    assert((mm_label_due(false, 0, true, 0, false, 0) == true));
+    assert((mm_label_due(false, 0, false, 0, true, 0) == true));
+    assert((mm_label_due(false, 0, true, 0, true, -1) == false));
+    assert((mm_snapshot_publishes(false, false) == false));
+    assert((mm_snapshot_publishes(true, false) == true));
+    assert((mm_snapshot_publishes(false, true) == true));
+}
+
+void test_mm_watchdog(void) {
+    assert((mm_stale_reason(500, 500) == MM_STALE_NONE));
+    assert((mm_stale_reason(10001, 0) == MM_STALE_TICK));
+    assert((mm_stale_reason(0, 10001) == MM_STALE_QUEUE));
+    assert((mm_stale_reason(10000, 10000) == MM_STALE_NONE));
+    assert((mm_stale_reason(10001, 10001) == MM_STALE_TICK));
+    assert((mm_watchdog_action(MM_STALE_TICK, 0, 0) == MM_WATCHDOG_NUDGE));
+    assert((mm_watchdog_action(MM_STALE_TICK, 0, 1) == MM_WATCHDOG_NONE));
+    assert((mm_watchdog_action(MM_STALE_TICK, 0, 12) == MM_WATCHDOG_NUDGE));
+    assert((mm_watchdog_action(MM_STALE_TICK, 0, 24) == MM_WATCHDOG_NUDGE));
+    assert((mm_watchdog_action(MM_STALE_QUEUE, 0, 0) == MM_WATCHDOG_NUDGE));
+    assert((mm_watchdog_action(MM_STALE_NONE, 0, 0) == MM_WATCHDOG_NONE));
+    assert((mm_watchdog_action(MM_STALE_NONE, 0, 3) == MM_WATCHDOG_RECOVERED));
+    assert((mm_watchdog_action(MM_STALE_TICK, 5001, 0) == MM_WATCHDOG_THROTTLED));
+    assert((mm_watchdog_action(MM_STALE_NONE, 5000, 3) == MM_WATCHDOG_RECOVERED));
+    assert((mm_stale_checks_next(MM_STALE_TICK, 0, 0) == 1));
+    assert((mm_stale_checks_next(MM_STALE_QUEUE, 0, 11) == 12));
+    assert((mm_stale_checks_next(MM_STALE_NONE, 0, 7) == 0));
+    assert((mm_stale_checks_next(MM_STALE_TICK, 5001, 7) == 0));
+}
+
+void test_mm_relaunch(void) {
+    assert((MM_RELAUNCH_OPEN_WAIT_MS == 3000));
+    assert((mm_can_relaunch(false, true) == true));
+    assert((mm_can_relaunch(true, true) == false));
+    assert((mm_can_relaunch(false, false) == false));
+    assert((mm_can_relaunch(true, false) == false));
+    assert((mm_relaunches(120001, 0, false, false, true, 0, false, true, false, 0, false) == true));
+    assert((mm_relaunches(0, 120001, false, false, true, 0, false, true, false, 0, false) == true));
+    assert((mm_relaunches(120000, 120000, false, false, true, 0, false, true, false, 0, false) == false));
+    assert((mm_relaunches(120001, 0, true, false, true, 0, false, true, false, 0, false) == false));
+    assert((mm_relaunches(120001, 0, false, true, true, 0, false, true, false, 0, false) == false));
+    assert((mm_relaunches(120001, 0, false, false, false, 0, false, true, false, 0, false) == false));
+    assert((mm_relaunches(120001, 0, false, false, true, 1, false, true, false, 0, false) == false));
+    assert((mm_relaunches(120001, 0, false, false, true, -1, false, true, false, 0, false) == true));
+    assert((mm_relaunches(120001, 0, false, false, true, 0, true, true, false, 0, false) == false));
+    assert((mm_relaunches(120001, 0, false, false, true, 0, false, false, false, 0, false) == false));
+    assert((mm_relaunches(120001, 0, false, false, true, 0, false, true, true, 599999, false) == false));
+    assert((mm_relaunches(120001, 0, false, false, true, 0, false, true, true, 600000, false) == true));
+    assert((mm_relaunches(120001, 0, false, false, true, 0, false, true, false, 0, true) == false));
+    assert((mm_relaunch_exits(0, true, 0) == true));
+    assert((mm_relaunch_exits(0, false, 0) == true));
+    assert((mm_relaunch_exits(0, true, 3) == false));
+    assert((mm_relaunch_exits(1, false, 0) == false));
+    assert((mm_relaunch_exits(1, true, 0) == false));
+}
+
+void test_mm_open_window(void) {
+    assert((mm_open_route(true, false, false, true, false, false, false) == MM_OPEN_SHOWN));
+    assert((mm_open_route(false, false, false, true, false, false, true) == MM_OPEN_KEPT));
+    assert((mm_open_route(false, false, true, false, false, false, true) == MM_OPEN_LAUNCH));
+    assert((mm_open_route(false, true, false, false, false, false, true) == MM_OPEN_LAUNCH));
+    assert((mm_open_route(false, false, false, false, false, true, true) == MM_OPEN_LAUNCH));
+    assert((mm_open_route(true, true, true, true, true, true, true) == MM_OPEN_SHOWN));
+    assert((mm_open_route(false, true, true, true, true, true, true) == MM_OPEN_UNHIDE));
+    assert((mm_open_route(false, false, true, true, true, true, true) == MM_OPEN_MINIMIZED));
+    assert((mm_open_route(false, false, false, true, true, true, true) == MM_OPEN_KEPT));
+    assert((mm_open_route(false, false, false, false, true, true, true) == MM_OPEN_PENDING));
+    assert((mm_open_route(false, false, false, false, true, true, false) == MM_OPEN_PENDING));
+    assert((mm_open_route(false, false, false, false, true, false, true) == MM_OPEN_SCENE));
+    assert((mm_open_route(false, false, false, false, true, false, false) == MM_OPEN_NONE));
+    assert((mm_open_pending(0) == true));
+    assert((mm_open_pending(999) == true));
+    assert((mm_open_pending(1000) == false));
+    assert((mm_open_pending(-1) == false));
+    assert((mm_reopen_opens(true, false) == true));
+    assert((mm_reopen_opens(true, true) == false));
+    assert((mm_reopen_opens(false, false) == false));
+    assert((mm_reopen_opens(false, true) == false));
+}
+
 
 /* -------------------------------------------------------
    Test runner (compile with -DT27_TEST_MAIN to execute)
@@ -521,7 +816,12 @@ int main(void) {
     test_mm_groups();
     test_mm_list();
     test_mm_monitor_mode();
-    printf("All %d tests passed.\n", 6);
+    test_mm_refresh();
+    test_mm_label();
+    test_mm_watchdog();
+    test_mm_relaunch();
+    test_mm_open_window();
+    printf("All %d tests passed.\n", 11);
     return 0;
 }
 #endif /* T27_TEST_MAIN */

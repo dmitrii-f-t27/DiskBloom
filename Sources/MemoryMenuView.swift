@@ -1,17 +1,34 @@
 import AppKit
 import SwiftUI
 
-/// The menu bar item: a memory chip and the share of memory in use.
+/// What the menu bar item shows. Only `MenuBarController` sets it, and only when the figure changes, so the
+/// label (and macOS's menu bar) redraw only then.
+@MainActor
+final class MenuBarLabelModel: ObservableObject, MenuBarDisplay {
+    @Published private(set) var label = MenuBarLabel.unknown
+
+    func show(_ label: MenuBarLabel) {
+        if self.label != label { self.label = label }
+    }
+}
+
+/// The menu bar item: a memory chip and the share of memory in use. The item exists from launch, also in a
+/// copy started without its window, so it hands the window-opening action to `MainWindow`.
 struct MemoryMenuLabel: View {
-    @ObservedObject var monitor: MemoryMonitorModel
+    @ObservedObject var model: MenuBarLabelModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: monitor.snapshot.level == .normal ? "memorychip" : "memorychip.fill")
-            Text(monitor.percentText)
+            Image(systemName: model.label.symbol)
+            Text(model.label.title)
                 .monospacedDigit()
         }
-        .accessibilityLabel("Memory \(monitor.percentText) used, pressure \(monitor.snapshot.level.title)")
+        .accessibilityLabel(model.label.accessibility)
+        .onAppear {
+            let action = openWindow
+            MainWindow.register { action(id: MainWindow.sceneID) }
+        }
     }
 }
 
@@ -20,6 +37,11 @@ struct MemoryMenuPanel: View {
     @ObservedObject var monitor: MemoryMonitorModel
     /// False while a move to the Trash runs (Specs/memory_rules.t27, mm_can_quit).
     let canQuit: Bool
+    /// Called when the panel appears and disappears, one run-loop turn later: setting published values from
+    /// inside a view update is a SwiftUI fault. The run loop (not a Task) is used because a Task runs from
+    /// the main dispatch queue.
+    let opened: @MainActor @Sendable () -> Void
+    let closed: @MainActor @Sendable () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -32,8 +54,8 @@ struct MemoryMenuPanel: View {
         }
         .padding(14)
         .frame(width: 360)
-        .onAppear { monitor.panelAppeared() }
-        .onDisappear { monitor.panelDisappeared() }
+        .onAppear { let f = opened; MainRunLoop.perform { f() } }
+        .onDisappear { let f = closed; MainRunLoop.perform { f() } }
     }
 
     private var snapshot: MemorySnapshot { monitor.snapshot }
