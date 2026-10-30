@@ -4,9 +4,9 @@ DiskBloom is a local, native macOS app that shows where your disk space went, sa
 
 ## Download and install
 
-**[Download DiskBloom 1.6 for macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.6.0/DiskBloom-1.6.0-macOS-arm64.dmg)**
+**[Download DiskBloom 1.7 for macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.0/DiskBloom-1.7.0-macOS-arm64.dmg)**
 
-[ZIP archive](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.6.0/DiskBloom-1.6.0-macOS-arm64.zip) · [All releases](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.6.0/SHA256SUMS)
+[ZIP archive](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.0/DiskBloom-1.7.0-macOS-arm64.zip) · [All releases](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.0/SHA256SUMS)
 
 Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later.** The direct download does not support Intel Macs. The interface is in English.
 
@@ -14,7 +14,7 @@ Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or la
 2. Open DiskBloom from Applications. The prebuilt app does not need Xcode.
 3. Choose a tool and a folder to analyze. The duplicate finder is read-only; cleanup actions in the other tools need a separate confirmation.
 
-**Signature status:** version 1.6 (build 7) from GitHub has a local ad-hoc signature, without a Developer ID and without Apple notarization. macOS may block the first launch. If you trust this release, try to open the app once, then use the per-app permission in System Settings → Privacy & Security. Do not turn off Gatekeeper for the whole system. [Apple's instructions](https://support.apple.com/102445).
+**Signature status:** version 1.7 (build 8) from GitHub has a local ad-hoc signature, without a Developer ID and without Apple notarization. macOS may block the first launch. If you trust this release, try to open the app once, then use the per-app permission in System Settings → Privacy & Security. Do not turn off Gatekeeper for the whole system. [Apple's instructions](https://support.apple.com/102445).
 
 ## Features
 
@@ -25,7 +25,7 @@ Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or la
 - the long tail of small items is merged into a safe virtual "Other" group;
 - a cleanup queue with exact paths and the total size;
 - re-measurement, a content fingerprint, path and file identity checks before any move;
-- only `FileManager.trashItem` is used — there is no direct permanent deletion;
+- only `FileManager.trashItem` moves items, or, for a protected application in the direct edition, a request to Finder — there is no direct permanent deletion;
 - system folders and the root of the home folder are view-only.
 
 ## Caches
@@ -56,7 +56,7 @@ While DiskBloom runs, the menu bar shows a memory chip and the share of memory i
 - **what uses it**: the apps and services that hold the most memory or use the most CPU, each app together with its helper processes; switch the order between Memory and CPU;
 - buttons to open DiskBloom or Activity Monitor, and to quit DiskBloom. Quit is unavailable while a move to the Trash runs.
 
-The panel only reads. It does not stop or change any process. Processes of other users (system services such as the window server) need administrator rights to be read, so the panel counts them but does not list them. The figure in the menu bar is read every second and changes as soon as memory use changes; when only the number moves, it changes at most every 2 seconds. While the panel is open its figures refresh every second and its list every 2 seconds. If DiskBloom cannot read the figure, the menu bar shows —% instead of an old number. If the figure stops updating for more than 2 minutes, DiskBloom reopens itself without a window, but only on macOS 15 or later, outside the App Store edition, and only while macOS still lets DiskBloom's own watchdog run at least every 10 seconds: if macOS stops or holds back the whole app, DiskBloom cannot act. It does not reopen while a DiskBloom window is open, DiskBloom is hidden, a move to the Trash runs, the cleanup queue has items, or a tool holds a selection, a review, an open report or a notice still to show. A copy that reopened itself waits 10 minutes before it may do so again, and a copy whose reopen started but failed does not try again. The reopened copy starts fresh: the tools' results and the assistant's conversation are not kept.
+The panel only reads. It does not stop or change any process. Processes of other users (system services such as the window server) need administrator rights to be read, so the panel counts them but does not list them. The figure in the menu bar is read every second and changes as soon as memory use changes; when only the number moves, it changes at most every 2 seconds. While the panel is open its figures refresh every second and its list every 2 seconds. If DiskBloom cannot read the figure three times in a row, about 3 seconds, the menu bar shows —% instead of an old number. If the figure stops updating for more than 2 minutes, DiskBloom reopens itself without a window, but only on macOS 15 or later, outside the App Store edition, and only while macOS still lets DiskBloom's own watchdog run at least every 10 seconds: if macOS stops or holds back the whole app, DiskBloom cannot act. It does not reopen while a DiskBloom window is open, DiskBloom is hidden, a move to the Trash runs, the cleanup queue has items, or a tool holds a selection, a review, an open report or a notice still to show. A copy that reopened itself waits 10 minutes before it may do so again, and a copy whose reopen started but failed does not try again. The reopened copy starts fresh: the tools' results and the assistant's conversation are not kept.
 
 **Monitor mode.** When you close DiskBloom's last window, the app stays in the menu bar, leaves the Dock until a DiskBloom window is open again (if you keep DiskBloom in the Dock, its icon stays there without the dot of an open app), and drops the Disk Map's scan results. In our test on macOS 27 (a scan of /System/Library), DiskBloom used about 60 MB 45 seconds after its window closed, against 190 MB with the window open. After a scan of a home folder, whose map is much larger, it used about 240 MB 45 seconds after the window closed, against about 1 GB with it open. Opening the window again starts the Disk Map from the beginning, as at launch. The Disk Map is kept while its move to the Trash runs or while items wait in its cleanup queue. The other tools keep their results.
 
@@ -76,7 +76,7 @@ For the selected application DiskBloom:
 - blocks system applications, `com.apple.*`, DiskBloom itself, network, read-only and cloud paths, symlinked paths, a running app or helper and any running copy with the same bundle ID;
 - re-checks the whole selection before review and every item inside `NSFileCoordinator`; for a trusted plan it re-verifies the bundle snapshot, the Apple-anchored signature, Team ID, signing identifier and App Groups;
 - moves the `.app` first; if that fails, related data is left untouched, and a later failure stops the remaining queue and keeps a report;
-- if macOS refuses to move the `.app` because it belongs to the system administrator account (root) or its folder is protected, the direct edition offers **Move with Administrator Password…**: DiskBloom checks the same reviewed selection and your Trash again and asks Finder to move the application; Finder asks macOS for your administrator password (or Touch ID, if this Mac offers it), and after that check Finder moves the application to the Trash. An open handle confirms that the application is in your Trash and that the original path is gone. DiskBloom never sees the password and runs nothing as administrator. The App Store edition explains the cause and offers Reveal in Finder instead;
+- if macOS refuses to move a `.app` in `/Applications` or `~/Applications` (directly or in one folder inside) because it belongs to the system administrator account (root) or its folder is protected, the direct edition offers **Move with Administrator Password…**: DiskBloom checks the same reviewed selection and your Trash again and asks Finder to move the application; Finder asks macOS for your administrator password (or Touch ID, if this Mac offers it), and after that check Finder moves the application to the Trash. An open handle confirms that the application is in your Trash and that the original path is gone. DiskBloom never sees the password and runs nothing as administrator. The App Store edition explains the cause and offers Reveal in Finder instead;
 - if the system Trash does not return a result with a confirmable identity, marks the path as unconfirmed and blocks automatic retry until the original path is checked separately;
 - after a partial failure keeps the plan, marks the rows that were already moved, shows the full report and lets you start a new analysis explicitly;
 - before continuing an old plan after the `.app` was moved, checks the standard application folders, LaunchServices registration, the original path and running processes; if another copy appears, a new analysis is required.
@@ -135,7 +135,7 @@ open -n DiskBloom.app
 To create the ZIP, DMG and `SHA256SUMS` from the built app:
 
 ```bash
-./package-release.sh
+./package-release.sh 1.7.0
 ```
 
 The packages are created in `release/` and published as separate GitHub Release assets. Local verification logs, test data, certificates and built packages are not part of the git history.
@@ -156,7 +156,7 @@ The Mac App Store build is produced by `DiskBloom.xcodeproj`, which is generated
 ARCH=x86_64 ./Tests/run-smoke-tests.sh   # Intel slice, runs under Rosetta
 ```
 
-Eight smoke suites cover the scanner, cleanup safety, app removal, possible leftovers, the duplicate finder, the cache explorer, the memory monitor and the administrator move through Finder (with a stand-in for Finder). The script also runs every t27 spec's own tests and eleven differential tests that compare the t27 rules with the Swift rules they replaced. Tests build their own fixtures inside `.build/` and never call the real Trash or Finder: the move coordinators use an injected mover and an injected Finder request.
+Eight smoke suites cover the scanner, cleanup safety, app removal, possible leftovers, the duplicate finder, the cache explorer, the memory monitor and the administrator move through Finder (with a stand-in for Finder). The script also runs every t27 spec's own tests and eleven differential tests that compare the t27 rules with the Swift rules they replaced. Tests build their own fixtures inside `.build/` and never call the real Trash or Finder: the move coordinators use an injected mover and an injected Finder request. Some differential tests also read real names and sizes from the home folder, `/Applications` and `/System`, and change nothing there.
 
 ## Important limitations
 

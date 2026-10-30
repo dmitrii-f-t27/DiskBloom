@@ -1,3 +1,43 @@
+# DiskBloom 1.7.0
+
+The memory figure in the menu bar now updates with memory use, and the App Uninstaller can finish removing a protected application with your administrator password. App version: 1.7, build 8.
+
+## Download
+
+- **DiskBloom-1.7.0-macOS-arm64.dmg** — open the image and drag DiskBloom to Applications.
+- **DiskBloom-1.7.0-macOS-arm64.zip** — the same app as a ZIP archive.
+- **SHA256SUMS** — SHA-256 of both files to verify your download.
+
+Requirements: a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later. The prebuilt app does not need Xcode. Intel Macs are not supported by this download.
+
+## What's new
+
+- **A live memory figure**: the figure in the menu bar is read every second. When only the number moves, it changes at most every 2 seconds; a change of the memory pressure level shows at once.
+- **No old number when memory cannot be read**: after three failed reads in a row, about 3 seconds, the menu bar shows `—%`.
+- **DiskBloom watches its own figure**: if the figure stops updating, DiskBloom restarts its timer. If the figure stays stale for more than 2 minutes, DiskBloom reopens itself without a window. This happens on macOS 15 or later, not in the Mac App Store edition, and not while a DiskBloom window is open, DiskBloom is hidden, a move to the Trash runs, the cleanup queue has items, or a tool holds a selection, a review, an open report or a notice still to show. A reopened copy starts fresh: the tools' results and the assistant's conversation are not kept. A reopened copy waits 10 minutes before it may reopen again, and a copy whose reopen started but failed does not try again.
+- **Move with Administrator Password…**: if macOS refuses to move an application in `/Applications` or `~/Applications` (directly or in one folder inside) because it belongs to the system administrator account (root) or its folder is protected, the direct edition offers this button in the App Uninstaller. DiskBloom checks the same reviewed selection and your Trash again, then asks Finder to move the application; Finder asks macOS for your administrator password. The first time, macOS asks whether DiskBloom may control Finder. The password goes to macOS, never to DiskBloom. An application that belongs to root still belongs to root in the Trash, so restoring it or emptying the Trash may ask for the password again. The Mac App Store edition does not offer this.
+- **The Dock in monitor mode**: when the last window closes, DiskBloom leaves the Dock until a window is open again. If you keep DiskBloom in the Dock, its icon stays without the dot of an open app. A minimized window now counts as open, so it keeps the Disk Map.
+- After this update the DiskBloom window may come back once at its default size.
+- The new rules are written in t27 like the rest of the app: `Specs/memory_rules.t27`, `Specs/move_rules.t27` and `Specs/model_rules.t27`. One exception: the list of tool states that keep DiskBloom from reopening itself is still kept in Swift.
+
+## Known limits
+
+- A stall that stops the whole app, its background threads included, may also stop the check that reopens it. Then the figure can stay on the old number until the app runs again.
+- The check was not tested during real low memory, and the reopening was not tested on a release build. The live figure was compared with `vm_stat` on one Mac with macOS 27. Nothing was run on macOS 14 or 15.
+- Put Back has not been verified for an application that belongs to root.
+
+## Privacy
+
+To show when the menu bar figure stops updating, DiskBloom now writes short status lines to the macOS system log on your Mac. The lines contain no memory amounts or percentages and no file, folder, app or process names, and DiskBloom sends them nowhere. [PRIVACY.md](https://github.com/dmitrii-f-t27/DiskBloom/blob/main/PRIVACY.md) lists them. The memory monitor still reads process names and paths on the Mac only and sends nothing. The disk tools still never use the network. Only the optional assistant, when you connect an API, sends your questions and the names, paths and sizes it looks up to the provider you chose.
+
+## Signature and first launch
+
+**This release is ad-hoc signed, without a Developer ID and without Apple notarization.** macOS may block the first launch. If you trust this release, try to open the app once, then check the permission for DiskBloom in System Settings → Privacy & Security. Do not turn off protection for the whole system. [Apple's instructions](https://support.apple.com/102445).
+
+## Verification before release
+
+The strict Swift 6 build, the signature integrity check, all eight smoke suites, the eleven differential tests and the 80 spec tests passed on Apple silicon. The Mac App Store edition is prepared but not yet published. Its project was built as a universal Release binary without code signing and was not run. Its Intel (x86_64) slice was compiled but not tested: Rosetta is not installed on the build Mac, so the x86_64 smoke and spec tests were not run for this release. The ZIP and DMG were checked again after packaging.
+
 # DiskBloom 1.6.0
 
 A memory monitor in the menu bar, and disk scans that use less memory. Everything else works as in 1.5. App version: 1.6, build 7.
