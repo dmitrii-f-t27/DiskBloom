@@ -94,6 +94,7 @@ bool md_uninstall_can_reanalyse(bool has_application, bool moving, bool app_move
 bool md_uninstall_can_toggle(bool moving, bool required, bool selectable, bool already_moved);
 bool md_uninstall_can_reveal(bool moving, bool already_moved);
 bool md_uninstall_can_move(bool has_plan, bool moving, bool uncertain);
+bool md_uninstall_can_admin_move(bool has_plan, bool moving, bool reviewing, bool uncertain, bool app_moved, bool offered);
 uint32_t md_review_step(uint32_t index, bool app_moved, bool sandboxed);
 bool md_can_open_uninstall_review(bool has_plan, bool reviewing, bool moving);
 bool md_running_check_applies(bool app_moved, bool has_application);

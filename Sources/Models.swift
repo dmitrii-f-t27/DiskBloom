@@ -27,7 +27,36 @@ enum FileIdentity {
             return lstat(path, &info)
         }
         guard result == 0 else { return nil }
-        return [
+        return relocationString(info)
+    }
+
+    /// The same identifier, read from an open descriptor (it follows the item through renames).
+    static func relocationIdentifier(descriptor: Int32) -> String? {
+        var info = stat()
+        guard fstat(descriptor, &info) == 0 else { return nil }
+        return relocationString(info)
+    }
+
+    /// Whether the open descriptor is a folder, or nil when it cannot be read.
+    static func isDirectory(descriptor: Int32) -> Bool? {
+        var info = stat()
+        guard fstat(descriptor, &info) == 0 else { return nil }
+        return (info.st_mode & S_IFMT) == S_IFDIR
+    }
+
+    /// "device:inode" of the item at the path itself (a symlink is not followed).
+    static func volumeAndInode(for url: URL) -> String? {
+        var info = stat()
+        let result = url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return Int32(-1) }
+            return lstat(path, &info)
+        }
+        guard result == 0 else { return nil }
+        return "\(info.st_dev):\(info.st_ino)"
+    }
+
+    private static func relocationString(_ info: stat) -> String {
+        [
             String(info.st_dev),
             String(info.st_ino),
             String(info.st_mode),

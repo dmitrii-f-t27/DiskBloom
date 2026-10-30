@@ -5,7 +5,10 @@
 ; inside the file coordinator before each item moves, and around re-reading the application's
 ; signature; Swift runs one step at a time and stops at the first that fails, so expensive steps run
 ; only when the cheaper ones passed. After a move it decides whether the move is confirmed, whether a
-; failed move counts as uncertain, and whether the rest of the queue continues. ASCII only.
+; failed move counts as uncertain, and whether the rest of the queue continues. When the bundle's own
+; move is refused for lack of permission, it also gives the checks around asking Finder to move the
+; same bundle (Finder asks macOS for the administrator password), how the file system state after
+; Finder's reply is read, and whether to retry; Finder's reply code only chooses the message. ASCII only.
 ; Generated C: Sources/Generated/move_rules.h (Specs/generate.sh).
 
 module DiskBloomMoveRules;
@@ -20,6 +23,12 @@ pub const MV_UNINSTALLER : u32 = 3;
 pub const MV_PHASE_QUEUE : u32 = 0;
 pub const MV_PHASE_ITEM : u32 = 1;
 pub const MV_PHASE_SIGNATURE : u32 = 2;
+; before coordination: the whole reviewed selection, the Trash, then the Automation permission
+pub const MV_PHASE_ADMIN_QUEUE : u32 = 3;
+; inside file coordination, for the bundle
+pub const MV_PHASE_ADMIN_ITEM : u32 = 4;
+; after coordination, immediately before Finder is asked
+pub const MV_PHASE_ADMIN_SEND : u32 = 5;
 
 pub const MV_STEP_END : u32 = 0;
 pub const MV_STEP_OVERLAP : u32 = 1;
@@ -36,6 +45,14 @@ pub const MV_STEP_SNAPSHOT : u32 = 11;
 pub const MV_STEP_SIGNATURE_UNCHANGED : u32 = 12;
 ; Leftovers check each item's owners and then its folder before moving to the next item.
 pub const MV_STEP_OWNERS_AND_VALIDATE_EACH : u32 = 13;
+; macOS lets DiskBloom send Finder this request (may show its consent prompt)
+pub const MV_STEP_AUTOMATION : u32 = 14;
+; open the item without following links; its identity must be the captured one
+pub const MV_STEP_OPEN_HANDLE : u32 = 15;
+; the path, the open handle and the URL still resolve to the captured item
+pub const MV_STEP_HANDLE_UNCHANGED : u32 = 16;
+; the user's Trash is a real folder of the user on the item's volume
+pub const MV_STEP_TRASH_READY : u32 = 17;
 
 ; The step at `index` of a phase; MV_STEP_END after the last.
 ;   required    (item phase, uninstaller) the item is the application bundle
@@ -98,6 +115,30 @@ pub fn mv_step(kind: u32, phase: u32, index: u32, required: bool, app_moved: boo
         if (index == 4) { return MV_STEP_SNAPSHOT; }
         return MV_STEP_END;
     }
+    if (phase == MV_PHASE_ADMIN_QUEUE or phase == MV_PHASE_ADMIN_ITEM or phase == MV_PHASE_ADMIN_SEND) {
+        if (kind != MV_UNINSTALLER or required == false or app_moved) { return MV_STEP_END; }
+        if (phase == MV_PHASE_ADMIN_QUEUE) {
+            if (index == 0) { return MV_STEP_OVERLAP; }
+            if (index == 1) { return MV_STEP_RUNNING; }
+            if (index == 2) { return MV_STEP_SIGNATURE; }
+            if (index == 3) { return MV_STEP_VALIDATE_ALL; }
+            if (index == 4) { return MV_STEP_TRASH_READY; }
+            if (index == 5) { return MV_STEP_AUTOMATION; }
+            return MV_STEP_END;
+        }
+        if (phase == MV_PHASE_ADMIN_ITEM) {
+            if (index == 0) { return MV_STEP_RUNNING; }
+            if (index == 1) { return MV_STEP_SIGNATURE; }
+            if (index == 2) { return MV_STEP_VALIDATE; }
+            if (index == 3) { return MV_STEP_CAPTURE_IDENTITY; }
+            if (index == 4) { return MV_STEP_OPEN_HANDLE; }
+            return MV_STEP_END;
+        }
+        if (index == 0) { return MV_STEP_RUNNING; }
+        if (index == 1) { return MV_STEP_TRASH_READY; }
+        if (index == 2) { return MV_STEP_HANDLE_UNCHANGED; }
+        return MV_STEP_END;
+    }
     return MV_STEP_END;
 }
 
@@ -139,6 +180,117 @@ pub fn mv_uncertain(kind: u32, how: u32, source_still_exists: bool) -> bool {
 ; uninstaller stop, because the next item may depend on the one that failed.
 pub fn mv_stop_after_failure(kind: u32) -> bool {
     return kind == MV_LEFTOVERS or kind == MV_UNINSTALLER;
+}
+
+; --- When a refused bundle move is offered to Finder ----------------------------------------------------
+; The kind of error the plain move threw. Permission means POSIX EACCES (13) or EPERM (1), or Cocoa 513
+; with no POSIX cause underneath or with one of those two.
+pub const MV_ERR_OTHER : u32 = 0;
+pub const MV_ERR_PERMISSION : u32 = 1;
+
+pub fn mv_error_kind(cocoa_domain: bool, posix_domain: bool, code: i64, underlying_posix: bool, underlying_code: i64) -> u32 {
+    if (posix_domain) {
+        if (code == 13 or code == 1) { return MV_ERR_PERMISSION; }
+        return MV_ERR_OTHER;
+    }
+    if (cocoa_domain and code == 513) {
+        if (underlying_posix) {
+            if (underlying_code == 13 or underlying_code == 1) { return MV_ERR_PERMISSION; }
+            return MV_ERR_OTHER;
+        }
+        return MV_ERR_PERMISSION;
+    }
+    return MV_ERR_OTHER;
+}
+
+; Why the move needs more than the user's own rights: the application belongs to root, or it belongs
+; to the user and the folder that contains it is not writable. Anything else gets no offer.
+pub const MV_CAUSE_NONE : u32 = 0;
+pub const MV_CAUSE_ROOT_OWNER : u32 = 1;
+pub const MV_CAUSE_PARENT_LOCKED : u32 = 2;
+
+pub fn mv_admin_cause(owner_is_self: bool, owner_is_root: bool, parent_writable: bool) -> u32 {
+    if (owner_is_self) {
+        if (parent_writable) { return MV_CAUSE_NONE; }
+        return MV_CAUSE_PARENT_LOCKED;
+    }
+    if (owner_is_root) { return MV_CAUSE_ROOT_OWNER; }
+    return MV_CAUSE_NONE;
+}
+
+; The bundle sits directly in an application root (depth 1) or in one plain folder inside it (depth 2).
+pub fn mv_admin_root_ok(depth: i64, intermediate_plain: bool) -> bool {
+    return depth == 1 or (depth == 2 and intermediate_plain);
+}
+
+; Whether to offer the Finder move (direct edition) or only an explanation (sandboxed edition).
+pub const MV_OFFER_NONE : u32 = 0;
+pub const MV_OFFER_FINDER_ADMIN : u32 = 1;
+pub const MV_OFFER_REVEAL : u32 = 2;
+
+pub fn mv_admin_offer(kind: u32, required: bool, error_kind: u32, source_still_exists: bool, uncertain: bool,
+                      application_eligible: bool, in_application_root: bool, protected_flags: bool,
+                      cause: u32, sandboxed: bool) -> u32 {
+    if (kind != MV_UNINSTALLER) { return MV_OFFER_NONE; }
+    if (required == false) { return MV_OFFER_NONE; }
+    if (error_kind != MV_ERR_PERMISSION) { return MV_OFFER_NONE; }
+    if (source_still_exists == false) { return MV_OFFER_NONE; }
+    if (uncertain) { return MV_OFFER_NONE; }
+    if (application_eligible == false) { return MV_OFFER_NONE; }
+    if (in_application_root == false) { return MV_OFFER_NONE; }
+    if (protected_flags) { return MV_OFFER_NONE; }
+    if (cause == MV_CAUSE_NONE) { return MV_OFFER_NONE; }
+    if (sandboxed) { return MV_OFFER_REVEAL; }
+    return MV_OFFER_FINDER_ADMIN;
+}
+
+; The user's Trash must be a real folder of the user on the same volume as the application, or Finder
+; could delete at once instead of moving.
+pub fn mv_trash_ready(exists: bool, is_directory: bool, is_symlink: bool, owned_by_self: bool, same_volume: bool) -> bool {
+    return exists and is_directory and is_symlink == false and owned_by_self and same_volume;
+}
+
+; Finder's reply only chooses the message; the outcome comes from mv_admin_verdict. Cancel's code was
+; not observed, so it is not named here.
+pub const MV_REPLY_OK : u32 = 0;
+pub const MV_REPLY_REFUSED : u32 = 1;
+pub const MV_REPLY_NOT_ALLOWED : u32 = 2;
+pub const MV_REPLY_TIMEOUT : u32 = 3;
+pub const MV_REPLY_NO_FINDER : u32 = 4;
+
+pub fn mv_admin_reply(status: i64) -> u32 {
+    if (status == 0) { return MV_REPLY_OK; }
+    if (status == -1743 or status == -1744) { return MV_REPLY_NOT_ALLOWED; }
+    if (status == -1712) { return MV_REPLY_TIMEOUT; }
+    if (status == -600) { return MV_REPLY_NO_FINDER; }
+    return MV_REPLY_REFUSED;
+}
+
+; What happened, read from the file system after Finder answered (or failed, or timed out):
+;   moved_confirmed           the open handle is the reviewed item (mv_confirmed)
+;   in_user_trash             the handle's folder is the user's Trash
+;   original_exists           something is at the original path now
+;   original_identity_matches that something is the reviewed item
+pub const MV_ADMIN_UNCERTAIN : u32 = 0;
+pub const MV_ADMIN_MOVED : u32 = 1;
+pub const MV_ADMIN_MOVED_PATH_REUSED : u32 = 2;
+pub const MV_ADMIN_NOT_MOVED : u32 = 3;
+
+pub fn mv_admin_verdict(moved_confirmed: bool, in_user_trash: bool, original_exists: bool, original_identity_matches: bool) -> u32 {
+    if (moved_confirmed and in_user_trash) {
+        if (original_exists) { return MV_ADMIN_MOVED_PATH_REUSED; }
+        return MV_ADMIN_MOVED;
+    }
+    if (original_exists and original_identity_matches) { return MV_ADMIN_NOT_MOVED; }
+    return MV_ADMIN_UNCERTAIN;
+}
+
+pub fn mv_admin_retry_allowed(verdict: u32) -> bool {
+    return verdict == MV_ADMIN_NOT_MOVED;
+}
+
+pub fn mv_admin_continue_related(verdict: u32) -> bool {
+    return verdict == MV_ADMIN_MOVED;
 }
 
 test mv_queue_steps {
@@ -205,4 +357,107 @@ test mv_results {
     assert mv_uncertain(MV_UNINSTALLER, MV_FAILED_COORDINATOR, false) == true;
     assert mv_stop_after_failure(MV_CACHES) == false;
     assert mv_stop_after_failure(MV_UNINSTALLER) == true;
+}
+
+test mv_admin_error_cause_root {
+    assert mv_error_kind(false, true, 13, false, 0) == MV_ERR_PERMISSION;
+    assert mv_error_kind(false, true, 1, false, 0) == MV_ERR_PERMISSION;
+    assert mv_error_kind(false, true, 2, false, 0) == MV_ERR_OTHER;
+    assert mv_error_kind(true, false, 513, true, 13) == MV_ERR_PERMISSION;
+    assert mv_error_kind(true, false, 513, true, 1) == MV_ERR_PERMISSION;
+    assert mv_error_kind(true, false, 513, true, 2) == MV_ERR_OTHER;
+    assert mv_error_kind(true, false, 513, false, 0) == MV_ERR_PERMISSION;
+    assert mv_error_kind(true, false, 4, true, 13) == MV_ERR_OTHER;
+    assert mv_error_kind(false, false, 7, false, 0) == MV_ERR_OTHER;
+    assert mv_error_kind(true, false, 640, false, 0) == MV_ERR_OTHER;
+    assert mv_admin_cause(false, true, true) == MV_CAUSE_ROOT_OWNER;
+    assert mv_admin_cause(false, true, false) == MV_CAUSE_ROOT_OWNER;
+    assert mv_admin_cause(true, false, false) == MV_CAUSE_PARENT_LOCKED;
+    assert mv_admin_cause(true, false, true) == MV_CAUSE_NONE;
+    assert mv_admin_cause(false, false, true) == MV_CAUSE_NONE;
+    assert mv_admin_cause(false, false, false) == MV_CAUSE_NONE;
+    assert mv_admin_cause(true, true, true) == MV_CAUSE_NONE;
+    assert mv_admin_root_ok(1, false) == true;
+    assert mv_admin_root_ok(1, true) == true;
+    assert mv_admin_root_ok(2, true) == true;
+    assert mv_admin_root_ok(2, false) == false;
+    assert mv_admin_root_ok(0, true) == false;
+    assert mv_admin_root_ok(3, true) == false;
+}
+
+test mv_admin_offers_and_trash {
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_FINDER_ADMIN;
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_PARENT_LOCKED, false) == MV_OFFER_FINDER_ADMIN;
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_ROOT_OWNER, true) == MV_OFFER_REVEAL;
+    assert mv_admin_offer(MV_DISK_MAP, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE;
+    assert mv_admin_offer(MV_UNINSTALLER, false, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE;
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_OTHER, true, false, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE;
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, false, false, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE;
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, true, true, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE;
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, false, true, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE;
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, false, false, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE;
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, true, MV_CAUSE_ROOT_OWNER, false) == MV_OFFER_NONE;
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_NONE, false) == MV_OFFER_NONE;
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, false, true, false, MV_CAUSE_ROOT_OWNER, true) == MV_OFFER_NONE;
+    assert mv_admin_offer(MV_UNINSTALLER, true, MV_ERR_PERMISSION, true, false, true, true, false, MV_CAUSE_NONE, true) == MV_OFFER_NONE;
+    assert mv_trash_ready(true, true, false, true, true) == true;
+    assert mv_trash_ready(false, true, false, true, true) == false;
+    assert mv_trash_ready(true, false, false, true, true) == false;
+    assert mv_trash_ready(true, true, true, true, true) == false;
+    assert mv_trash_ready(true, true, false, false, true) == false;
+    assert mv_trash_ready(true, true, false, true, false) == false;
+}
+
+test mv_admin_steps {
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 0, true, false, false) == MV_STEP_OVERLAP;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 1, true, false, false) == MV_STEP_RUNNING;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 2, true, false, false) == MV_STEP_SIGNATURE;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 3, true, false, false) == MV_STEP_VALIDATE_ALL;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 4, true, false, false) == MV_STEP_TRASH_READY;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 5, true, false, false) == MV_STEP_AUTOMATION;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_QUEUE, 6, true, false, false) == MV_STEP_END;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 0, true, false, false) == MV_STEP_RUNNING;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 1, true, false, false) == MV_STEP_SIGNATURE;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 2, true, false, false) == MV_STEP_VALIDATE;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 3, true, false, false) == MV_STEP_CAPTURE_IDENTITY;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 4, true, false, false) == MV_STEP_OPEN_HANDLE;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 5, true, false, false) == MV_STEP_END;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_SEND, 0, true, false, false) == MV_STEP_RUNNING;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_SEND, 1, true, false, false) == MV_STEP_TRASH_READY;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_SEND, 2, true, false, false) == MV_STEP_HANDLE_UNCHANGED;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_SEND, 3, true, false, false) == MV_STEP_END;
+    assert mv_step(MV_DISK_MAP, MV_PHASE_ADMIN_QUEUE, 0, true, false, false) == MV_STEP_END;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_ITEM, 0, false, false, false) == MV_STEP_END;
+    assert mv_step(MV_UNINSTALLER, MV_PHASE_ADMIN_SEND, 0, true, true, false) == MV_STEP_END;
+}
+
+test mv_admin_replies_and_verdicts {
+    assert mv_admin_reply(0) == MV_REPLY_OK;
+    assert mv_admin_reply(-128) == MV_REPLY_REFUSED;
+    assert mv_admin_reply(-1743) == MV_REPLY_NOT_ALLOWED;
+    assert mv_admin_reply(-1744) == MV_REPLY_NOT_ALLOWED;
+    assert mv_admin_reply(-1712) == MV_REPLY_TIMEOUT;
+    assert mv_admin_reply(-600) == MV_REPLY_NO_FINDER;
+    assert mv_admin_reply(-10000) == MV_REPLY_REFUSED;
+    assert mv_admin_reply(1) == MV_REPLY_REFUSED;
+    assert mv_admin_reply(-1708) == MV_REPLY_REFUSED;
+    assert mv_admin_verdict(true, true, false, false) == MV_ADMIN_MOVED;
+    assert mv_admin_verdict(true, true, true, false) == MV_ADMIN_MOVED_PATH_REUSED;
+    assert mv_admin_verdict(true, false, true, true) == MV_ADMIN_NOT_MOVED;
+    assert mv_admin_verdict(false, false, true, true) == MV_ADMIN_NOT_MOVED;
+    assert mv_admin_verdict(false, true, true, true) == MV_ADMIN_NOT_MOVED;
+    assert mv_admin_verdict(true, false, false, false) == MV_ADMIN_UNCERTAIN;
+    assert mv_admin_verdict(true, false, true, false) == MV_ADMIN_UNCERTAIN;
+    assert mv_admin_verdict(false, true, false, false) == MV_ADMIN_UNCERTAIN;
+    assert mv_admin_verdict(false, false, true, false) == MV_ADMIN_UNCERTAIN;
+    assert mv_admin_verdict(false, false, false, true) == MV_ADMIN_UNCERTAIN;
+    assert mv_admin_verdict(false, false, false, false) == MV_ADMIN_UNCERTAIN;
+    assert mv_admin_retry_allowed(MV_ADMIN_NOT_MOVED) == true;
+    assert mv_admin_retry_allowed(MV_ADMIN_MOVED) == false;
+    assert mv_admin_retry_allowed(MV_ADMIN_MOVED_PATH_REUSED) == false;
+    assert mv_admin_retry_allowed(MV_ADMIN_UNCERTAIN) == false;
+    assert mv_admin_continue_related(MV_ADMIN_MOVED) == true;
+    assert mv_admin_continue_related(MV_ADMIN_NOT_MOVED) == false;
+    assert mv_admin_continue_related(MV_ADMIN_MOVED_PATH_REUSED) == false;
+    assert mv_admin_continue_related(MV_ADMIN_UNCERTAIN) == false;
 }
