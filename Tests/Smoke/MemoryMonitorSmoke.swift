@@ -1012,7 +1012,7 @@ private func menuBarChipImageChecks() throws {
     let strokePixels = Int(MenuBarChipImage.strokeWidth * 2)
     let bodyTop = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight - MenuBarChipImage.bodyHeight) * 2)
     let bodyBottom = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight) * 2)
-    try require(imageHeightPixels == 36 && bodyTop == 4 && bodyBottom == 32,
+    try require(imageHeightPixels == 24 && bodyTop == 2 && bodyBottom == 22,
                 "M21: the test's pixel rows do not match the chip constants: \(imageHeightPixels) \(bodyTop) \(bodyBottom)")
     let middleRow = imageHeightPixels / 2
 
@@ -1030,7 +1030,7 @@ private func menuBarChipImageChecks() throws {
                 throw SmokeFailure.assertion("M21.2: the \(sample.name) chip has no pin in row 1")
             }
             let pinPixel = grid.pixel((pin.lowerBound + pin.upperBound) / 2, 1)
-            let bodyPixel = grid.pixel(4, middleRow)
+            let bodyPixel = grid.pixel(1, middleRow)
             try require(isBody(pinPixel), "M21.2: the \(sample.name) pin is not \(band): \(pinPixel)")
             try require(isBody(bodyPixel), "M21.2: the \(sample.name) body is not \(band): \(bodyPixel)")
             let share = Double(grid.pixels.filter(isBody).count) / Double(grid.pixels.count)
@@ -1100,7 +1100,7 @@ private func menuBarChipImageChecks() throws {
         ("91", chip(91)), ("99", chip(99)), ("unknown", chip(95, known: false)), ("100", chip(100)),
     ]
     for (name, image) in sized {
-        try require(image.size.height == MenuBarChipImage.imageHeight && MenuBarChipImage.imageHeight == 18,
+        try require(image.size.height == MenuBarChipImage.imageHeight && MenuBarChipImage.imageHeight == 12,
                     "M21.6: the \(name) chip is \(image.size.height) pt high")
     }
     let narrow = width(chip(50))
@@ -1109,8 +1109,8 @@ private func menuBarChipImageChecks() throws {
     }
     let width99 = width(chip(99)), width100 = width(chip(100))
     try require(width100 > width99, "M21.6: the 100 % chip (\(width100)) is not wider than the 99 % chip (\(width99))")
-    try require(width99 <= 34, "M21.6: the 99 % chip is \(width99) pt wide")
-    try require(width100 <= 42, "M21.6: the 100 % chip is \(width100) pt wide")
+    try require(width99 <= 23, "M21.6: the 99 % chip is \(width99) pt wide")
+    try require(width100 <= 28, "M21.6: the 100 % chip is \(width100) pt wide")
 
     // M21.7: the digits fit inside the body, with room on every side, and sit in the middle.
     for sample in filled {
@@ -1123,16 +1123,23 @@ private func menuBarChipImageChecks() throws {
         try require(left >= 2 && grid.wide - 1 - right >= 2,
                     "M21.7: the \(sample.name) digits are \(left) px from the left and \(grid.wide - 1 - right) px from the right side")
         let marginTop = top - bodyTop, marginBottom = (bodyBottom - 1) - bottom
-        try require(abs(marginTop - marginBottom) <= 2,
+        try require(abs(marginTop - marginBottom) <= 1,
                     "M21.7: the \(sample.name) digits sit \(marginTop) px below the top and \(marginBottom) px above the bottom")
     }
-    // The outline chip at 100 %: the two pixel columns just inside the stroke stay empty at mid-body. 100 % is
-    // red in the app, so the outline chip with that title is made from a label written by hand.
+    // The outline chip at 100 %: the pixel columns of the gap between the stroke and the text (textInset, one
+    // column per side) stay empty at mid-body. 100 % is red in the app, so the outline chip with that title is
+    // made from a label written by hand.
     let outlineHundred = MenuBarChipImage.image(for: MenuBarLabel(title: "100%", symbol: "memorychip", tint: .none, accessibility: "outline probe"))
     try require(outlineHundred.isTemplate, "M21.7: the outline 100 % probe is not a template")
     let outlineGrid = try chipGrid(outlineHundred)
-    for y in (middleRow - 8)...(middleRow + 7) {
-        for x in [strokePixels, strokePixels + 1, outlineGrid.wide - strokePixels - 2, outlineGrid.wide - strokePixels - 1] {
+    let insetPixels = Int(MenuBarChipImage.textInset * 2)
+    for y in (middleRow - 6)...(middleRow + 5) {
+        var gapColumns: [Int] = []
+        for offset in 0..<insetPixels {
+            gapColumns.append(strokePixels + offset)
+            gapColumns.append(outlineGrid.wide - strokePixels - 1 - offset)
+        }
+        for x in gapColumns {
             try require(outlineGrid.pixel(x, y).a < 0.05, "M21.7: the outline 100 % chip has ink at \(x),\(y) just inside the stroke")
         }
     }

@@ -25,22 +25,22 @@ final class MenuBarLabelModel: ObservableObject, MenuBarDisplay {
 @MainActor
 enum MenuBarChipImage {
     /// Sizes in points. They are internal so that the smoke test can read them.
-    static let fontSize: CGFloat = 11
-    static let bodyHeight: CGFloat = 14
-    static let pinHeight: CGFloat = 2
-    static let imageHeight: CGFloat = 18
-    static let pinWidth: CGFloat = 2
+    static let fontSize: CGFloat = 7.5
+    static let bodyHeight: CGFloat = 10
+    static let pinHeight: CGFloat = 1
+    static let imageHeight: CGFloat = 12
+    static let pinWidth: CGFloat = 1.5
     static let pinCount = 4
-    static let strokeWidth: CGFloat = 1
+    static let strokeWidth: CGFloat = 0.5
     /// The gap between the stroke and the text.
-    static let textInset: CGFloat = 1.5
-    static let cornerRadius: CGFloat = 2.5
+    static let textInset: CGFloat = 0.5
+    static let cornerRadius: CGFloat = 1.5
     /// How many images the cache keeps; when it is full it is emptied before the next one is stored.
     static let cacheLimit = 16
 
     private static let configuration = NSImage.SymbolConfiguration(
         pointSize: NSFont.systemFontSize, weight: .regular, scale: .medium)
-    private static let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .bold)
+    private static let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .heavy)
     private static var cache: [String: NSImage] = [:]
 
     static var cacheCount: Int { cache.count }
