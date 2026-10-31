@@ -19,7 +19,8 @@ final class MenuBarLabelModel: ObservableObject, MenuBarDisplay {
 /// The colours are fixed sRGB values, never the dynamic system colours: a dynamic colour would be baked in
 /// with whichever appearance is current when the bitmap is drawn, and the bitmap is cached. The coloured chip
 /// is not a template, so the menu bar draws its colours as they are. Every width from 0 % to 99 % and the
-/// unknown figure share one width, so the item does not jump; only "100%" is wider. The bitmap is drawn
+/// unknown figure share one width, so the item does not jump; only "100%" is wider. The percent sign is half
+/// the size of the digits and centred on them (`titleText`). The bitmap is drawn
 /// without a drawing closure: such a closure may run on any thread. The only other image is the ladybug of the
 /// automation switch (DEBUG builds), which is a plain symbol and keeps its title as a separate text.
 @MainActor
@@ -41,6 +42,8 @@ enum MenuBarChipImage {
     private static let configuration = NSImage.SymbolConfiguration(
         pointSize: NSFont.systemFontSize, weight: .regular, scale: .medium)
     private static let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .heavy)
+    static let signFontSize: CGFloat = fontSize / 2
+    private static let signFont = NSFont.monospacedDigitSystemFont(ofSize: signFontSize, weight: .heavy)
     private static var cache: [String: NSImage] = [:]
 
     static var cacheCount: Int { cache.count }
@@ -84,12 +87,23 @@ enum MenuBarChipImage {
         (value * 2).rounded() / 2
     }
 
+    /// The text of the chip: the digits in the full size, and a trailing "%" at half that size, raised so that
+    /// its centre is the centre of the digits' cap height. The raise is rounded to half a point.
+    static func titleText(_ text: String, ink: NSColor) -> NSAttributedString {
+        let result = NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: ink])
+        if text.hasSuffix("%") {
+            let sign = NSRange(location: text.utf16.count - 1, length: 1)
+            result.addAttributes([.font: signFont,
+                                  .baselineOffset: half((font.capHeight - signFont.capHeight) / 2)], range: sign)
+        }
+        return result
+    }
+
     private static func chip(for label: MenuBarLabel) -> NSImage? {
         let colors = palette(for: label.tint)
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: colors.ink]
-        let title = NSAttributedString(string: label.title, attributes: attributes)
+        let title = titleText(label.title, ink: colors.ink)
         let titleWidth = title.size().width
-        let widestTwoDigits = NSAttributedString(string: "00%", attributes: attributes).size().width
+        let widestTwoDigits = titleText("00%", ink: colors.ink).size().width
         let textWidth = ceil(max(titleWidth, widestTwoDigits))
         let bodyWidth = textWidth + 2 * (strokeWidth + textInset)
         let size = NSSize(width: bodyWidth, height: imageHeight)

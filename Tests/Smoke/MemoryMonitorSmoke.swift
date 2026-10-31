@@ -991,6 +991,66 @@ private func writeChipPreview(_ samples: [(name: String, image: NSImage)], to di
     try writePNG(enlarged, to: directory.appendingPathComponent("sheet-6x.png"))
 }
 
+/// Where the digits and the percent sign of a chip's title are, in pixel rows and columns (rows from the top).
+private struct ChipSignMeasure {
+    var digitTop: Int
+    var digitBottom: Int
+    var signTop: Int
+    var signBottom: Int
+    var signLeft: Int
+    var signRight: Int
+    var signInk: Int
+    var wide: Int
+
+    var digitRows: Int { digitBottom - digitTop + 1 }
+    var signRows: Int { signBottom - signTop + 1 }
+    var signColumns: Int { signRight - signLeft + 1 }
+    /// The share of the sign's bounding box that is ink (a solid block is near 1).
+    var signInkShare: Double { Double(signInk) / Double(signRows * signColumns) }
+}
+
+/// Splits the text ink inside the inner body rectangle of a chip (without its four rounded corners) into the
+/// digits and the percent sign. The text ink of an outline chip has alpha of at least 0.5; on a filled chip it
+/// is at least half opaque and has a WCAG contrast of at least 2 against the body colour. The split column is the first ink column plus the 2x width of the title
+/// without its last character, in the digit font, which is safely past the digits' ink.
+@MainActor
+private func measureChipSign(_ image: NSImage, title: String, filled: Bool, name: String) throws -> ChipSignMeasure {
+    let grid = try chipGrid(image)
+    let strokePixels = Int(MenuBarChipImage.strokeWidth * 2)
+    let bodyTop = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight - MenuBarChipImage.bodyHeight) * 2)
+    let bodyBottom = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight) * 2)
+    let body = grid.pixel(1, grid.high / 2)
+    func isInk(_ pixel: ChipPixel) -> Bool {
+        pixel.a >= 0.5 && (!filled || wcagContrast(pixel, body) >= 2)
+    }
+    // The rounded corners of the outline stroke reach into the inner rectangle; they are not text.
+    let cornerPixels = Int((MenuBarChipImage.cornerRadius * 2).rounded(.up))
+    func inCorner(_ x: Int, _ y: Int) -> Bool {
+        (x < cornerPixels || x >= grid.wide - cornerPixels) && (y < bodyTop + cornerPixels || y >= bodyBottom - cornerPixels)
+    }
+    var ink: [(x: Int, y: Int)] = []
+    for y in (bodyTop + strokePixels)..<(bodyBottom - strokePixels) {
+        for x in strokePixels..<(grid.wide - strokePixels) where !inCorner(x, y) && isInk(grid.pixel(x, y)) {
+            ink.append((x, y))
+        }
+    }
+    guard let leftInk = ink.map({ $0.x }).min() else {
+        throw SmokeFailure.assertion("M21.11: no text ink on the \(name) chip")
+    }
+    let digitFont = NSFont.monospacedDigitSystemFont(ofSize: MenuBarChipImage.fontSize, weight: .heavy)
+    let prefixWidth = NSAttributedString(string: String(title.dropLast()), attributes: [.font: digitFont]).size().width
+    let split = leftInk + Int(ceil(prefixWidth * 2))
+    let digits = ink.filter { $0.x < split }
+    let sign = ink.filter { $0.x >= split }
+    guard let digitTop = digits.map({ $0.y }).min(), let digitBottom = digits.map({ $0.y }).max(),
+          let signTop = sign.map({ $0.y }).min(), let signBottom = sign.map({ $0.y }).max(),
+          let signLeft = sign.map({ $0.x }).min(), let signRight = sign.map({ $0.x }).max() else {
+        throw SmokeFailure.assertion("M21.11: the \(name) chip has \(digits.count) digit and \(sign.count) sign ink pixels (split at column \(split))")
+    }
+    return ChipSignMeasure(digitTop: digitTop, digitBottom: digitBottom, signTop: signTop, signBottom: signBottom,
+                           signLeft: signLeft, signRight: signRight, signInk: sign.count, wide: grid.wide)
+}
+
 /// M21: the menu bar chip as one image with the percent inside (MenuBarChipImage): colour, template flag,
 /// size, fit and cache, from the label, and the wiring of the menu bar label.
 @MainActor
@@ -1109,8 +1169,8 @@ private func menuBarChipImageChecks() throws {
     }
     let width99 = width(chip(99)), width100 = width(chip(100))
     try require(width100 > width99, "M21.6: the 100 % chip (\(width100)) is not wider than the 99 % chip (\(width99))")
-    try require(width99 <= 23, "M21.6: the 99 % chip is \(width99) pt wide")
-    try require(width100 <= 28, "M21.6: the 100 % chip is \(width100) pt wide")
+    try require(width99 <= 19, "M21.6: the 99 % chip is \(width99) pt wide")
+    try require(width100 <= 24, "M21.6: the 100 % chip is \(width100) pt wide")
 
     // M21.7: the digits fit inside the body, with room on every side, and sit in the middle.
     for sample in filled {
@@ -1182,6 +1242,54 @@ private func menuBarChipImageChecks() throws {
     // Written in two parts so that a search for the name finds only real uses of it.
     let forbidden = "drawing" + "Handler"
     try require(!menuSource.contains(forbidden), "M21.10: MemoryMenuView.swift uses a \(forbidden)")
+
+    // M21.11: the percent sign is half the size of the digits, still a sign, and centred on the digits.
+    try require(MenuBarChipImage.fontSize == 7.5, "M21.11: the digit size is \(MenuBarChipImage.fontSize) pt")
+    try require(MenuBarChipImage.signFontSize == 3.75, "M21.11: the sign size is \(MenuBarChipImage.signFontSize) pt")
+    let heavyDigits = NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .heavy)
+    let heavySign = NSFont.monospacedDigitSystemFont(ofSize: 3.75, weight: .heavy)
+    for text in ["85%", "—%"] {
+        let styled = MenuBarChipImage.titleText(text, ink: .black)
+        try require(styled.string == text, "M21.11: titleText changed the text \(text) to \(styled.string)")
+        let last = styled.length - 1
+        for index in 0..<last {
+            let font = styled.attribute(.font, at: index, effectiveRange: nil) as? NSFont
+            try require(font?.pointSize == 7.5 && font == heavyDigits,
+                        "M21.11: character \(index) of \(text) is not the 7.5 pt heavy font: \(String(describing: font))")
+        }
+        let signFont = styled.attribute(.font, at: last, effectiveRange: nil) as? NSFont
+        try require(signFont?.pointSize == 3.75 && signFont == heavySign,
+                    "M21.11: the sign of \(text) is not the 3.75 pt heavy font: \(String(describing: signFont))")
+    }
+    try require(label(85).title == "85%", "M21.11: the 85 % title is \(label(85).title)")
+    try require(label(95, known: false).title == "—%", "M21.11: the unknown title is \(label(95, known: false).title)")
+
+    let signSamples: [(name: String, label: MenuBarLabel, filled: Bool)] = [
+        ("50", label(50), false), ("80", label(80), false), ("81", label(81), true), ("90", label(90), true),
+        ("91", label(91), true), ("100", label(100), true), ("unknown", label(95, known: false), false),
+    ]
+    var measured: [String: ChipSignMeasure] = [:]
+    for sample in signSamples {
+        let measure = try measureChipSign(MenuBarChipImage.image(for: sample.label), title: sample.label.title,
+                                          filled: sample.filled, name: sample.name)
+        measured[sample.name] = measure
+        if sample.name == "unknown" { continue }
+        try require(Double(measure.signRows) <= 0.65 * Double(measure.digitRows),
+                    "M21.11: the \(sample.name) sign is \(measure.signRows) rows high, the digits \(measure.digitRows)")
+        try require(measure.signRows >= 3 && measure.signColumns >= 4,
+                    "M21.11: the \(sample.name) sign is only \(measure.signColumns) x \(measure.signRows) px")
+        try require(measure.signInkShare <= 0.85,
+                    "M21.11: the \(sample.name) sign is a block: \(measure.signInkShare) of its box is ink")
+        try require(abs((measure.signTop + measure.signBottom) - (measure.digitTop + measure.digitBottom)) <= 2,
+                    "M21.11: the \(sample.name) sign is not centred: sign rows \(measure.signTop)-\(measure.signBottom), digit rows \(measure.digitTop)-\(measure.digitBottom)")
+        try require(measure.wide - 1 - measure.signRight >= 2,
+                    "M21.11: the \(sample.name) sign is \(measure.wide - 1 - measure.signRight) px from the right edge")
+    }
+    guard let fifty = measured["50"], let unknownMeasure = measured["unknown"] else {
+        throw SmokeFailure.assertion("M21.11: no measurement of the 50 or the unknown chip")
+    }
+    try require(unknownMeasure.signTop == fifty.signTop && unknownMeasure.signBottom == fifty.signBottom,
+                "M21.11: the unknown sign has rows \(unknownMeasure.signTop)-\(unknownMeasure.signBottom), the 50 sign \(fifty.signTop)-\(fifty.signBottom)")
 
     // The preview, after every check has passed.
     let checkout = sources.deletingLastPathComponent()
