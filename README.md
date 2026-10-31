@@ -4,9 +4,9 @@ DiskBloom is a local, native macOS app that shows where your disk space went, sa
 
 ## Download and install
 
-**[Download DiskBloom 1.7 for macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.0/DiskBloom-1.7.0-macOS-arm64.dmg)**
+**[Download DiskBloom 1.7.1 for macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.1/DiskBloom-1.7.1-macOS-arm64.dmg)**
 
-[ZIP archive](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.0/DiskBloom-1.7.0-macOS-arm64.zip) · [All releases](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.0/SHA256SUMS)
+[ZIP archive](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.1/DiskBloom-1.7.1-macOS-arm64.zip) · [All releases](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.1/SHA256SUMS)
 
 Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later.** The direct download does not support Intel Macs. The interface is in English.
 
@@ -14,7 +14,7 @@ Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or la
 2. Open DiskBloom from Applications. The prebuilt app does not need Xcode.
 3. Choose a tool and a folder to analyze. The duplicate finder is read-only; cleanup actions in the other tools need a separate confirmation.
 
-**Signature status:** version 1.7 (build 8) from GitHub has a local ad-hoc signature, without a Developer ID and without Apple notarization. macOS may block the first launch. If you trust this release, try to open the app once, then use the per-app permission in System Settings → Privacy & Security. Do not turn off Gatekeeper for the whole system. [Apple's instructions](https://support.apple.com/102445).
+**Signature status:** version 1.7.1 (build 9) from GitHub has a local ad-hoc signature, without a Developer ID and without Apple notarization. macOS may block the first launch. If you trust this release, try to open the app once, then use the per-app permission in System Settings → Privacy & Security. Do not turn off Gatekeeper for the whole system. [Apple's instructions](https://support.apple.com/102445).
 
 ## Features
 
@@ -55,6 +55,7 @@ While DiskBloom runs, the menu bar shows a memory chip and the share of memory i
 - the parts: app memory, wired, compressed, cached files, free, and swap when anything is swapped out;
 - **what uses it**: the apps and services that hold the most memory or use the most CPU, each app together with its helper processes; switch the order between Memory and CPU;
 - buttons to open DiskBloom or Activity Monitor, and to quit DiskBloom. Quit is unavailable while a move to the Trash runs.
+- the running version of DiskBloom and its build, on the panel's last line.
 
 The panel only reads. It does not stop or change any process. Processes of other users (system services such as the window server) need administrator rights to be read, so the panel counts them but does not list them. The figure in the menu bar is read every second and changes as soon as memory use changes; when only the number moves, it changes at most every 2 seconds. While the panel is open its figures refresh every second and its list every 2 seconds. If DiskBloom cannot read the figure three times in a row, about 3 seconds, the menu bar shows —% instead of an old number. If the figure stops updating for more than 2 minutes, DiskBloom reopens itself without a window, but only on macOS 15 or later, outside the App Store edition, and only while macOS still lets DiskBloom's own watchdog run at least every 10 seconds: if macOS stops or holds back the whole app, DiskBloom cannot act. It does not reopen while a DiskBloom window is open, DiskBloom is hidden, a move to the Trash runs, the cleanup queue has items, or a tool holds a selection, a review, an open report or a notice still to show. A copy that reopened itself waits 10 minutes before it may do so again, and a copy whose reopen started but failed does not try again. The reopened copy starts fresh: the tools' results and the assistant's conversation are not kept.
 
@@ -135,7 +136,7 @@ open -n DiskBloom.app
 To create the ZIP, DMG and `SHA256SUMS` from the built app:
 
 ```bash
-./package-release.sh 1.7.0
+./package-release.sh 1.7.1
 ```
 
 The packages are created in `release/` and published as separate GitHub Release assets. Local verification logs, test data, certificates and built packages are not part of the git history.
