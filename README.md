@@ -49,7 +49,7 @@ Press ⌘K or "Ask DiskBloom" to chat with an assistant that looks up real sizes
 
 ## Memory in the menu bar
 
-While DiskBloom runs, the menu bar shows a memory chip and the share of memory in use. Click it for a panel:
+While DiskBloom runs, the menu bar shows a memory chip with the share of memory in use inside it. Up to 80% the chip is an outline, from 81% to 90% it is filled yellow, and above 90% it is filled red. Click it for a panel:
 
 - **how full the memory is**, counted the way Activity Monitor counts it (app memory, wired and compressed memory), with the memory pressure macOS reports: normal, warning or critical;
 - the parts: app memory, wired, compressed, cached files, free, and swap when anything is swapped out;

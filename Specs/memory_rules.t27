@@ -238,6 +238,22 @@ pub fn mm_label_known(misses: i64, has_value: bool) -> bool {
     return has_value and misses < MM_SAMPLE_MISSES_MAX;
 }
 
+; The chip follows the percent shown, not the pressure level (owner, 2026-10-31): an outline chip up to and
+; including 80 %, a filled yellow chip from 81 to 90, a filled red chip above 90. An unknown figure shows the
+; outline chip. The pressure level stays in the panel and the spoken text.
+pub const MM_CHIP_OUTLINE : u32 = 0;
+pub const MM_CHIP_YELLOW : u32 = 1;
+pub const MM_CHIP_RED : u32 = 2;
+pub const MM_CHIP_YELLOW_ABOVE : i64 = 80;
+pub const MM_CHIP_RED_ABOVE : i64 = 90;
+
+pub fn mm_chip_band(percent: i64, known: bool) -> u32 {
+    if (known == false) { return MM_CHIP_OUTLINE; }
+    if (percent > MM_CHIP_RED_ABOVE) { return MM_CHIP_RED; }
+    if (percent > MM_CHIP_YELLOW_ABOVE) { return MM_CHIP_YELLOW; }
+    return MM_CHIP_OUTLINE;
+}
+
 ; Whether the figure now differs from the one on screen: the percent, the pressure level, or whether it is
 ; known at all. Two unknown figures are the same.
 pub fn mm_label_changes(shown_percent: i64, shown_level: u32, shown_known: bool, percent: i64, level: u32, known: bool) -> bool {
@@ -248,12 +264,13 @@ pub fn mm_label_changes(shown_percent: i64, shown_level: u32, shown_known: bool,
 }
 
 ; Whether a change may be shown now. Pressure, wake, panel and watchdog ticks are forced; a change of the
-; level or of the unknown mark shows at once; only the timer's change of the number alone waits until
-; MM_LABEL_MIN_CHANGE_MS after the previous change.
-pub fn mm_label_due(forced: bool, shown_level: u32, shown_known: bool, level: u32, known: bool, since_shown_ms: i64) -> bool {
+; level, the chip band or the unknown mark shows at once; only the timer's change of the number inside one
+; band waits until MM_LABEL_MIN_CHANGE_MS after the previous change.
+pub fn mm_label_due(forced: bool, shown_percent: i64, shown_level: u32, shown_known: bool, percent: i64, level: u32, known: bool, since_shown_ms: i64) -> bool {
     if (forced) { return true; }
     if (known != shown_known) { return true; }
     if (level != shown_level) { return true; }
+    if (mm_chip_band(percent, known) != mm_chip_band(shown_percent, shown_known)) { return true; }
     return since_shown_ms >= MM_LABEL_MIN_CHANGE_MS;
 }
 
@@ -627,16 +644,34 @@ test mm_label {
     assert mm_label_changes(85, 0, true, 85, 0, false) == true;
     assert mm_label_changes(0, 0, false, 79, 0, false) == false;
     assert mm_label_changes(0, 0, false, 79, 0, true) == true;
-    assert mm_label_due(true, 0, true, 0, true, 0) == true;
-    assert mm_label_due(false, 0, true, 0, true, 1999) == false;
-    assert mm_label_due(false, 0, true, 0, true, 2000) == true;
-    assert mm_label_due(false, 0, true, 1, true, 0) == true;
-    assert mm_label_due(false, 0, true, 0, false, 0) == true;
-    assert mm_label_due(false, 0, false, 0, true, 0) == true;
-    assert mm_label_due(false, 0, true, 0, true, -1) == false;
+    assert mm_label_due(true, 50, 0, true, 50, 0, true, 0) == true;
+    assert mm_label_due(false, 50, 0, true, 51, 0, true, 1999) == false;
+    assert mm_label_due(false, 50, 0, true, 51, 0, true, 2000) == true;
+    assert mm_label_due(false, 50, 0, true, 51, 1, true, 0) == true;
+    assert mm_label_due(false, 50, 0, true, 50, 0, false, 0) == true;
+    assert mm_label_due(false, 50, 0, false, 50, 0, true, 0) == true;
+    assert mm_label_due(false, 50, 0, true, 51, 0, true, -1) == false;
     assert mm_snapshot_publishes(false, false) == false;
     assert mm_snapshot_publishes(true, false) == true;
     assert mm_snapshot_publishes(false, true) == true;
+}
+
+test mm_chip {
+    assert mm_chip_band(0, true) == MM_CHIP_OUTLINE;
+    assert mm_chip_band(80, true) == MM_CHIP_OUTLINE;
+    assert mm_chip_band(81, true) == MM_CHIP_YELLOW;
+    assert mm_chip_band(90, true) == MM_CHIP_YELLOW;
+    assert mm_chip_band(91, true) == MM_CHIP_RED;
+    assert mm_chip_band(100, true) == MM_CHIP_RED;
+    assert mm_chip_band(95, false) == MM_CHIP_OUTLINE;
+    assert mm_label_changes(80, 0, true, 81, 0, true) == true;
+    assert mm_label_due(false, 80, 0, true, 81, 0, true, 1) == true;
+    assert mm_label_due(false, 81, 0, true, 80, 0, true, 1) == true;
+    assert mm_label_due(false, 90, 0, true, 91, 0, true, 1) == true;
+    assert mm_label_due(false, 91, 0, true, 90, 0, true, 1) == true;
+    assert mm_label_due(false, 79, 0, true, 80, 0, true, 1) == false;
+    assert mm_label_due(false, 81, 0, true, 82, 0, true, 1) == false;
+    assert mm_label_due(false, 91, 0, true, 92, 0, true, 1) == false;
 }
 
 test mm_watchdog {

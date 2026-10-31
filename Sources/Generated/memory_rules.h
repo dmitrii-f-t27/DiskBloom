@@ -38,6 +38,11 @@
 #define MM_PANEL_REFRESH_MS 2000
 #define MM_TIMER_TOLERANCE_PERMILLE 100
 #define MM_SAMPLE_MISSES_MAX 3
+#define MM_CHIP_OUTLINE 0
+#define MM_CHIP_YELLOW 1
+#define MM_CHIP_RED 2
+#define MM_CHIP_YELLOW_ABOVE 80
+#define MM_CHIP_RED_ABOVE 90
 #define MM_WATCHDOG_MS 5000
 #define MM_STALE_MS 10000
 #define MM_WATCHDOG_LATE_MS 5000
@@ -98,8 +103,9 @@ bool mm_notes_unreadable(int64_t unreadable);
 int64_t mm_timer_tolerance_ms(int64_t interval_ms);
 bool mm_lists_now(bool panel_open, bool lists_processes);
 bool mm_label_known(int64_t misses, bool has_value);
+uint32_t mm_chip_band(int64_t percent, bool known);
 bool mm_label_changes(int64_t shown_percent, uint32_t shown_level, bool shown_known, int64_t percent, uint32_t level, bool known);
-bool mm_label_due(bool forced, uint32_t shown_level, bool shown_known, uint32_t level, bool known, int64_t since_shown_ms);
+bool mm_label_due(bool forced, int64_t shown_percent, uint32_t shown_level, bool shown_known, int64_t percent, uint32_t level, bool known, int64_t since_shown_ms);
 bool mm_snapshot_publishes(bool panel_open, bool label_shown);
 uint32_t mm_stale_reason(int64_t tick_age_ms, int64_t echo_age_ms);
 uint32_t mm_watchdog_action(uint32_t reason, int64_t late_ms, int64_t stale_checks);
@@ -351,6 +357,19 @@ bool mm_label_known(int64_t misses, bool has_value) {
     return (has_value && (misses < MM_SAMPLE_MISSES_MAX));
 }
 
+uint32_t mm_chip_band(int64_t percent, bool known) {
+    if ((known == false)) {
+        return MM_CHIP_OUTLINE;
+    }
+    if ((percent > MM_CHIP_RED_ABOVE)) {
+        return MM_CHIP_RED;
+    }
+    if ((percent > MM_CHIP_YELLOW_ABOVE)) {
+        return MM_CHIP_YELLOW;
+    }
+    return MM_CHIP_OUTLINE;
+}
+
 bool mm_label_changes(int64_t shown_percent, uint32_t shown_level, bool shown_known, int64_t percent, uint32_t level, bool known) {
     if ((shown_known != known)) {
         return true;
@@ -364,7 +383,7 @@ bool mm_label_changes(int64_t shown_percent, uint32_t shown_level, bool shown_kn
     return (shown_level != level);
 }
 
-bool mm_label_due(bool forced, uint32_t shown_level, bool shown_known, uint32_t level, bool known, int64_t since_shown_ms) {
+bool mm_label_due(bool forced, int64_t shown_percent, uint32_t shown_level, bool shown_known, int64_t percent, uint32_t level, bool known, int64_t since_shown_ms) {
     if (forced) {
         return true;
     }
@@ -372,6 +391,9 @@ bool mm_label_due(bool forced, uint32_t shown_level, bool shown_known, uint32_t 
         return true;
     }
     if ((level != shown_level)) {
+        return true;
+    }
+    if ((mm_chip_band(percent, known) != mm_chip_band(shown_percent, shown_known))) {
         return true;
     }
     return (since_shown_ms >= MM_LABEL_MIN_CHANGE_MS);
@@ -719,16 +741,34 @@ void test_mm_label(void) {
     assert((mm_label_changes(85, 0, true, 85, 0, false) == true));
     assert((mm_label_changes(0, 0, false, 79, 0, false) == false));
     assert((mm_label_changes(0, 0, false, 79, 0, true) == true));
-    assert((mm_label_due(true, 0, true, 0, true, 0) == true));
-    assert((mm_label_due(false, 0, true, 0, true, 1999) == false));
-    assert((mm_label_due(false, 0, true, 0, true, 2000) == true));
-    assert((mm_label_due(false, 0, true, 1, true, 0) == true));
-    assert((mm_label_due(false, 0, true, 0, false, 0) == true));
-    assert((mm_label_due(false, 0, false, 0, true, 0) == true));
-    assert((mm_label_due(false, 0, true, 0, true, -1) == false));
+    assert((mm_label_due(true, 50, 0, true, 50, 0, true, 0) == true));
+    assert((mm_label_due(false, 50, 0, true, 51, 0, true, 1999) == false));
+    assert((mm_label_due(false, 50, 0, true, 51, 0, true, 2000) == true));
+    assert((mm_label_due(false, 50, 0, true, 51, 1, true, 0) == true));
+    assert((mm_label_due(false, 50, 0, true, 50, 0, false, 0) == true));
+    assert((mm_label_due(false, 50, 0, false, 50, 0, true, 0) == true));
+    assert((mm_label_due(false, 50, 0, true, 51, 0, true, -1) == false));
     assert((mm_snapshot_publishes(false, false) == false));
     assert((mm_snapshot_publishes(true, false) == true));
     assert((mm_snapshot_publishes(false, true) == true));
+}
+
+void test_mm_chip(void) {
+    assert((mm_chip_band(0, true) == MM_CHIP_OUTLINE));
+    assert((mm_chip_band(80, true) == MM_CHIP_OUTLINE));
+    assert((mm_chip_band(81, true) == MM_CHIP_YELLOW));
+    assert((mm_chip_band(90, true) == MM_CHIP_YELLOW));
+    assert((mm_chip_band(91, true) == MM_CHIP_RED));
+    assert((mm_chip_band(100, true) == MM_CHIP_RED));
+    assert((mm_chip_band(95, false) == MM_CHIP_OUTLINE));
+    assert((mm_label_changes(80, 0, true, 81, 0, true) == true));
+    assert((mm_label_due(false, 80, 0, true, 81, 0, true, 1) == true));
+    assert((mm_label_due(false, 81, 0, true, 80, 0, true, 1) == true));
+    assert((mm_label_due(false, 90, 0, true, 91, 0, true, 1) == true));
+    assert((mm_label_due(false, 91, 0, true, 90, 0, true, 1) == true));
+    assert((mm_label_due(false, 79, 0, true, 80, 0, true, 1) == false));
+    assert((mm_label_due(false, 81, 0, true, 82, 0, true, 1) == false));
+    assert((mm_label_due(false, 91, 0, true, 92, 0, true, 1) == false));
 }
 
 void test_mm_watchdog(void) {
@@ -818,10 +858,11 @@ int main(void) {
     test_mm_monitor_mode();
     test_mm_refresh();
     test_mm_label();
+    test_mm_chip();
     test_mm_watchdog();
     test_mm_relaunch();
     test_mm_open_window();
-    printf("All %d tests passed.\n", 11);
+    printf("All %d tests passed.\n", 12);
     return 0;
 }
 #endif /* T27_TEST_MAIN */
