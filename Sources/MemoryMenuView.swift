@@ -12,42 +12,87 @@ final class MenuBarLabelModel: ObservableObject, MenuBarDisplay {
     }
 }
 
-/// The chip of the menu bar item as an image. Up to 80 % it is the outline chip, a template that follows the
-/// bar's colour; above 80 % it is the filled chip in yellow, above 90 % in red (`mm_chip_band`). The coloured
-/// chip is baked into a bitmap and is not a template, so the menu bar draws its colours as they are and does
-/// not apply its own symbol configuration to it. One configuration serves every case, so the chip keeps its
-/// size from band to band. The bitmap is drawn without a drawing closure: such a closure may run on any thread.
+/// The menu bar item as one image: a memory chip with pins on its top and bottom edge, and the percent drawn
+/// inside it, so the item takes less room than a symbol with a separate title. Up to 80 % (and for an unknown
+/// figure) it is the outline chip, a template that follows the bar's colour, with digits in the same ink; above
+/// 80 % it is the filled chip in yellow with dark digits, above 90 % in red with white digits (`mm_chip_band`).
+/// The colours are fixed sRGB values, never the dynamic system colours: a dynamic colour would be baked in
+/// with whichever appearance is current when the bitmap is drawn, and the bitmap is cached. The coloured chip
+/// is not a template, so the menu bar draws its colours as they are. Every width from 0 % to 99 % and the
+/// unknown figure share one width, so the item does not jump; only "100%" is wider. The bitmap is drawn
+/// without a drawing closure: such a closure may run on any thread. The only other image is the ladybug of the
+/// automation switch (DEBUG builds), which is a plain symbol and keeps its title as a separate text.
 @MainActor
 enum MenuBarChipImage {
+    /// Sizes in points. They are internal so that the smoke test can read them.
+    static let fontSize: CGFloat = 11
+    static let bodyHeight: CGFloat = 14
+    static let pinHeight: CGFloat = 2
+    static let imageHeight: CGFloat = 18
+    static let pinWidth: CGFloat = 2
+    static let pinCount = 4
+    static let strokeWidth: CGFloat = 1
+    /// The gap between the stroke and the text.
+    static let textInset: CGFloat = 1.5
+    static let cornerRadius: CGFloat = 2.5
+    /// How many images the cache keeps; when it is full it is emptied before the next one is stored.
+    static let cacheLimit = 16
+
     private static let configuration = NSImage.SymbolConfiguration(
         pointSize: NSFont.systemFontSize, weight: .regular, scale: .medium)
+    private static let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .bold)
     private static var cache: [String: NSImage] = [:]
 
-    static func image(symbol: String, tint: MenuBarTint) -> NSImage {
-        let key = "\(symbol)|\(tint)"
+    static var cacheCount: Int { cache.count }
+
+    static func image(for label: MenuBarLabel) -> NSImage {
+        let key = "\(label.symbol)|\(label.tint)|\(label.title)"
         if let cached = cache[key] { return cached }
-        guard let built = build(symbol: symbol, tint: tint) else { return placeholder() }
+        guard let built = label.isDebugMarker ? symbolTemplate(label.symbol) : chip(for: label) else {
+            return placeholder()
+        }
+        if cache.count >= cacheLimit { cache.removeAll() }
         cache[key] = built
         return built
     }
 
-    private static func build(symbol: String, tint: MenuBarTint) -> NSImage? {
-        let color: NSColor
+    /// The colours of one band: the body (nil for the outline chip) and the ink of the digits. The outline chip
+    /// is a template, so only the alpha of its black ink matters.
+    private static func palette(for tint: MenuBarTint) -> (body: NSColor?, ink: NSColor) {
         switch tint {
         case .none:
-            guard let plain = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-                .withSymbolConfiguration(configuration) else { return nil }
-            plain.isTemplate = true
-            return plain
+            return (nil, NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1))
         case .yellow:
-            color = .systemYellow
+            return (NSColor(srgbRed: 1, green: 204.0 / 255, blue: 0, alpha: 1),
+                    NSColor(srgbRed: 26.0 / 255, green: 26.0 / 255, blue: 26.0 / 255, alpha: 1))
         case .red:
-            color = .systemRed
+            return (NSColor(srgbRed: 215.0 / 255, green: 0, blue: 21.0 / 255, alpha: 1),
+                    NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
         }
-        let colored = configuration.applying(NSImage.SymbolConfiguration(paletteColors: [color]))
-        guard let symbolImage = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(colored) else { return nil }
-        let size = symbolImage.size
+    }
+
+    /// A plain symbol, as a template that follows the bar's colour.
+    private static func symbolTemplate(_ symbol: String) -> NSImage? {
+        guard let plain = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration) else { return nil }
+        plain.isTemplate = true
+        return plain
+    }
+
+    /// A position rounded to half a point, which is a whole pixel at 2x.
+    private static func half(_ value: CGFloat) -> CGFloat {
+        (value * 2).rounded() / 2
+    }
+
+    private static func chip(for label: MenuBarLabel) -> NSImage? {
+        let colors = palette(for: label.tint)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: colors.ink]
+        let title = NSAttributedString(string: label.title, attributes: attributes)
+        let titleWidth = title.size().width
+        let widestTwoDigits = NSAttributedString(string: "00%", attributes: attributes).size().width
+        let textWidth = ceil(max(titleWidth, widestTwoDigits))
+        let bodyWidth = textWidth + 2 * (strokeWidth + textInset)
+        let size = NSSize(width: bodyWidth, height: imageHeight)
         let pixelsWide = Int((size.width * 2).rounded(.up))
         let pixelsHigh = Int((size.height * 2).rounded(.up))
         guard pixelsWide > 0, pixelsHigh > 0,
@@ -58,13 +103,46 @@ enum MenuBarChipImage {
               let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
+        context.cgContext.clear(CGRect(x: 0, y: 0, width: pixelsWide, height: pixelsHigh))
         context.cgContext.scaleBy(x: 2, y: 2)
-        symbolImage.draw(in: NSRect(origin: .zero, size: size))
+        // A transparent bitmap must not get coloured fringes around the digits.
+        context.cgContext.setShouldSmoothFonts(false)
+        context.cgContext.setAllowsFontSmoothing(false)
+
+        // The pins, each half a point into the body so that no gap shows between pin and body.
+        (colors.body ?? colors.ink).setFill()
+        for index in 0..<pinCount {
+            let x = half(bodyWidth * (CGFloat(index) + 0.5) / CGFloat(pinCount) - pinWidth / 2)
+            NSBezierPath(rect: NSRect(x: x, y: 0, width: pinWidth, height: pinHeight + 0.5)).fill()
+            NSBezierPath(rect: NSRect(x: x, y: pinHeight + bodyHeight - 0.5,
+                                      width: pinWidth, height: pinHeight + 0.5)).fill()
+        }
+
+        // The body: filled in yellow or red, or an outline in the ink of the template.
+        let bodyRect = NSRect(x: 0, y: pinHeight, width: bodyWidth, height: bodyHeight)
+        if let body = colors.body {
+            body.setFill()
+            NSBezierPath(roundedRect: bodyRect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
+        } else {
+            colors.ink.setStroke()
+            let outline = NSBezierPath(
+                roundedRect: bodyRect.insetBy(dx: strokeWidth / 2, dy: strokeWidth / 2),
+                xRadius: cornerRadius - strokeWidth / 2, yRadius: cornerRadius - strokeWidth / 2)
+            outline.lineWidth = strokeWidth
+            outline.stroke()
+        }
+
+        // The digits. Without .usesLineFragmentOrigin the origin of the rectangle is the baseline.
+        let baseline = half(pinHeight + (bodyHeight - font.capHeight) / 2)
+        let originX = half((bodyWidth - titleWidth) / 2)
+        title.draw(with: NSRect(x: originX, y: baseline, width: ceil(titleWidth), height: bodyHeight),
+                   options: [], context: nil)
         NSGraphicsContext.restoreGraphicsState()
+
         rep.size = size
         let baked = NSImage(size: size)
         baked.addRepresentation(rep)
-        baked.isTemplate = false
+        baked.isTemplate = label.tint == .none
         return baked
     }
 
@@ -76,18 +154,21 @@ enum MenuBarChipImage {
     }
 }
 
-/// The menu bar item: a memory chip that follows the percent shown, and the share of memory in use. The item
-/// exists from launch, also in a copy started without its window, so it hands the window-opening action to
-/// `MainWindow`.
+/// The menu bar item: a memory chip with the share of memory in use drawn inside it. The item exists from
+/// launch, also in a copy started without its window, so it hands the window-opening action to `MainWindow`.
 struct MemoryMenuLabel: View {
     @ObservedObject var model: MenuBarLabelModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(nsImage: MenuBarChipImage.image(symbol: model.label.symbol, tint: model.label.tint))
-            Text(model.label.title)
-                .monospacedDigit()
+            Image(nsImage: MenuBarChipImage.image(for: model.label))
+            #if DEBUG
+            if model.label.isDebugMarker {
+                Text(model.label.title)
+                    .monospacedDigit()
+            }
+            #endif
         }
         .accessibilityLabel(model.label.accessibility)
         .onAppear {

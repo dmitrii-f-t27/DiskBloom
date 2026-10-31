@@ -785,11 +785,43 @@ private func versionChecks(root: URL) throws {
     try require(appSource.contains("versionText: runningVersion"), "M20.8: the panel is not given the version text")
 }
 
-/// The pixels a chip image draws, on a fresh transparent bitmap at the same explicit 2x scale as
-/// `MenuBarChipImage`: the colour of every pixel with at least `minAlpha`, and how much of the bitmap's width
-/// and height the box around those pixels covers.
+/// One pixel of a chip bitmap, as sRGB.
+private struct ChipPixel: Equatable {
+    var r: CGFloat
+    var g: CGFloat
+    var b: CGFloat
+    var a: CGFloat
+}
+
+/// Every pixel of a chip image, rows counted from the top (like `colorAt`).
+private struct ChipGrid: Equatable {
+    let wide: Int
+    let high: Int
+    let pixels: [ChipPixel]
+
+    func pixel(_ x: Int, _ y: Int) -> ChipPixel { pixels[y * wide + x] }
+
+    /// The x ranges of the pixels with at least `minAlpha` in one row.
+    func runs(row: Int, minAlpha: CGFloat = 0.5) -> [Range<Int>] {
+        var found: [Range<Int>] = []
+        var start: Int?
+        for x in 0..<wide {
+            if pixel(x, row).a >= minAlpha {
+                if start == nil { start = x }
+            } else if let begin = start {
+                found.append(begin..<x)
+                start = nil
+            }
+        }
+        if let begin = start { found.append(begin..<wide) }
+        return found
+    }
+}
+
+/// The chip image redrawn on a fresh transparent bitmap at the same explicit 2x scale as `MenuBarChipImage`,
+/// so that its pixels can be read.
 @MainActor
-private func chipInk(_ image: NSImage, minAlpha: CGFloat) throws -> (colors: [(r: CGFloat, g: CGFloat, b: CGFloat)], coverX: Double, coverY: Double) {
+private func chipBitmap(_ image: NSImage) throws -> NSBitmapImageRep {
     let size = image.size
     let wide = Int((size.width * 2).rounded(.up))
     let high = Int((size.height * 2).rounded(.up))
@@ -806,58 +838,352 @@ private func chipInk(_ image: NSImage, minAlpha: CGFloat) throws -> (colors: [(r
     context.cgContext.scaleBy(x: 2, y: 2)
     image.draw(in: NSRect(origin: .zero, size: size))
     NSGraphicsContext.restoreGraphicsState()
-    var colors: [(r: CGFloat, g: CGFloat, b: CGFloat)] = []
-    var minX = Int.max, maxX = -1, minY = Int.max, maxY = -1
-    for y in 0..<high {
-        for x in 0..<wide {
-            guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), color.alphaComponent >= minAlpha else { continue }
-            colors.append((color.redComponent, color.greenComponent, color.blueComponent))
-            minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
-        }
-    }
-    guard !colors.isEmpty else { return (colors, 0, 0) }
-    return (colors, Double(maxX - minX + 1) / Double(wide), Double(maxY - minY + 1) / Double(high))
+    return rep
 }
 
-/// M21: the menu bar chip as an image (MenuBarChipImage): colour, template flag and scale, from the label.
+@MainActor
+private func chipGrid(_ image: NSImage) throws -> ChipGrid {
+    let rep = try chipBitmap(image)
+    var pixels: [ChipPixel] = []
+    pixels.reserveCapacity(rep.pixelsWide * rep.pixelsHigh)
+    for y in 0..<rep.pixelsHigh {
+        for x in 0..<rep.pixelsWide {
+            guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+                throw SmokeFailure.assertion("M21: no colour at pixel \(x),\(y)")
+            }
+            pixels.append(ChipPixel(r: color.redComponent, g: color.greenComponent, b: color.blueComponent,
+                                    a: color.alphaComponent))
+        }
+    }
+    return ChipGrid(wide: rep.pixelsWide, high: rep.pixelsHigh, pixels: pixels)
+}
+
+/// The pixels a chip image draws with at least `minAlpha`.
+@MainActor
+private func chipInk(_ image: NSImage, minAlpha: CGFloat) throws -> [ChipPixel] {
+    try chipGrid(image).pixels.filter { $0.a >= minAlpha }
+}
+
+/// The WCAG relative luminance of an sRGB pixel.
+private func relativeLuminance(_ pixel: ChipPixel) -> Double {
+    func linear(_ value: CGFloat) -> Double {
+        let v = Double(value)
+        return v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+    }
+    return 0.2126 * linear(pixel.r) + 0.7152 * linear(pixel.g) + 0.0722 * linear(pixel.b)
+}
+
+private func wcagContrast(_ first: ChipPixel, _ second: ChipPixel) -> Double {
+    let a = relativeLuminance(first), b = relativeLuminance(second)
+    return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+}
+
+private func isYellowBody(_ p: ChipPixel) -> Bool { p.a >= 0.9 && p.r > 0.8 && p.g > 0.6 && p.b < 0.35 }
+private func isRedBody(_ p: ChipPixel) -> Bool { p.a >= 0.9 && p.r > 0.75 && p.g < 0.4 && p.b < 0.4 }
+
+/// The opaque pixels in the digit colour of a filled chip: dark on yellow, white on red.
+private func digitPixels(of grid: ChipGrid, onRed: Bool) -> [(x: Int, y: Int, pixel: ChipPixel)] {
+    var found: [(x: Int, y: Int, pixel: ChipPixel)] = []
+    for y in 0..<grid.high {
+        for x in 0..<grid.wide {
+            let p = grid.pixel(x, y)
+            guard p.a >= 0.9 else { continue }
+            let isDigit = onRed ? min(p.r, p.g, p.b) > 0.85 : max(p.r, p.g, p.b) < 0.3
+            if isDigit { found.append((x, y, p)) }
+        }
+    }
+    return found
+}
+
+/// A copy of a template chip in one colour, the way macOS tints a template in the menu bar: the colour is
+/// filled over the image with the source-in operation, so only the alpha of the image is kept.
+@MainActor
+private func tintedCopy(_ image: NSImage, color: NSColor) throws -> NSImage {
+    let rep = try chipBitmap(image)
+    guard let context = NSGraphicsContext(bitmapImageRep: rep) else {
+        throw SmokeFailure.assertion("M21: no context to tint the chip with")
+    }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    color.setFill()
+    NSRect(x: 0, y: 0, width: rep.pixelsWide, height: rep.pixelsHigh).fill(using: .sourceIn)
+    NSGraphicsContext.restoreGraphicsState()
+    rep.size = image.size
+    let tinted = NSImage(size: image.size)
+    tinted.addRepresentation(rep)
+    return tinted
+}
+
+/// A transparent bitmap of the given size in pixels, drawn into by `draw` with the context in pixel units.
+@MainActor
+private func drawBitmap(pixelsWide: Int, pixelsHigh: Int, _ draw: (NSGraphicsContext) -> Void) throws -> NSBitmapImageRep {
+    guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: pixelsWide, pixelsHigh: pixelsHigh, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0),
+          let context = NSGraphicsContext(bitmapImageRep: rep) else {
+        throw SmokeFailure.assertion("M21: no bitmap for the preview (\(pixelsWide) x \(pixelsHigh))")
+    }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    context.cgContext.clear(CGRect(x: 0, y: 0, width: pixelsWide, height: pixelsHigh))
+    draw(context)
+    NSGraphicsContext.restoreGraphicsState()
+    return rep
+}
+
+private func writePNG(_ rep: NSBitmapImageRep, to url: URL) throws {
+    guard let data = rep.representation(using: .png, properties: [:]) else {
+        throw SmokeFailure.assertion("M21: no PNG data for \(url.lastPathComponent)")
+    }
+    try data.write(to: url)
+}
+
+/// The preview of the chip for the owner and the review, in `<checkout>/.build/chip-preview/`: one PNG per
+/// sample at its native 2x on a transparent ground, and a sheet of all samples on a light and a dark menu
+/// bar (template chips tinted black on light and white on dark), also enlarged to 6 pixels per point.
+@MainActor
+private func writeChipPreview(_ samples: [(name: String, image: NSImage)], to directory: URL) throws {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    for sample in samples {
+        try writePNG(try chipBitmap(sample.image), to: directory.appendingPathComponent("chip-\(sample.name).png"))
+    }
+
+    let gap: CGFloat = 6
+    let rowHeight: CGFloat = 24
+    let sheetWidth = samples.reduce(gap) { $0 + $1.image.size.width + gap }
+    let sheetHeight = rowHeight * 2
+    let bars: [(ground: NSColor, ink: NSColor)] = [
+        (NSColor(srgbRed: 0.93, green: 0.93, blue: 0.93, alpha: 1), NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)),
+        (NSColor(srgbRed: 0.12, green: 0.12, blue: 0.12, alpha: 1), NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)),
+    ]
+    var drawingError: Error?
+    let sheet = try drawBitmap(pixelsWide: Int(sheetWidth * 2), pixelsHigh: Int(sheetHeight * 2)) { context in
+        context.cgContext.scaleBy(x: 2, y: 2)
+        for (row, bar) in bars.enumerated() {
+            let rowY = sheetHeight - rowHeight * CGFloat(row + 1)
+            bar.ground.setFill()
+            NSRect(x: 0, y: rowY, width: sheetWidth, height: rowHeight).fill()
+            var x = gap
+            for sample in samples {
+                do {
+                    let image = sample.image.isTemplate ? try tintedCopy(sample.image, color: bar.ink) : sample.image
+                    let size = sample.image.size
+                    image.draw(in: NSRect(x: x, y: rowY + (rowHeight - size.height) / 2,
+                                          width: size.width, height: size.height))
+                } catch {
+                    drawingError = error
+                }
+                x += sample.image.size.width + gap
+            }
+        }
+    }
+    if let drawingError { throw drawingError }
+    try writePNG(sheet, to: directory.appendingPathComponent("sheet-2x.png"))
+
+    let sheetImage = NSImage(size: NSSize(width: sheetWidth, height: sheetHeight))
+    sheet.size = sheetImage.size
+    sheetImage.addRepresentation(sheet)
+    let enlarged = try drawBitmap(pixelsWide: Int(sheetWidth * 6), pixelsHigh: Int(sheetHeight * 6)) { context in
+        context.imageInterpolation = .none
+        sheetImage.draw(in: NSRect(x: 0, y: 0, width: sheetWidth * 6, height: sheetHeight * 6))
+    }
+    try writePNG(enlarged, to: directory.appendingPathComponent("sheet-6x.png"))
+}
+
+/// M21: the menu bar chip as one image with the percent inside (MenuBarChipImage): colour, template flag,
+/// size, fit and cache, from the label, and the wiring of the menu bar label.
 @MainActor
 private func menuBarChipImageChecks() throws {
-    func chip(percent: Int64, known: Bool = true, debugMarker: Bool = false) -> NSImage {
-        let label = MenuBarLabel.make(percent: percent, level: UInt32(MM_LEVEL_NORMAL), known: known, debugMarker: debugMarker)
-        return MenuBarChipImage.image(symbol: label.symbol, tint: label.tint)
+    func label(_ percent: Int64, known: Bool = true, debugMarker: Bool = false) -> MenuBarLabel {
+        MenuBarLabel.make(percent: percent, level: UInt32(MM_LEVEL_NORMAL), known: known, debugMarker: debugMarker)
+    }
+    func chip(_ percent: Int64, known: Bool = true, debugMarker: Bool = false) -> NSImage {
+        MenuBarChipImage.image(for: label(percent, known: known, debugMarker: debugMarker))
     }
 
-    // 85 %: the filled yellow chip is a bitmap, not a template.
-    let yellow = chip(percent: 85)
-    try require(!yellow.isTemplate, "M21.1: the yellow chip is a template")
-    let yellowInk = try chipInk(yellow, minAlpha: 0.9)
-    try require(yellowInk.colors.count >= 20, "M21.1: too few opaque pixels in the yellow chip: \(yellowInk.colors.count)")
-    let notYellow = yellowInk.colors.filter { !($0.r > 0.8 && $0.g > 0.6 && $0.b < 0.35) }
-    try require(notYellow.isEmpty, "M21.1: \(notYellow.count) opaque pixels are not yellow, first \(String(describing: notYellow.first))")
-    try require(yellowInk.coverX >= 0.6 && yellowInk.coverY >= 0.6,
-                "M21.1: the yellow chip covers \(yellowInk.coverX) x \(yellowInk.coverY) of the bitmap (scale mistake)")
+    let outline: [(name: String, image: NSImage)] = [("50", chip(50)), ("80", chip(80)), ("unknown", chip(95, known: false))]
+    let yellow: [(name: String, image: NSImage)] = [("81", chip(81)), ("90", chip(90))]
+    let red: [(name: String, image: NSImage)] = [("91", chip(91)), ("100", chip(100))]
+    let filled = yellow + red
 
-    // 95 %: the filled red chip.
-    let red = chip(percent: 95)
-    try require(!red.isTemplate, "M21.2: the red chip is a template")
-    let redInk = try chipInk(red, minAlpha: 0.9)
-    try require(redInk.colors.count >= 20, "M21.2: too few opaque pixels in the red chip: \(redInk.colors.count)")
-    let notRed = redInk.colors.filter { !($0.r > 0.75 && $0.g < 0.4 && $0.b < 0.4) }
-    try require(notRed.isEmpty, "M21.2: \(notRed.count) opaque pixels are not red, first \(String(describing: notRed.first))")
-    try require(redInk.coverX >= 0.6 && redInk.coverY >= 0.6,
-                "M21.2: the red chip covers \(redInk.coverX) x \(redInk.coverY) of the bitmap (scale mistake)")
+    // The bitmap is 2 pixels per point. The body starts below the top pins and ends above the bottom pins.
+    let imageHeightPixels = Int(MenuBarChipImage.imageHeight * 2)
+    let strokePixels = Int(MenuBarChipImage.strokeWidth * 2)
+    let bodyTop = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight - MenuBarChipImage.bodyHeight) * 2)
+    let bodyBottom = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight) * 2)
+    try require(imageHeightPixels == 36 && bodyTop == 4 && bodyBottom == 32,
+                "M21: the test's pixel rows do not match the chip constants: \(imageHeightPixels) \(bodyTop) \(bodyBottom)")
+    let middleRow = imageHeightPixels / 2
 
-    // 50 % and an unknown figure: the outline chip is a template with no colour of its own.
-    for (name, image) in [("50 %", chip(percent: 50)), ("unknown", chip(percent: 95, known: false))] {
-        try require(image.isTemplate, "M21.3: the \(name) chip is not a template")
-        let ink = try chipInk(image, minAlpha: 0.5)
-        try require(ink.colors.count >= 20, "M21.3: too few pixels in the \(name) chip: \(ink.colors.count)")
-        let coloured = ink.colors.filter { max($0.r, $0.g, $0.b) - min($0.r, $0.g, $0.b) >= 0.1 }
-        try require(coloured.isEmpty, "M21.3: \(coloured.count) pixels of the \(name) chip have a colour, first \(String(describing: coloured.first))")
+    // M21.1: only the outline chip is a template.
+    for sample in outline { try require(sample.image.isTemplate, "M21.1: the \(sample.name) chip is not a template") }
+    for sample in filled { try require(!sample.image.isTemplate, "M21.1: the \(sample.name) chip is a template") }
+
+    // M21.2: the body and the pins of a filled chip have the band's colour, and the body is most of the bitmap.
+    var bodyPixels: [String: ChipPixel] = [:]
+    for (band, samples) in [("yellow", yellow), ("red", red)] {
+        let isBody = band == "yellow" ? isYellowBody : isRedBody
+        for sample in samples {
+            let grid = try chipGrid(sample.image)
+            guard let pin = grid.runs(row: 1).first else {
+                throw SmokeFailure.assertion("M21.2: the \(sample.name) chip has no pin in row 1")
+            }
+            let pinPixel = grid.pixel((pin.lowerBound + pin.upperBound) / 2, 1)
+            let bodyPixel = grid.pixel(4, middleRow)
+            try require(isBody(pinPixel), "M21.2: the \(sample.name) pin is not \(band): \(pinPixel)")
+            try require(isBody(bodyPixel), "M21.2: the \(sample.name) body is not \(band): \(bodyPixel)")
+            let share = Double(grid.pixels.filter(isBody).count) / Double(grid.pixels.count)
+            try require(share >= 0.4, "M21.2: only \(share) of the \(sample.name) bitmap has the body colour")
+            bodyPixels[sample.name] = bodyPixel
+        }
     }
 
-    // The debug marker stays a template.
-    try require(chip(percent: 50, debugMarker: true).isTemplate, "M21.4: the ladybug is not a template")
+    // M21.3: the digits of a filled chip are drawn in a readable colour, inside the inner body rectangle.
+    for (band, samples) in [("yellow", yellow), ("red", red)] {
+        for sample in samples {
+            let grid = try chipGrid(sample.image)
+            let digits = digitPixels(of: grid, onRed: band == "red")
+            try require(digits.count >= 30, "M21.3: only \(digits.count) digit pixels on the \(sample.name) chip")
+            let outside = digits.filter {
+                $0.x < strokePixels || $0.x >= grid.wide - strokePixels
+                    || $0.y < bodyTop + strokePixels || $0.y >= bodyBottom - strokePixels
+            }
+            try require(outside.isEmpty, "M21.3: \(outside.count) digit pixels of the \(sample.name) chip are outside the inner body")
+            guard let body = bodyPixels[sample.name] else {
+                throw SmokeFailure.assertion("M21.3: no body colour for the \(sample.name) chip")
+            }
+            // The strongest digit pixel (darkest on yellow, whitest on red) against the body.
+            let strongest = band == "red"
+                ? digits.max { relativeLuminance($0.pixel) < relativeLuminance($1.pixel) }
+                : digits.min { relativeLuminance($0.pixel) < relativeLuminance($1.pixel) }
+            guard let digit = strongest?.pixel else { throw SmokeFailure.assertion("M21.3: no digit pixel") }
+            let contrast = wcagContrast(body, digit)
+            try require(contrast >= 4.5, "M21.3: the \(sample.name) digits have contrast \(contrast) against the body")
+        }
+    }
+
+    // M21.4: the digits of an outline chip are template ink, neutral, inside a body that is otherwise empty.
+    for sample in outline {
+        let ink = try chipInk(sample.image, minAlpha: 0.5)
+        let coloured = ink.filter { max($0.r, $0.g, $0.b) - min($0.r, $0.g, $0.b) >= 0.1 }
+        try require(coloured.isEmpty, "M21.4: \(coloured.count) pixels of the \(sample.name) chip have a colour, first \(String(describing: coloured.first))")
+        let grid = try chipGrid(sample.image)
+        var inside = 0, empty = 0
+        for y in (bodyTop + strokePixels)..<(bodyBottom - strokePixels) {
+            for x in strokePixels..<(grid.wide - strokePixels) {
+                let alpha = grid.pixel(x, y).a
+                if alpha >= 0.5 { inside += 1 } else if alpha < 0.05 { empty += 1 }
+            }
+        }
+        try require(inside >= 30, "M21.4: only \(inside) ink pixels inside the \(sample.name) outline chip")
+        try require(empty >= 30, "M21.4: only \(empty) empty pixels inside the \(sample.name) outline chip")
+    }
+    let grid79 = try chipGrid(chip(79)), grid80 = try chipGrid(chip(80)), gridUnknown = try chipGrid(chip(95, known: false))
+    try require(grid79 != grid80, "M21.4: the 79 % and 80 % chips look the same")
+    try require(grid80 != gridUnknown, "M21.4: the 80 % and unknown chips look the same")
+    try require(grid79 != gridUnknown, "M21.4: the 79 % and unknown chips look the same")
+
+    // M21.5: pins on the top and the bottom edge, four of them, in outline and filled chips.
+    for sample in outline + filled {
+        let grid = try chipGrid(sample.image)
+        for row in [1, grid.high - 2] {
+            let runs = grid.runs(row: row)
+            try require(runs.count == 4, "M21.5: the \(sample.name) chip has \(runs.count) pins in row \(row): \(runs)")
+        }
+    }
+
+    // M21.6: the height is fixed; the width is the same from 0 % to 99 % and for the unknown figure.
+    func width(_ image: NSImage) -> CGFloat { image.size.width }
+    let sized: [(String, NSImage)] = [
+        ("5", chip(5)), ("10", chip(10)), ("50", chip(50)), ("80", chip(80)), ("81", chip(81)), ("90", chip(90)),
+        ("91", chip(91)), ("99", chip(99)), ("unknown", chip(95, known: false)), ("100", chip(100)),
+    ]
+    for (name, image) in sized {
+        try require(image.size.height == MenuBarChipImage.imageHeight && MenuBarChipImage.imageHeight == 18,
+                    "M21.6: the \(name) chip is \(image.size.height) pt high")
+    }
+    let narrow = width(chip(50))
+    for (name, image) in sized where name != "100" {
+        try require(width(image) == narrow, "M21.6: the \(name) chip is \(width(image)) pt wide, not \(narrow)")
+    }
+    let width99 = width(chip(99)), width100 = width(chip(100))
+    try require(width100 > width99, "M21.6: the 100 % chip (\(width100)) is not wider than the 99 % chip (\(width99))")
+    try require(width99 <= 34, "M21.6: the 99 % chip is \(width99) pt wide")
+    try require(width100 <= 42, "M21.6: the 100 % chip is \(width100) pt wide")
+
+    // M21.7: the digits fit inside the body, with room on every side, and sit in the middle.
+    for sample in filled {
+        let grid = try chipGrid(sample.image)
+        let digits = digitPixels(of: grid, onRed: red.contains { $0.name == sample.name })
+        guard let left = digits.map({ $0.x }).min(), let right = digits.map({ $0.x }).max(),
+              let top = digits.map({ $0.y }).min(), let bottom = digits.map({ $0.y }).max() else {
+            throw SmokeFailure.assertion("M21.7: no digit pixels on the \(sample.name) chip")
+        }
+        try require(left >= 2 && grid.wide - 1 - right >= 2,
+                    "M21.7: the \(sample.name) digits are \(left) px from the left and \(grid.wide - 1 - right) px from the right side")
+        let marginTop = top - bodyTop, marginBottom = (bodyBottom - 1) - bottom
+        try require(abs(marginTop - marginBottom) <= 2,
+                    "M21.7: the \(sample.name) digits sit \(marginTop) px below the top and \(marginBottom) px above the bottom")
+    }
+    // The outline chip at 100 %: the two pixel columns just inside the stroke stay empty at mid-body. 100 % is
+    // red in the app, so the outline chip with that title is made from a label written by hand.
+    let outlineHundred = MenuBarChipImage.image(for: MenuBarLabel(title: "100%", symbol: "memorychip", tint: .none, accessibility: "outline probe"))
+    try require(outlineHundred.isTemplate, "M21.7: the outline 100 % probe is not a template")
+    let outlineGrid = try chipGrid(outlineHundred)
+    for y in (middleRow - 8)...(middleRow + 7) {
+        for x in [strokePixels, strokePixels + 1, outlineGrid.wide - strokePixels - 2, outlineGrid.wide - strokePixels - 1] {
+            try require(outlineGrid.pixel(x, y).a < 0.05, "M21.7: the outline 100 % chip has ink at \(x),\(y) just inside the stroke")
+        }
+    }
+
+    // M21.8: the same label gives the same image, and the cache stays small.
+    let again = MenuBarChipImage.image(for: label(85))
+    try require(again === MenuBarChipImage.image(for: label(85)), "M21.8: the same label gave two images")
+    for number in 0..<300 {
+        _ = MenuBarChipImage.image(for: MenuBarLabel(title: "\(number)%", symbol: "memorychip", tint: .none, accessibility: "cache probe"))
+    }
+    try require(MenuBarChipImage.cacheCount <= MenuBarChipImage.cacheLimit && MenuBarChipImage.cacheLimit == 16,
+                "M21.8: the cache holds \(MenuBarChipImage.cacheCount) images (limit \(MenuBarChipImage.cacheLimit))")
+
+    // M21.9: the ladybug stays a plain symbol template.
+    let ladybug = chip(50, debugMarker: true)
+    try require(ladybug.isTemplate, "M21.9: the ladybug is not a template")
+    let ladybugInk = try chipInk(ladybug, minAlpha: 0.5)
+    try require(ladybugInk.count >= 20, "M21.9: only \(ladybugInk.count) ink pixels in the ladybug")
+
+    // M21.10: the wiring. The tests have no view inspector, so the source of the menu bar label is read:
+    // without its DEBUG part it has no separate text, and it shows the chip image and speaks the label.
+    let sources = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Sources", isDirectory: true)
+    let menuSource = try String(contentsOf: sources.appendingPathComponent("MemoryMenuView.swift"), encoding: .utf8)
+    guard let labelStart = menuSource.range(of: "struct MemoryMenuLabel"),
+          let labelEnd = menuSource.range(of: "/// The version line", range: labelStart.upperBound..<menuSource.endIndex) else {
+        throw SmokeFailure.assertion("M21.10: MemoryMenuLabel or the version line is not in MemoryMenuView.swift")
+    }
+    var release = String(menuSource[labelStart.lowerBound..<labelEnd.lowerBound])
+    while let open = release.range(of: "#if DEBUG") {
+        guard let close = release.range(of: "#endif", range: open.upperBound..<release.endIndex) else {
+            throw SmokeFailure.assertion("M21.10: #if DEBUG without #endif in the menu bar label")
+        }
+        release.removeSubrange(open.lowerBound..<close.upperBound)
+    }
+    try require(!release.contains("Text("), "M21.10: the release menu bar label still has a separate text")
+    try require(release.contains("MenuBarChipImage.image(for: model.label)"), "M21.10: the label does not show the chip image of the label")
+    try require(release.contains(".accessibilityLabel(model.label.accessibility)"), "M21.10: the label does not speak the accessibility text")
+    // Written in two parts so that a search for the name finds only real uses of it.
+    let forbidden = "drawing" + "Handler"
+    try require(!menuSource.contains(forbidden), "M21.10: MemoryMenuView.swift uses a \(forbidden)")
+
+    // The preview, after every check has passed.
+    let checkout = sources.deletingLastPathComponent()
+    let previewDirectory = checkout.appendingPathComponent(".build", isDirectory: true)
+        .appendingPathComponent("chip-preview", isDirectory: true)
+    try writeChipPreview([("80", chip(80)), ("81", chip(81)), ("90", chip(90)), ("91", chip(91)),
+                          ("100", chip(100)), ("unknown", chip(95, known: false))], to: previewDirectory)
+    print("CHIP_PREVIEW \(previewDirectory.path)")
+    print("CHIP_SIZES two-digit=\(String(format: "%g", Double(narrow))) hundred=\(String(format: "%g", Double(width100))) height=\(String(format: "%g", Double(chip(50).size.height)))")
 }
 
 @main

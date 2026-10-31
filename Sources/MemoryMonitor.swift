@@ -673,13 +673,16 @@ enum MenuBarTint: Equatable, Sendable {
 }
 
 /// What the menu bar item shows: the percentage, a chip symbol with its colour, and the spoken text. The chip
-/// follows the percent shown (`mm_chip_band`), not the pressure level. The image itself is built in
-/// `MenuBarChipImage`, so this struct stays `Sendable`.
+/// follows the percent shown (`mm_chip_band`), not the pressure level. The title is drawn inside the chip. The
+/// image itself is built in `MenuBarChipImage`, so this struct stays `Sendable`.
 struct MenuBarLabel: Equatable, Sendable {
     var title: String
     var symbol: String
     var tint: MenuBarTint
     var accessibility: String
+
+    /// True for the ladybug of the automation switch (DEBUG builds), which keeps its own title next to it.
+    var isDebugMarker: Bool { symbol == "ladybug" }
 
     static let unknown = MenuBarLabel(title: "—%", symbol: "memorychip", tint: .none,
                                       accessibility: "Memory figure unavailable")
