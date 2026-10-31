@@ -13,6 +13,8 @@ struct DiskBloomApp: App {
     @State private var memoryMonitor: MemoryMonitorModel
     @State private var menuBarLabel: MenuBarLabelModel
     @State private var monitorController = MonitorModeController()
+    /// Read once at launch, so the panel names the running copy even if the app on disk is replaced later.
+    private let runningVersion = AppVersionText.text(of: .main)
 
     init() {
         // The models the menu bar controller reads are made here, so it can start before any window exists.
@@ -79,6 +81,7 @@ struct DiskBloomApp: App {
                 monitor: memoryMonitor,
                 canQuit: mm_can_quit(model.isMovingToTrash, uninstaller.isMovingToTrash,
                                      orphanedData.isMovingToTrash, cacheExplorer.isMovingToTrash),
+                versionText: runningVersion,
                 opened: { MenuBarController.shared?.panelOpened() },
                 closed: { MenuBarController.shared?.panelClosed() }
             )

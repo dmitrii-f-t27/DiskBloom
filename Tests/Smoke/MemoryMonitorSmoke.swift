@@ -669,6 +669,75 @@ private func menuBarChecks() throws {
     }
 }
 
+// MARK: - The version line of the panel (M20)
+
+private func writeInfoPlist(_ values: [String: Any], bundle: URL) throws {
+    let contents = bundle.appendingPathComponent("Contents", isDirectory: true)
+    try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+    let data = try PropertyListSerialization.data(fromPropertyList: values, format: .xml, options: 0)
+    try data.write(to: contents.appendingPathComponent("Info.plist"))
+}
+
+private func versionChecks(root: URL) throws {
+    let unknown = "DiskBloom unknown version (unknown build)"
+
+    // The text: a missing, blank or empty value is named as missing and never replaced by another value.
+    try require(AppVersionText.text(short: "1.7.1", build: "9") == "DiskBloom 1.7.1 (9)", "M20.1: both present")
+    try require(AppVersionText.text(short: nil, build: "9") == "DiskBloom unknown version (9)", "M20.1: no version")
+    try require(AppVersionText.text(short: "1.7.1", build: nil) == "DiskBloom 1.7.1 (unknown build)", "M20.1: no build")
+    try require(AppVersionText.text(short: nil, build: nil) == unknown, "M20.1: neither")
+    try require(AppVersionText.text(short: "  ", build: "") == AppVersionText.text(short: nil, build: nil),
+                "M20.2: blank and empty values are not the nil result")
+    try require(AppVersionText.text(short: " 1.7.1\n", build: "9 ") == "DiskBloom 1.7.1 (9)", "M20.2: values are not trimmed")
+
+    // The bundle: the values come from the Info.plist of the bundle that is asked.
+    let m20 = root.appendingPathComponent("m20", isDirectory: true)
+    try? FileManager.default.removeItem(at: m20)
+    let full = m20.appendingPathComponent("Full.app", isDirectory: true)
+    let empty = m20.appendingPathComponent("Empty.app", isDirectory: true)
+    let numbers = m20.appendingPathComponent("Numbers.app", isDirectory: true)
+    try writeInfoPlist(["CFBundleIdentifier": "test.m20.full",
+                        "CFBundleShortVersionString": "3.4.5", "CFBundleVersion": "77"], bundle: full)
+    try writeInfoPlist(["CFBundleIdentifier": "test.m20.empty"], bundle: empty)
+    try writeInfoPlist(["CFBundleIdentifier": "test.m20.numbers",
+                        "CFBundleShortVersionString": 7, "CFBundleVersion": 8], bundle: numbers)
+    guard let fullBundle = Bundle(url: full) else { throw SmokeFailure.assertion("M20.3: Full.app is not a bundle") }
+    guard let emptyBundle = Bundle(url: empty) else { throw SmokeFailure.assertion("M20.3: Empty.app is not a bundle") }
+    guard let numbersBundle = Bundle(url: numbers) else { throw SmokeFailure.assertion("M20.3: Numbers.app is not a bundle") }
+    try require(AppVersionText.text(of: fullBundle) == "DiskBloom 3.4.5 (77)", "M20.3: \(AppVersionText.text(of: fullBundle))")
+    try require(AppVersionText.text(of: emptyBundle) == unknown, "M20.4: \(AppVersionText.text(of: emptyBundle))")
+    try require(AppVersionText.text(of: numbersBundle) == unknown, "M20.5: \(AppVersionText.text(of: numbersBundle))")
+
+    // The wiring: the tests have no view inspector, so the sources are read. Tests/Smoke/<this file> is three
+    // path levels below the checkout.
+    let sources = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Sources", isDirectory: true)
+    let menuSource = try String(contentsOf: sources.appendingPathComponent("MemoryMenuView.swift"), encoding: .utf8)
+    guard let panelStart = menuSource.range(of: "struct MemoryMenuPanel") else {
+        throw SmokeFailure.assertion("M20.6: struct MemoryMenuPanel is not in MemoryMenuView.swift")
+    }
+    let panel = menuSource[panelStart.upperBound...]
+    guard let actionsAt = panel.range(of: "            actions\n") else {
+        throw SmokeFailure.assertion("M20.6: the panel body does not list actions")
+    }
+    guard let textAt = panel.range(of: "Text(versionText)") else {
+        throw SmokeFailure.assertion("M20.6: the panel does not show Text(versionText)")
+    }
+    guard let paddingAt = panel.range(of: ".padding(14)") else {
+        throw SmokeFailure.assertion("M20.6: the panel body has no .padding(14)")
+    }
+    try require(actionsAt.upperBound <= textAt.lowerBound && textAt.upperBound <= paddingAt.lowerBound,
+                "M20.6: the version text is not between actions and .padding(14)")
+    let styling = panel[textAt.upperBound..<paddingAt.lowerBound]
+    try require(styling.contains(".caption2"), "M20.7: the version text is not .caption2")
+    try require(styling.contains(".secondary"), "M20.7: the version text is not .secondary")
+
+    let appSource = try String(contentsOf: sources.appendingPathComponent("DiskBloomApp.swift"), encoding: .utf8)
+    try require(appSource.contains("AppVersionText.text(of: .main)"), "M20.8: the app does not read the main bundle")
+    try require(appSource.contains("versionText: runningVersion"), "M20.8: the panel is not given the version text")
+}
+
 @main
 @MainActor
 private struct MemoryMonitorSmoke {
@@ -883,6 +952,9 @@ private struct MemoryMonitorSmoke {
                     "an open window in a hidden app lost the Dock icon")
         try require(DockIcon.policy(windowOpen: false, appHidden: false) == .accessory,
                     "an app with no window and not hidden kept the Dock icon")
+
+        // M20: the version line of the panel.
+        try versionChecks(root: root)
 
         // M10-M19: the menu bar figure (clock, label policy, watchdog, relaunch, opening the window).
         try menuBarChecks()

@@ -32,11 +32,31 @@ struct MemoryMenuLabel: View {
     }
 }
 
+/// The version line of the panel. A missing value is named as missing, never replaced by another value.
+enum AppVersionText {
+    static func text(short: String?, build: String?) -> String {
+        "DiskBloom \(present(short) ?? "unknown version") (\(present(build) ?? "unknown build"))"
+    }
+
+    static func text(of bundle: Bundle) -> String {
+        text(short: bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+             build: bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
+    }
+
+    /// The value without surrounding white space, or nil when nothing is left.
+    private static func present(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+}
+
 /// The panel under the menu bar item: how full the memory is, and which apps and services use it.
 struct MemoryMenuPanel: View {
     @ObservedObject var monitor: MemoryMonitorModel
     /// False while a move to the Trash runs (Specs/memory_rules.t27, mm_can_quit).
     let canQuit: Bool
+    /// The line at the bottom of the panel: which version of DiskBloom this is (AppVersionText).
+    let versionText: String
     /// Called when the panel appears and disappears, one run-loop turn later: setting published values from
     /// inside a view update is a SwiftUI fault. The run loop (not a Task) is used because a Task runs from
     /// the main dispatch queue.
@@ -51,6 +71,10 @@ struct MemoryMenuPanel: View {
             usage
             Divider()
             actions
+            Text(versionText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
         .padding(14)
         .frame(width: 360)
