@@ -1,3 +1,29 @@
+# DiskBloom 1.7.1
+
+The menu bar panel now shows which version of DiskBloom is running. Everything else works as in 1.7. App version: 1.7.1, build 9.
+
+## Download
+
+- **DiskBloom-1.7.1-macOS-arm64.dmg** — open the image and drag DiskBloom to Applications.
+- **DiskBloom-1.7.1-macOS-arm64.zip** — the same app as a ZIP archive.
+- **SHA256SUMS** — SHA-256 of both files to verify your download.
+
+Requirements: a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later. The prebuilt app does not need Xcode. Intel Macs are not supported by this download.
+
+## What's new
+
+- **Version in the panel**: the last line of the panel that opens from the menu bar figure reads `DiskBloom 1.7.1 (9)`. The app reads it from its own bundle when it starts, so it names the running copy. A missing value shows as `unknown version` or `unknown build`.
+
+The known limits of 1.7 still apply. See the 1.7.0 notes.
+
+## Signature and first launch
+
+**This release is ad-hoc signed, without a Developer ID and without Apple notarization.** macOS may block the first launch. If you trust this release, try to open the app once, then check the permission for DiskBloom in System Settings → Privacy & Security. Do not turn off protection for the whole system. [Apple's instructions](https://support.apple.com/102445).
+
+## Verification before release
+
+The strict Swift 6 build, the signature integrity check, all eight smoke suites, the eleven differential tests and the 80 spec tests passed on Apple silicon. The Mac App Store edition is prepared but not yet published. Its project was built as a universal Release binary without code signing and was not run. Its Intel (x86_64) slice was compiled but not tested: Rosetta is not installed on the build Mac, so the x86_64 smoke and spec tests were not run for this release. The ZIP and DMG were checked again after packaging.
+
 # DiskBloom 1.7.0
 
 The memory figure in the menu bar now updates with memory use, and the App Uninstaller can finish removing a protected application with your administrator password. App version: 1.7, build 8.
