@@ -12,15 +12,80 @@ final class MenuBarLabelModel: ObservableObject, MenuBarDisplay {
     }
 }
 
-/// The menu bar item: a memory chip and the share of memory in use. The item exists from launch, also in a
-/// copy started without its window, so it hands the window-opening action to `MainWindow`.
+/// The chip of the menu bar item as an image. Up to 80 % it is the outline chip, a template that follows the
+/// bar's colour; above 80 % it is the filled chip in yellow, above 90 % in red (`mm_chip_band`). The coloured
+/// chip is baked into a bitmap and is not a template, so the menu bar draws its colours as they are and does
+/// not apply its own symbol configuration to it. One configuration serves every case, so the chip keeps its
+/// size from band to band. The bitmap is drawn without a drawing closure: such a closure may run on any thread.
+@MainActor
+enum MenuBarChipImage {
+    private static let configuration = NSImage.SymbolConfiguration(
+        pointSize: NSFont.systemFontSize, weight: .regular, scale: .medium)
+    private static var cache: [String: NSImage] = [:]
+
+    static func image(symbol: String, tint: MenuBarTint) -> NSImage {
+        let key = "\(symbol)|\(tint)"
+        if let cached = cache[key] { return cached }
+        guard let built = build(symbol: symbol, tint: tint) else { return placeholder() }
+        cache[key] = built
+        return built
+    }
+
+    private static func build(symbol: String, tint: MenuBarTint) -> NSImage? {
+        let color: NSColor
+        switch tint {
+        case .none:
+            guard let plain = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(configuration) else { return nil }
+            plain.isTemplate = true
+            return plain
+        case .yellow:
+            color = .systemYellow
+        case .red:
+            color = .systemRed
+        }
+        let colored = configuration.applying(NSImage.SymbolConfiguration(paletteColors: [color]))
+        guard let symbolImage = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(colored) else { return nil }
+        let size = symbolImage.size
+        let pixelsWide = Int((size.width * 2).rounded(.up))
+        let pixelsHigh = Int((size.height * 2).rounded(.up))
+        guard pixelsWide > 0, pixelsHigh > 0,
+              let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: pixelsWide, pixelsHigh: pixelsHigh, bitsPerSample: 8,
+                samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.cgContext.scaleBy(x: 2, y: 2)
+        symbolImage.draw(in: NSRect(origin: .zero, size: size))
+        NSGraphicsContext.restoreGraphicsState()
+        rep.size = size
+        let baked = NSImage(size: size)
+        baked.addRepresentation(rep)
+        baked.isTemplate = false
+        return baked
+    }
+
+    /// What a missing symbol or drawing context shows: an empty template image, never a crash.
+    private static func placeholder() -> NSImage {
+        let empty = NSImage(size: NSSize(width: 16, height: 16))
+        empty.isTemplate = true
+        return empty
+    }
+}
+
+/// The menu bar item: a memory chip that follows the percent shown, and the share of memory in use. The item
+/// exists from launch, also in a copy started without its window, so it hands the window-opening action to
+/// `MainWindow`.
 struct MemoryMenuLabel: View {
     @ObservedObject var model: MenuBarLabelModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: model.label.symbol)
+            Image(nsImage: MenuBarChipImage.image(symbol: model.label.symbol, tint: model.label.tint))
             Text(model.label.title)
                 .monospacedDigit()
         }

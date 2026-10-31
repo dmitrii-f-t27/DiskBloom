@@ -34,6 +34,11 @@
 #define MM_PANEL_REFRESH_MS 2000
 #define MM_TIMER_TOLERANCE_PERMILLE 100
 #define MM_SAMPLE_MISSES_MAX 3
+#define MM_CHIP_OUTLINE 0
+#define MM_CHIP_YELLOW 1
+#define MM_CHIP_RED 2
+#define MM_CHIP_YELLOW_ABOVE 80
+#define MM_CHIP_RED_ABOVE 90
 #define MM_WATCHDOG_MS 5000
 #define MM_STALE_MS 10000
 #define MM_WATCHDOG_LATE_MS 5000
@@ -92,8 +97,9 @@ bool mm_notes_unreadable(int64_t unreadable);
 int64_t mm_timer_tolerance_ms(int64_t interval_ms);
 bool mm_lists_now(bool panel_open, bool lists_processes);
 bool mm_label_known(int64_t misses, bool has_value);
+uint32_t mm_chip_band(int64_t percent, bool known);
 bool mm_label_changes(int64_t shown_percent, uint32_t shown_level, bool shown_known, int64_t percent, uint32_t level, bool known);
-bool mm_label_due(bool forced, uint32_t shown_level, bool shown_known, uint32_t level, bool known, int64_t since_shown_ms);
+bool mm_label_due(bool forced, int64_t shown_percent, uint32_t shown_level, bool shown_known, int64_t percent, uint32_t level, bool known, int64_t since_shown_ms);
 bool mm_snapshot_publishes(bool panel_open, bool label_shown);
 uint32_t mm_stale_reason(int64_t tick_age_ms, int64_t echo_age_ms);
 uint32_t mm_watchdog_action(uint32_t reason, int64_t late_ms, int64_t stale_checks);

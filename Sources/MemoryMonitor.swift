@@ -667,28 +667,47 @@ final class RunLoopTickScheduler: TickScheduler {
     }
 }
 
-/// What the menu bar item shows: the percentage, a chip symbol and the spoken text.
+/// The colour of the chip in the menu bar: none (the bar's own colour), yellow or red.
+enum MenuBarTint: Equatable, Sendable {
+    case none, yellow, red
+}
+
+/// What the menu bar item shows: the percentage, a chip symbol with its colour, and the spoken text. The chip
+/// follows the percent shown (`mm_chip_band`), not the pressure level. The image itself is built in
+/// `MenuBarChipImage`, so this struct stays `Sendable`.
 struct MenuBarLabel: Equatable, Sendable {
     var title: String
     var symbol: String
+    var tint: MenuBarTint
     var accessibility: String
 
-    static let unknown = MenuBarLabel(title: "—%", symbol: "memorychip", accessibility: "Memory figure unavailable")
+    static let unknown = MenuBarLabel(title: "—%", symbol: "memorychip", tint: .none,
+                                      accessibility: "Memory figure unavailable")
 
     static func make(percent: Int64, level: UInt32, known: Bool, debugMarker: Bool) -> MenuBarLabel {
         let memoryLevel = MemoryLevel(code: level)
         let symbol: String
+        let tint: MenuBarTint
         if debugMarker {
             symbol = "ladybug"
-        } else if known && memoryLevel != .normal {
-            symbol = "memorychip.fill"
+            tint = .none
         } else {
-            symbol = "memorychip"
+            switch mm_chip_band(percent, known) {
+            case UInt32(MM_CHIP_RED):
+                symbol = "memorychip.fill"
+                tint = .red
+            case UInt32(MM_CHIP_YELLOW):
+                symbol = "memorychip.fill"
+                tint = .yellow
+            default:
+                symbol = "memorychip"
+                tint = .none
+            }
         }
         guard known else {
-            return MenuBarLabel(title: "—%", symbol: symbol, accessibility: "Memory figure unavailable")
+            return MenuBarLabel(title: "—%", symbol: symbol, tint: tint, accessibility: "Memory figure unavailable")
         }
-        return MenuBarLabel(title: "\(percent)%", symbol: symbol,
+        return MenuBarLabel(title: "\(percent)%", symbol: symbol, tint: tint,
                             accessibility: "Memory \(percent)% used, pressure \(memoryLevel.title)")
     }
 }
@@ -1084,10 +1103,14 @@ final class MenuBarController {
             log.notice("pressure code=\(sample.pressureCode)")
         }
 
+        #if DEBUG
+        let percent = MenuBarAutomation.forcedPercent ?? last?.percent ?? 0
+        #else
         let percent = last?.percent ?? 0
+        #endif
         let level = last?.levelCode ?? UInt32(MM_LEVEL_NORMAL)
         let changes = mm_label_changes(shownPercent, shownLevel, shownKnown, percent, level, known)
-        let due = mm_label_due(reason != .timer, shownLevel, shownKnown, level, known, now - shownAt)
+        let due = mm_label_due(reason != .timer, shownPercent, shownLevel, shownKnown, percent, level, known, now - shownAt)
         let show = changes && due
         if show {
             let label = MenuBarLabel.make(percent: percent, level: level, known: known, debugMarker: debugMarker)
@@ -1321,6 +1344,8 @@ enum MonitorModeAutomation {
 ///   -DiskBloomAutomationMenuBarStallMs <ms>      length of fault F1 (default 0: F1 is skipped)
 ///   -DiskBloomAutomationMenuBarQuitAfter <s>     quits at the first tick this long after install
 ///   -DiskBloomAutomationNoWindow YES             starts without a window (`MenuBarRelaunch`)
+///   -DiskBloomAutomationMenuBarForcePercent <n>  shows n % instead of the measured figure, to see each chip
+///                                                band (independent of the master switch: no ladybug)
 /// The schedule advances at the end of every tick, so a blocked main thread delays it, not the watchdog.
 @MainActor
 enum MenuBarAutomation {
@@ -1342,6 +1367,7 @@ enum MenuBarAutomation {
     }
 
     static let enabled: Bool = UserDefaults.standard.bool(forKey: "DiskBloomAutomationMenuBar")
+    static let forcedPercent: Int64? = UserDefaults.standard.object(forKey: "DiskBloomAutomationMenuBarForcePercent") == nil ? nil : Int64(UserDefaults.standard.integer(forKey: "DiskBloomAutomationMenuBarForcePercent"))
     private static var controller: MenuBarController?
     private static var monitor: MemoryMonitorModel?
     private static var sink: (any MenuBarLogging)?

@@ -242,9 +242,9 @@ private func menuBarChecks() throws {
             nil,                                                                                  // 1
             fakeSnapshot(percent: 85, used: 1000),                                                // 2
             fakeSnapshot(percent: 85, used: 2000),                                                // 3
-            fakeSnapshot(percent: 79, used: 3000), fakeSnapshot(percent: 79, used: 3000),         // 4
-            fakeSnapshot(percent: 79, level: UInt32(MM_LEVEL_WARNING), used: 3500, pressure: 2),  // 5
-            fakeSnapshot(percent: 80, level: UInt32(MM_LEVEL_WARNING), used: 3600, pressure: 2),  // 6
+            fakeSnapshot(percent: 84, used: 3000), fakeSnapshot(percent: 84, used: 3000),         // 4
+            fakeSnapshot(percent: 84, level: UInt32(MM_LEVEL_WARNING), used: 3500, pressure: 2),  // 5
+            fakeSnapshot(percent: 85, level: UInt32(MM_LEVEL_WARNING), used: 3600, pressure: 2),  // 6
             nil, nil, nil,                                                                        // 7
             fakeSnapshot(percent: 81, used: 3700),                                                // 8
         ])
@@ -258,7 +258,8 @@ private func menuBarChecks() throws {
         rig.clock.now = 2000
         rig.controller.tick(.launch)
         try require(rig.display.shown.count == 1 && rig.display.label.title == "85%"
-                    && rig.display.label.symbol == "memorychip", "M10.2: \(rig.display.shown)")
+                    && rig.display.label.symbol == "memorychip.fill" && rig.display.label.tint == .yellow,
+                    "M10.2: \(rig.display.shown)")
         try require(rig.display.label.accessibility == "Memory 85% used, pressure Normal", "M10.2: accessibility")
         try require(rig.monitor.snapshot.used == 1000 && rig.monitor.percentText == "85%", "M10.2: panel snapshot")
         // 3: same percent, other bytes: nothing is shown or published.
@@ -266,22 +267,24 @@ private func menuBarChecks() throws {
         rig.controller.tick(.timer)
         try require(rig.display.shown.count == 1, "M10.3: shown again for the same percent")
         try require(rig.monitor.snapshot.used == 1000, "M10.3: the closed panel's snapshot was published")
-        // 4: 79 percent from a timer tick waits until 2000 ms after the show.
+        // 4: 84 percent from a timer tick waits until 2000 ms after the show.
         rig.clock.now = 3000
         rig.controller.tick(.timer)
         try require(rig.display.shown.count == 1, "M10.4: a number-only change was shown after 1000 ms")
         rig.clock.now = 4000
         rig.controller.tick(.timer)
-        try require(rig.display.shown.count == 2 && rig.display.label.title == "79%", "M10.4: \(rig.display.shown)")
-        // 5: a level change is due at once and fills the chip.
+        try require(rig.display.shown.count == 2 && rig.display.label.title == "84%", "M10.4: \(rig.display.shown)")
+        // 5: a level change is due at once; the chip stays filled and yellow (it follows the percent).
         rig.clock.now = 4500
         rig.controller.tick(.timer)
-        try require(rig.display.shown.count == 3 && rig.display.label.symbol == "memorychip.fill",
+        try require(rig.display.shown.count == 3 && rig.display.label.symbol == "memorychip.fill"
+                    && rig.display.label.tint == .yellow
+                    && rig.display.label.accessibility == "Memory 84% used, pressure Warning",
                     "M10.5: \(rig.display.shown)")
         // 6: a forced tick shows a number-only change at once.
         rig.clock.now = 4600
         rig.controller.tick(.pressure)
-        try require(rig.display.shown.count == 4 && rig.display.label.title == "80%", "M10.6: \(rig.display.shown)")
+        try require(rig.display.shown.count == 4 && rig.display.label.title == "85%", "M10.6: \(rig.display.shown)")
         // 7: three failed samples in a row make the figure unknown.
         let failed = rig.log.count(prefix: "sample-failed")
         let unknown = rig.log.count(prefix: "unknown")
@@ -289,20 +292,64 @@ private func menuBarChecks() throws {
         rig.controller.tick(.timer)
         rig.clock.now = 6000
         rig.controller.tick(.timer)
-        try require(rig.display.shown.count == 4 && rig.monitor.percentText == "80%", "M10.7: unknown too early")
+        try require(rig.display.shown.count == 4 && rig.monitor.percentText == "85%", "M10.7: unknown too early")
         rig.clock.now = 7000
         rig.controller.tick(.timer)
-        try require(rig.display.shown.count == 5 && rig.display.label.title == "—%", "M10.7: \(rig.display.shown)")
+        try require(rig.display.shown.count == 5 && rig.display.label.title == "—%"
+                    && rig.display.label.symbol == "memorychip" && rig.display.label.tint == .none,
+                    "M10.7: \(rig.display.shown)")
         try require(!rig.monitor.known && rig.monitor.percentText == "—%", "M10.7: the panel still shows a number")
         try require(rig.log.count(prefix: "sample-failed") == failed + 1, "M10.7: sample-failed not logged once")
         try require(rig.log.count(prefix: "unknown") == unknown + 1, "M10.7: unknown not logged once")
         // 8: a good sample brings the number back at once.
         rig.clock.now = 7100
         rig.controller.tick(.timer)
-        try require(rig.display.shown.count == 6 && rig.display.label.title == "81%", "M10.8: \(rig.display.shown)")
+        try require(rig.display.shown.count == 6 && rig.display.label.title == "81%"
+                    && rig.display.label.tint == .yellow, "M10.8: \(rig.display.shown)")
         try require(rig.monitor.known && rig.monitor.percentText == "81%", "M10.8: the panel is still unknown")
         try require(MenuBarLabel.make(percent: 5, level: 0, known: true, debugMarker: true).symbol == "ladybug",
                     "M10: the debug marker is missing")
+    }
+
+    // M10b: the chip follows the percent shown (mm_chip_band): a change of band shows at once, a change of
+    // the number inside one band waits 2 s, and the pressure level does not touch the chip.
+    do {
+        let percents: [Int64] = [50, 51, 80, 81, 82, 90, 91, 92, 90, 80]
+        let rig = MenuBarRig(script: percents.map { fakeSnapshot(percent: $0) })
+        // (clock in ms, expected count of labels shown, expected title, expected symbol, expected tint)
+        let steps: [(Int64, Int, String, String, MenuBarTint)] = [
+            (1000, 1, "50%", "memorychip", .none),
+            (1100, 1, "50%", "memorychip", .none),
+            (3000, 2, "80%", "memorychip", .none),
+            (3100, 3, "81%", "memorychip.fill", .yellow),
+            (3200, 3, "81%", "memorychip.fill", .yellow),
+            (5200, 4, "90%", "memorychip.fill", .yellow),
+            (5300, 5, "91%", "memorychip.fill", .red),
+            (5400, 5, "91%", "memorychip.fill", .red),
+            (5500, 6, "90%", "memorychip.fill", .yellow),
+            (5600, 7, "80%", "memorychip", .none),
+        ]
+        for (index, step) in steps.enumerated() {
+            rig.clock.now = step.0
+            rig.controller.tick(index == 0 ? .launch : .timer)
+            let label = rig.display.label
+            try require(
+                rig.display.shown.count == step.1 && label.title == step.2 && label.symbol == step.3
+                    && label.tint == step.4,
+                "M10b.\(index + 1): at \(step.0) ms (percent \(percents[index])) expected \(step.1) \(step.2) \(step.3) \(step.4), got \(rig.display.shown)")
+        }
+        let red = MenuBarLabel.make(percent: 95, level: UInt32(MM_LEVEL_NORMAL), known: true, debugMarker: false)
+        try require(red.symbol == "memorychip.fill" && red.tint == .red, "M10b: 95 % is not a red filled chip: \(red)")
+        let critical = MenuBarLabel.make(percent: 10, level: UInt32(MM_LEVEL_CRITICAL), known: true, debugMarker: false)
+        try require(critical.symbol == "memorychip" && critical.tint == .none
+                    && critical.accessibility.contains("pressure Critical"),
+                    "M10b: the pressure level changed the chip or the spoken text: \(critical)")
+        let unknownLabel = MenuBarLabel.make(percent: 95, level: UInt32(MM_LEVEL_NORMAL), known: false, debugMarker: false)
+        try require(unknownLabel.symbol == "memorychip" && unknownLabel.tint == .none && unknownLabel.title == "—%",
+                    "M10b: an unknown figure is not the outline chip: \(unknownLabel)")
+        let marker = MenuBarLabel.make(percent: 95, level: UInt32(MM_LEVEL_NORMAL), known: true, debugMarker: true)
+        try require(marker.symbol == "ladybug" && marker.tint == .none && marker.title == "95%",
+                    "M10b: the debug marker is not a plain ladybug: \(marker)")
     }
 
     // M11: the heartbeat.
@@ -738,6 +785,81 @@ private func versionChecks(root: URL) throws {
     try require(appSource.contains("versionText: runningVersion"), "M20.8: the panel is not given the version text")
 }
 
+/// The pixels a chip image draws, on a fresh transparent bitmap at the same explicit 2x scale as
+/// `MenuBarChipImage`: the colour of every pixel with at least `minAlpha`, and how much of the bitmap's width
+/// and height the box around those pixels covers.
+@MainActor
+private func chipInk(_ image: NSImage, minAlpha: CGFloat) throws -> (colors: [(r: CGFloat, g: CGFloat, b: CGFloat)], coverX: Double, coverY: Double) {
+    let size = image.size
+    let wide = Int((size.width * 2).rounded(.up))
+    let high = Int((size.height * 2).rounded(.up))
+    guard wide > 0, high > 0,
+          let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: wide, pixelsHigh: high, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+          let context = NSGraphicsContext(bitmapImageRep: rep) else {
+        throw SmokeFailure.assertion("M21: no bitmap to draw the chip into (size \(size))")
+    }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    context.cgContext.clear(CGRect(x: 0, y: 0, width: wide, height: high))
+    context.cgContext.scaleBy(x: 2, y: 2)
+    image.draw(in: NSRect(origin: .zero, size: size))
+    NSGraphicsContext.restoreGraphicsState()
+    var colors: [(r: CGFloat, g: CGFloat, b: CGFloat)] = []
+    var minX = Int.max, maxX = -1, minY = Int.max, maxY = -1
+    for y in 0..<high {
+        for x in 0..<wide {
+            guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), color.alphaComponent >= minAlpha else { continue }
+            colors.append((color.redComponent, color.greenComponent, color.blueComponent))
+            minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+        }
+    }
+    guard !colors.isEmpty else { return (colors, 0, 0) }
+    return (colors, Double(maxX - minX + 1) / Double(wide), Double(maxY - minY + 1) / Double(high))
+}
+
+/// M21: the menu bar chip as an image (MenuBarChipImage): colour, template flag and scale, from the label.
+@MainActor
+private func menuBarChipImageChecks() throws {
+    func chip(percent: Int64, known: Bool = true, debugMarker: Bool = false) -> NSImage {
+        let label = MenuBarLabel.make(percent: percent, level: UInt32(MM_LEVEL_NORMAL), known: known, debugMarker: debugMarker)
+        return MenuBarChipImage.image(symbol: label.symbol, tint: label.tint)
+    }
+
+    // 85 %: the filled yellow chip is a bitmap, not a template.
+    let yellow = chip(percent: 85)
+    try require(!yellow.isTemplate, "M21.1: the yellow chip is a template")
+    let yellowInk = try chipInk(yellow, minAlpha: 0.9)
+    try require(yellowInk.colors.count >= 20, "M21.1: too few opaque pixels in the yellow chip: \(yellowInk.colors.count)")
+    let notYellow = yellowInk.colors.filter { !($0.r > 0.8 && $0.g > 0.6 && $0.b < 0.35) }
+    try require(notYellow.isEmpty, "M21.1: \(notYellow.count) opaque pixels are not yellow, first \(String(describing: notYellow.first))")
+    try require(yellowInk.coverX >= 0.6 && yellowInk.coverY >= 0.6,
+                "M21.1: the yellow chip covers \(yellowInk.coverX) x \(yellowInk.coverY) of the bitmap (scale mistake)")
+
+    // 95 %: the filled red chip.
+    let red = chip(percent: 95)
+    try require(!red.isTemplate, "M21.2: the red chip is a template")
+    let redInk = try chipInk(red, minAlpha: 0.9)
+    try require(redInk.colors.count >= 20, "M21.2: too few opaque pixels in the red chip: \(redInk.colors.count)")
+    let notRed = redInk.colors.filter { !($0.r > 0.75 && $0.g < 0.4 && $0.b < 0.4) }
+    try require(notRed.isEmpty, "M21.2: \(notRed.count) opaque pixels are not red, first \(String(describing: notRed.first))")
+    try require(redInk.coverX >= 0.6 && redInk.coverY >= 0.6,
+                "M21.2: the red chip covers \(redInk.coverX) x \(redInk.coverY) of the bitmap (scale mistake)")
+
+    // 50 % and an unknown figure: the outline chip is a template with no colour of its own.
+    for (name, image) in [("50 %", chip(percent: 50)), ("unknown", chip(percent: 95, known: false))] {
+        try require(image.isTemplate, "M21.3: the \(name) chip is not a template")
+        let ink = try chipInk(image, minAlpha: 0.5)
+        try require(ink.colors.count >= 20, "M21.3: too few pixels in the \(name) chip: \(ink.colors.count)")
+        let coloured = ink.colors.filter { max($0.r, $0.g, $0.b) - min($0.r, $0.g, $0.b) >= 0.1 }
+        try require(coloured.isEmpty, "M21.3: \(coloured.count) pixels of the \(name) chip have a colour, first \(String(describing: coloured.first))")
+    }
+
+    // The debug marker stays a template.
+    try require(chip(percent: 50, debugMarker: true).isTemplate, "M21.4: the ladybug is not a template")
+}
+
 @main
 @MainActor
 private struct MemoryMonitorSmoke {
@@ -958,6 +1080,9 @@ private struct MemoryMonitorSmoke {
 
         // M10-M19: the menu bar figure (clock, label policy, watchdog, relaunch, opening the window).
         try menuBarChecks()
+
+        // M21: the menu bar chip as an image (colour, template flag, scale).
+        try menuBarChipImageChecks()
 
         print("MEMORY_MONITOR_SMOKE_OK")
     }
