@@ -4,9 +4,9 @@ DiskBloom is a local, native macOS app that shows where your disk space went, sa
 
 ## Download and install
 
-**[Download DiskBloom 1.7.2 for macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.2/DiskBloom-1.7.2-macOS-arm64.dmg)**
+**[Download DiskBloom 1.7.3 for macOS — DMG](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.3/DiskBloom-1.7.3-macOS-arm64.dmg)**
 
-[ZIP archive](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.2/DiskBloom-1.7.2-macOS-arm64.zip) · [All releases](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.2/SHA256SUMS)
+[ZIP archive](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.3/DiskBloom-1.7.3-macOS-arm64.zip) · [All releases](https://github.com/dmitrii-f-t27/DiskBloom/releases) · [SHA-256](https://github.com/dmitrii-f-t27/DiskBloom/releases/download/v1.7.3/SHA256SUMS)
 
 Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later.** The direct download does not support Intel Macs. The interface is in English.
 
@@ -14,7 +14,7 @@ Requirements: **a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or la
 2. Open DiskBloom from Applications. The prebuilt app does not need Xcode.
 3. Choose a tool and a folder to analyze. The duplicate finder is read-only; cleanup actions in the other tools need a separate confirmation.
 
-**Signature status:** version 1.7.2 (build 13) from GitHub has a local ad-hoc signature, without a Developer ID and without Apple notarization. macOS may block the first launch. If you trust this release, try to open the app once, then use the per-app permission in System Settings → Privacy & Security. Do not turn off Gatekeeper for the whole system. [Apple's instructions](https://support.apple.com/102445).
+**Signature status:** version 1.7.3 (build 16) from GitHub has a local ad-hoc signature, without a Developer ID and without Apple notarization. macOS may block the first launch. If you trust this release, try to open the app once, then use the per-app permission in System Settings → Privacy & Security. Do not turn off Gatekeeper for the whole system. [Apple's instructions](https://support.apple.com/102445).
 
 ## Features
 
@@ -136,7 +136,7 @@ open -n DiskBloom.app
 To create the ZIP, DMG and `SHA256SUMS` from the built app:
 
 ```bash
-./package-release.sh 1.7.2
+./package-release.sh 1.7.3
 ```
 
 The packages are created in `release/` and published as separate GitHub Release assets. Local verification logs, test data, certificates and built packages are not part of the git history.
