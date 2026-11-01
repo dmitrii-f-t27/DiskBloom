@@ -18,33 +18,46 @@ final class MenuBarLabelModel: ObservableObject, MenuBarDisplay {
 /// 80 % it is the filled chip in yellow with dark digits, above 90 % in red with white digits (`mm_chip_band`).
 /// The colours are fixed sRGB values, never the dynamic system colours: a dynamic colour would be baked in
 /// with whichever appearance is current when the bitmap is drawn, and the bitmap is cached. The coloured chip
-/// is not a template, so the menu bar draws its colours as they are. Every width from 0 % to 99 % and the
-/// unknown figure share one width, so the item does not jump; only "100%" is wider. The percent sign is half
-/// the size of the digits and centred on them (`titleText`). The bitmap is drawn
+/// is not a template, so the menu bar draws its colours as they are. The digits are proportional, not
+/// monospaced, so the width of the chip does not come from one digit: it comes from the widest title of
+/// "0" to "99" and the unknown figure "—", measured as whole titles. Every width from 0 % to 99 % and the
+/// unknown figure share that one width, with the digits centred in it, so the item does not jump; only "100%"
+/// is wider. The digits are drawn in the system font, in the size and weight that match the digits of the
+/// battery figure of macOS (the sizes are measured, see `Tests/Smoke/MemoryMonitorSmoke.swift`, M21.12), and
+/// the percent sign is not drawn
+/// (`drawnText`). The image has two bitmap representations, 1x and 2x, each drawn on its own so that both
+/// are sharp: at 1x every edge lies on a whole pixel. The bitmap is drawn
 /// without a drawing closure: such a closure may run on any thread. The only other image is the ladybug of the
 /// automation switch (DEBUG builds), which is a plain symbol and keeps its title as a separate text.
 @MainActor
 enum MenuBarChipImage {
     /// Sizes in points. They are internal so that the smoke test can read them.
-    static let fontSize: CGFloat = 9
+    static let fontSize: CGFloat = 10.25
+    static let fontWeight: NSFont.Weight = .medium
+    /// The cap height of the digits, rounded up, plus 4 points (M21.12 checks the rule).
     static let bodyHeight: CGFloat = 12
     static let pinHeight: CGFloat = 1
+    /// The body height plus a pin above and a pin below.
     static let imageHeight: CGFloat = 14
     static let pinWidth: CGFloat = 2
     static let pinCount = 4
-    static let strokeWidth: CGFloat = 0.5
-    /// The gap between the stroke and the text.
-    static let textInset: CGFloat = 0.5
+    /// The stroke of the outline chip is one pixel wide at every scale.
+    static let strokePixels = 1
+    /// Per side: the stroke plus the gap between the stroke and the text. A whole point, so it is whole pixels
+    /// at 1x and at 2x (1 pixel of gap at 1x, 3 pixels at 2x).
+    static let sidePadding: CGFloat = 2
     static let cornerRadius: CGFloat = 2
     /// How many images the cache keeps; when it is full it is emptied before the next one is stored.
     static let cacheLimit = 16
 
     private static let configuration = NSImage.SymbolConfiguration(
         pointSize: NSFont.systemFontSize, weight: .regular, scale: .medium)
-    private static let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .heavy)
-    static let signFontSize: CGFloat = fontSize / 2
-    private static let signFont = NSFont.monospacedDigitSystemFont(ofSize: signFontSize, weight: .heavy)
+    private static let font = NSFont.systemFont(ofSize: fontSize, weight: fontWeight)
     private static var cache: [String: NSImage] = [:]
+    /// The widest title among "0"..."99" and the unknown "—": all of them share one chip width.
+    private static let widestCommonTitle: CGFloat = (Array(0...99).map { String($0) } + ["—"])
+        .map { titleText($0, ink: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)).size().width }
+        .max() ?? 0
 
     static var cacheCount: Int { cache.count }
 
@@ -82,33 +95,49 @@ enum MenuBarChipImage {
         return plain
     }
 
-    /// A position rounded to half a point, which is a whole pixel at 2x.
-    private static func half(_ value: CGFloat) -> CGFloat {
-        (value * 2).rounded() / 2
+    /// A position rounded to a whole pixel of the given scale (1 or 2 pixels per point).
+    private static func snap(_ value: CGFloat, scale: CGFloat) -> CGFloat {
+        (value * scale).rounded() / scale
     }
 
-    /// The text of the chip: the digits in the full size, and a trailing "%" at half that size, raised so that
-    /// its centre is the centre of the digits' cap height. The raise is rounded to half a point.
+    /// The text the chip draws for a label's title: the title without one trailing "%". The sign is not drawn;
+    /// the title itself (with its sign) stays the text of the label, its cache key and its log line.
+    static func drawnText(_ title: String) -> String {
+        title.hasSuffix("%") ? String(title.dropLast()) : title
+    }
+
+    /// The text of the chip: the whole string in one font and one ink.
     static func titleText(_ text: String, ink: NSColor) -> NSAttributedString {
-        let result = NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: ink])
-        if text.hasSuffix("%") {
-            let sign = NSRange(location: text.utf16.count - 1, length: 1)
-            result.addAttributes([.font: signFont,
-                                  .baselineOffset: half((font.capHeight - signFont.capHeight) / 2)], range: sign)
-        }
-        return result
+        NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: ink])
     }
 
     private static func chip(for label: MenuBarLabel) -> NSImage? {
         let colors = palette(for: label.tint)
-        let title = titleText(label.title, ink: colors.ink)
+        let title = titleText(drawnText(label.title), ink: colors.ink)
         let titleWidth = title.size().width
-        let widestTwoDigits = titleText("00%", ink: colors.ink).size().width
-        let textWidth = ceil(max(titleWidth, widestTwoDigits))
-        let bodyWidth = textWidth + 2 * (strokeWidth + textInset)
+        let textWidth = ceil(max(titleWidth, widestCommonTitle))
+        let bodyWidth = textWidth + 2 * sidePadding
         let size = NSSize(width: bodyWidth, height: imageHeight)
-        let pixelsWide = Int((size.width * 2).rounded(.up))
-        let pixelsHigh = Int((size.height * 2).rounded(.up))
+        // Each scale is drawn on its own, so that the 1x bitmap is not a 2x bitmap scaled down.
+        guard let standard = renderRep(scale: 1, title: title, titleWidth: titleWidth, bodyWidth: bodyWidth, colors: colors),
+              let sharp = renderRep(scale: 2, title: title, titleWidth: titleWidth, bodyWidth: bodyWidth, colors: colors)
+        else { return nil }
+        standard.size = size
+        sharp.size = size
+        let baked = NSImage(size: size)
+        baked.addRepresentation(standard)
+        baked.addRepresentation(sharp)
+        baked.isTemplate = label.tint == .none
+        return baked
+    }
+
+    /// The chip at `scale` pixels per point (1 or 2). Every position is a whole pixel of that scale, so the
+    /// stroke and the pins are crisp at 1x as well. Nil if no bitmap or drawing context can be made.
+    private static func renderRep(scale: Int, title: NSAttributedString, titleWidth: CGFloat, bodyWidth: CGFloat,
+                                  colors: (body: NSColor?, ink: NSColor)) -> NSBitmapImageRep? {
+        let factor = CGFloat(scale)
+        let pixelsWide = Int((bodyWidth * factor).rounded(.up))
+        let pixelsHigh = Int((imageHeight * factor).rounded(.up))
         guard pixelsWide > 0, pixelsHigh > 0,
               let rep = NSBitmapImageRep(
                 bitmapDataPlanes: nil, pixelsWide: pixelsWide, pixelsHigh: pixelsHigh, bitsPerSample: 8,
@@ -118,46 +147,55 @@ enum MenuBarChipImage {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
         context.cgContext.clear(CGRect(x: 0, y: 0, width: pixelsWide, height: pixelsHigh))
-        context.cgContext.scaleBy(x: 2, y: 2)
+        context.cgContext.scaleBy(x: factor, y: factor)
         // A transparent bitmap must not get coloured fringes around the digits.
         context.cgContext.setShouldSmoothFonts(false)
         context.cgContext.setAllowsFontSmoothing(false)
-
-        // The pins, each half a point into the body so that no gap shows between pin and body.
-        (colors.body ?? colors.ink).setFill()
-        for index in 0..<pinCount {
-            let x = half(bodyWidth * (CGFloat(index) + 0.5) / CGFloat(pinCount) - pinWidth / 2)
-            NSBezierPath(rect: NSRect(x: x, y: 0, width: pinWidth, height: pinHeight + 0.5)).fill()
-            NSBezierPath(rect: NSRect(x: x, y: pinHeight + bodyHeight - 0.5,
-                                      width: pinWidth, height: pinHeight + 0.5)).fill()
+        if scale == 1 {
+            // At 1x the second digit should start on a whole pixel too. AppKit may ignore these flags.
+            context.cgContext.setAllowsFontSubpixelPositioning(false)
+            context.cgContext.setShouldSubpixelPositionFonts(false)
         }
 
-        // The body: filled in yellow or red, or an outline in the ink of the template.
+        // The pins, one pixel into the body so that no gap shows between pin and body. The two left pins are
+        // snapped to whole pixels and the right ones mirror them, so the chip stays symmetric at every width.
+        let overlap = 1 / factor
+        var pinX = [CGFloat](repeating: 0, count: pinCount)
+        for index in 0..<(pinCount / 2) {
+            let x = snap(bodyWidth * (CGFloat(index) + 0.5) / CGFloat(pinCount) - pinWidth / 2, scale: factor)
+            pinX[index] = x
+            pinX[pinCount - 1 - index] = bodyWidth - pinWidth - x
+        }
+        (colors.body ?? colors.ink).setFill()
+        for x in pinX {
+            NSBezierPath(rect: NSRect(x: x, y: 0, width: pinWidth, height: pinHeight + overlap)).fill()
+            NSBezierPath(rect: NSRect(x: x, y: pinHeight + bodyHeight - overlap,
+                                      width: pinWidth, height: pinHeight + overlap)).fill()
+        }
+
+        // The body: filled in yellow or red, or an outline in the ink of the template. The outline is one pixel
+        // wide and its path runs through the middle of the pixel row or column, so it is not smeared over two.
         let bodyRect = NSRect(x: 0, y: pinHeight, width: bodyWidth, height: bodyHeight)
         if let body = colors.body {
             body.setFill()
             NSBezierPath(roundedRect: bodyRect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
         } else {
+            let stroke = CGFloat(strokePixels) / factor
             colors.ink.setStroke()
             let outline = NSBezierPath(
-                roundedRect: bodyRect.insetBy(dx: strokeWidth / 2, dy: strokeWidth / 2),
-                xRadius: cornerRadius - strokeWidth / 2, yRadius: cornerRadius - strokeWidth / 2)
-            outline.lineWidth = strokeWidth
+                roundedRect: bodyRect.insetBy(dx: stroke / 2, dy: stroke / 2),
+                xRadius: cornerRadius - stroke / 2, yRadius: cornerRadius - stroke / 2)
+            outline.lineWidth = stroke
             outline.stroke()
         }
 
         // The digits. Without .usesLineFragmentOrigin the origin of the rectangle is the baseline.
-        let baseline = half(pinHeight + (bodyHeight - font.capHeight) / 2)
-        let originX = half((bodyWidth - titleWidth) / 2)
+        let baseline = snap(pinHeight + (bodyHeight - font.capHeight) / 2, scale: factor)
+        let originX = snap((bodyWidth - titleWidth) / 2, scale: factor)
         title.draw(with: NSRect(x: originX, y: baseline, width: ceil(titleWidth), height: bodyHeight),
                    options: [], context: nil)
         NSGraphicsContext.restoreGraphicsState()
-
-        rep.size = size
-        let baked = NSImage(size: size)
-        baked.addRepresentation(rep)
-        baked.isTemplate = label.tint == .none
-        return baked
+        return rep
     }
 
     /// What a missing symbol or drawing context shows: an empty template image, never a crash.
