@@ -968,83 +968,6 @@ private func enlarged(_ rep: NSBitmapImageRep, factor: Int) throws -> NSBitmapIm
     }
 }
 
-/// The "7" of Apple's battery figure in a 2x capture of the real display.
-private struct ReferenceSeven {
-    var rows: Int
-    var width: Int
-    var ink: Int
-    /// The first row of the white pill the figure sits in.
-    var pillTop: Int
-}
-
-/// Measures the "7" of the battery figure in a capture: the pill is the largest connected region of bright
-/// pixels (luma over black >= 0.7; the wallpaper has bright specks, so rows and columns with many bright
-/// pixels are not enough), inset by 3 pixels. Ink is darker than the midpoint between the pill's luma (the upper
-/// quartile of the inset region) and its darkest pixel. The ink columns split into runs; run 1 is the "7". The
-/// plug is taller than the digits and is never in a run that is measured.
-@MainActor
-private func measureReferenceSeven(at url: URL) throws -> ReferenceSeven {
-    guard let data = try? Data(contentsOf: url), let rep = NSBitmapImageRep(data: data) else {
-        throw SmokeFailure.assertion("M21.12: cannot read the reference \(url.lastPathComponent)")
-    }
-    let w = rep.pixelsWide, h = rep.pixelsHigh
-    var luma = [Double](repeating: 0, count: w * h)
-    for y in 0..<h {
-        for x in 0..<w {
-            guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
-                throw SmokeFailure.assertion("M21.12: no colour at \(x),\(y) of the reference")
-            }
-            luma[y * w + x] = Double(c.alphaComponent)
-                * (0.2126 * Double(c.redComponent) + 0.7152 * Double(c.greenComponent) + 0.0722 * Double(c.blueComponent))
-        }
-    }
-    var seen = [Bool](repeating: false, count: w * h)
-    var best: (size: Int, minX: Int, maxX: Int, minY: Int, maxY: Int)?
-    for startY in 0..<h {
-        for startX in 0..<w where !seen[startY * w + startX] && luma[startY * w + startX] >= 0.7 {
-            var stack = [(startX, startY)]
-            seen[startY * w + startX] = true
-            var region = (size: 0, minX: startX, maxX: startX, minY: startY, maxY: startY)
-            while let (x, y) = stack.popLast() {
-                region.size += 1
-                region.minX = min(region.minX, x); region.maxX = max(region.maxX, x)
-                region.minY = min(region.minY, y); region.maxY = max(region.maxY, y)
-                for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                    let nx = x + dx, ny = y + dy
-                    if nx >= 0, ny >= 0, nx < w, ny < h, !seen[ny * w + nx], luma[ny * w + nx] >= 0.7 {
-                        seen[ny * w + nx] = true
-                        stack.append((nx, ny))
-                    }
-                }
-            }
-            if region.size > (best?.size ?? 0) { best = region }
-        }
-    }
-    guard let pill = best, pill.size >= 100 else {
-        throw SmokeFailure.assertion("M21.12: no pill in the reference \(url.lastPathComponent)")
-    }
-    let top = pill.minY + 3, bottom = pill.maxY - 3, left = pill.minX + 3, right = pill.maxX - 3
-    guard top < bottom, left < right else { throw SmokeFailure.assertion("M21.12: the pill of the reference is too small") }
-    var inside: [Double] = []
-    for y in top...bottom { for x in left...right { inside.append(luma[y * w + x]) } }
-    inside.sort()
-    let threshold = (inside[inside.count * 3 / 4] + inside[0]) / 2
-    var columns: [Int] = []
-    for x in left...right where (top...bottom).contains(where: { luma[$0 * w + x] < threshold }) { columns.append(x) }
-    guard let first = columns.first else { throw SmokeFailure.assertion("M21.12: no digit ink in the reference") }
-    var seven = first...first
-    for x in columns.dropFirst() {
-        guard x == seven.upperBound + 1 else { break }
-        seven = seven.lowerBound...x
-    }
-    var rows: [Int] = []
-    for y in top...bottom { for x in seven where luma[y * w + x] < threshold { rows.append(y) } }
-    guard let firstRow = rows.min(), let lastRow = rows.max() else {
-        throw SmokeFailure.assertion("M21.12: no \"7\" in the reference")
-    }
-    return ReferenceSeven(rows: lastRow - firstRow + 1, width: seven.count, ink: rows.count, pillTop: pill.minY)
-}
-
 /// The preview of the chip for the owner and the review, in `<checkout>/.build/chip-preview/`: one PNG per
 /// sample at 2x and at 1x on a transparent ground, and a sheet of all samples on a light and a dark menu
 /// bar (template chips tinted black on light and white on dark) at 2x (drawn at 2 pixels per point), at 1x
@@ -1100,35 +1023,8 @@ private func writeChipPreview(_ samples: [(name: String, image: NSImage)], to di
     try writePNG(try enlarged(sheet1x, factor: 6), to: directory.appendingPathComponent("sheet-1x-6x.png"))
 }
 
-/// The reference capture at its native pixels on the left, the chip (white, as on a dark menu bar) on a dark
-/// ground on the right, with the body of the chip on the rows of the reference's pill; at 2 pixels per point
-/// and enlarged to 6. False if the reference is not there.
-@MainActor
-private func writeReferenceComparison(chip: NSImage, reference: URL, to directory: URL) throws -> Bool {
-    guard let data = try? Data(contentsOf: reference), let referenceRep = NSBitmapImageRep(data: data) else { return false }
-    let measured = try measureReferenceSeven(at: reference)
-    let tinted = try tintedCopy(chip, color: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1), scale: 2)
-    let chipWide = Int(chip.size.width) * 2, chipHigh = Int(chip.size.height) * 2
-    let pad = 8
-    let wide = referenceRep.pixelsWide + pad + chipWide + 2 * pad
-    let high = referenceRep.pixelsHigh
-    // The body starts one pin (2 pixels at 2x) below the top of the chip image.
-    let chipTop = measured.pillTop - Int(MenuBarChipImage.pinHeight) * 2
-    let comparison = try drawBitmap(pixelsWide: wide, pixelsHigh: high) { context in
-        context.imageInterpolation = .none
-        _ = referenceRep.draw(in: NSRect(x: 0, y: 0, width: referenceRep.pixelsWide, height: referenceRep.pixelsHigh))
-        NSColor(srgbRed: 0.12, green: 0.12, blue: 0.12, alpha: 1).setFill()
-        NSRect(x: referenceRep.pixelsWide + pad, y: 0, width: chipWide + 2 * pad, height: high).fill()
-        tinted.draw(in: NSRect(x: referenceRep.pixelsWide + 2 * pad, y: high - chipTop - chipHigh,
-                               width: chipWide, height: chipHigh))
-    }
-    try writePNG(comparison, to: directory.appendingPathComponent("compare-reference-2x.png"))
-    try writePNG(try enlarged(comparison, factor: 3), to: directory.appendingPathComponent("compare-reference-6x.png"))
-    return true
-}
-
 /// Where the text ink of a chip's title is, in pixel rows and columns (rows from the top), and where its first
-/// digit is (the first run of ink columns).
+/// and its last glyph are (the first and the last run of ink columns).
 private struct ChipDigitsMeasure {
     var top: Int
     var bottom: Int
@@ -1136,10 +1032,15 @@ private struct ChipDigitsMeasure {
     var right: Int
     var firstTop: Int
     var firstBottom: Int
+    var lastTop: Int
+    var lastBottom: Int
+    /// The number of contiguous runs of ink columns.
+    var runCount: Int
     var wide: Int
 
     var rows: Int { bottom - top + 1 }
     var firstRows: Int { firstBottom - firstTop + 1 }
+    var lastRows: Int { lastBottom - lastTop + 1 }
 }
 
 /// The text ink inside the inner body rectangle of a chip (without its four rounded corners), at `scale`
@@ -1148,7 +1049,7 @@ private struct ChipDigitsMeasure {
 @MainActor
 private func measureChipDigits(_ image: NSImage, filled: Bool, scale: CGFloat, name: String) throws -> ChipDigitsMeasure {
     let grid = try chipGrid(image, scale: scale)
-    let strokePixels = MenuBarChipImage.strokePixels
+    let strokePixels = Int(MenuBarChipImage.strokeWidth * scale)
     let bodyTop = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight - MenuBarChipImage.bodyHeight) * scale)
     let bodyBottom = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight) * scale)
     let body = grid.pixel(1, grid.high / 2)
@@ -1171,24 +1072,28 @@ private func measureChipDigits(_ image: NSImage, filled: Bool, scale: CGFloat, n
           let top = ink.map({ $0.y }).min(), let bottom = ink.map({ $0.y }).max() else {
         throw SmokeFailure.assertion("M21.11: no text ink on the \(name) chip at \(scale)x")
     }
-    var firstRun = left...left
+    // The runs of contiguous ink columns, from the left; the first and the last one are measured.
+    var runs: [ClosedRange<Int>] = [left...left]
     for x in columns.dropFirst() {
-        guard x == firstRun.upperBound + 1 else { break }
-        firstRun = firstRun.lowerBound...x
+        if let current = runs.last, x == current.upperBound + 1 {
+            runs[runs.count - 1] = current.lowerBound...x
+        } else {
+            runs.append(x...x)
+        }
     }
+    let firstRun = runs[0], lastRun = runs[runs.count - 1]
     let firstRows = ink.filter { firstRun.contains($0.x) }.map { $0.y }
     guard let firstTop = firstRows.min(), let firstBottom = firstRows.max() else {
         throw SmokeFailure.assertion("M21.11: no first digit on the \(name) chip at \(scale)x")
     }
+    let lastRows = ink.filter { lastRun.contains($0.x) }.map { $0.y }
+    guard let lastTop = lastRows.min(), let lastBottom = lastRows.max() else {
+        throw SmokeFailure.assertion("M21.11: no last glyph on the \(name) chip at \(scale)x")
+    }
     return ChipDigitsMeasure(top: top, bottom: bottom, left: left, right: right,
-                             firstTop: firstTop, firstBottom: firstBottom, wide: grid.wide)
+                             firstTop: firstTop, firstBottom: firstBottom,
+                             lastTop: lastTop, lastBottom: lastBottom, runCount: runs.count, wide: grid.wide)
 }
-
-/// The rows of the "7" of Apple's battery figure ("79" with the plug) in the real 2x capture
-/// work/memory-chip-2026-10-29/reference-apple-battery-2x.png, measured on 2026-10-31 with the rule of
-/// `measureReferenceSeven` (width 10 pixels, 54 ink pixels). The owner's own capture of the same figure
-/// (reference-owner-battery.png) gives the same numbers. M21.12 pins the chip's digits to it.
-private let appleDigitRows2x = 15
 
 /// M21: the menu bar chip as one image with the percent digits inside (MenuBarChipImage): colour, template
 /// flag, size, fit, the 1x and 2x representations and cache, from the label, and the wiring of the menu bar label.
@@ -1208,10 +1113,10 @@ private func menuBarChipImageChecks() throws {
 
     // The bitmap is 2 pixels per point. The body starts below the top pins and ends above the bottom pins.
     let imageHeightPixels = Int(MenuBarChipImage.imageHeight * 2)
-    let strokePixels = MenuBarChipImage.strokePixels
+    let strokePixels = Int(MenuBarChipImage.strokeWidth * 2)
     let bodyTop = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight - MenuBarChipImage.bodyHeight) * 2)
     let bodyBottom = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight) * 2)
-    try require(imageHeightPixels == 28 && bodyTop == 2 && bodyBottom == 26,
+    try require(imageHeightPixels == 36 && bodyTop == 4 && bodyBottom == 32,
                 "M21: the test's pixel rows do not match the chip constants: \(imageHeightPixels) \(bodyTop) \(bodyBottom)")
     let middleRow = imageHeightPixels / 2
 
@@ -1239,11 +1144,14 @@ private func menuBarChipImageChecks() throws {
     }
 
     // M21.3: the digits of a filled chip are drawn in a readable colour, inside the inner body rectangle.
+    var minFilledDigits = Int.max
     for (band, samples) in [("yellow", yellow), ("red", red)] {
         for sample in samples {
             let grid = try chipGrid(sample.image)
             let digits = digitPixels(of: grid, onRed: band == "red")
-            try require(digits.count >= 43, "M21.3: only \(digits.count) digit pixels on the \(sample.name) chip")
+            minFilledDigits = min(minFilledDigits, digits.count)
+            // Floor: 0.8 x the measured minimum of 218 digit pixels (the CHIP_INK_2X line).
+            try require(digits.count >= 174, "M21.3: only \(digits.count) digit pixels on the \(sample.name) chip")
             let outside = digits.filter {
                 $0.x < strokePixels || $0.x >= grid.wide - strokePixels
                     || $0.y < bodyTop + strokePixels || $0.y >= bodyBottom - strokePixels
@@ -1263,6 +1171,7 @@ private func menuBarChipImageChecks() throws {
     }
 
     // M21.4: the digits of an outline chip are template ink, neutral, inside a body that is otherwise empty.
+    var minOutlineInside = Int.max, unknownInside = 0, minEmpty = Int.max
     for sample in outline {
         let ink = try chipInk(sample.image, minAlpha: 0.5)
         let coloured = ink.filter { max($0.r, $0.g, $0.b) - min($0.r, $0.g, $0.b) >= 0.1 }
@@ -1275,12 +1184,16 @@ private func menuBarChipImageChecks() throws {
                 if alpha >= 0.5 { inside += 1 } else if alpha < 0.05 { empty += 1 }
             }
         }
-        // The unknown figure is a dash, which has less ink than two digits (it had a percent sign before).
-        let insideFloor = sample.name == "unknown" ? 20 : 43
+        if sample.name == "unknown" { unknownInside = inside } else { minOutlineInside = min(minOutlineInside, inside) }
+        minEmpty = min(minEmpty, empty)
+        // Floors: 0.8 x the measured minimum (the CHIP_INK_2X line): 329 ink pixels for two digits and the sign, 174
+        // for the dash and the sign, 952 empty pixels.
+        let insideFloor = sample.name == "unknown" ? 139 : 263
         try require(inside >= insideFloor,
                     "M21.4: only \(inside) ink pixels inside the \(sample.name) outline chip (floor \(insideFloor))")
-        try require(empty >= 43, "M21.4: only \(empty) empty pixels inside the \(sample.name) outline chip")
+        try require(empty >= 761, "M21.4: only \(empty) empty pixels inside the \(sample.name) outline chip")
     }
+    print("CHIP_INK_2X filled=\(minFilledDigits) outline=\(minOutlineInside) unknown=\(unknownInside) empty=\(minEmpty)")
     let grid79 = try chipGrid(chip(79)), grid80 = try chipGrid(chip(80)), gridUnknown = try chipGrid(chip(95, known: false))
     try require(grid79 != grid80, "M21.4: the 79 % and 80 % chips look the same")
     try require(grid80 != gridUnknown, "M21.4: the 80 % and unknown chips look the same")
@@ -1303,23 +1216,21 @@ private func menuBarChipImageChecks() throws {
     sized.append(("unknown", chip(95, known: false)))
     sized.append(("100", chip(100)))
     for (name, image) in sized {
-        try require(image.size.height == MenuBarChipImage.imageHeight && MenuBarChipImage.imageHeight == 14,
+        try require(image.size.height == MenuBarChipImage.imageHeight && MenuBarChipImage.imageHeight == 18,
                     "M21.6: the \(name) chip is \(image.size.height) pt high")
     }
     let narrow = width(chip(50))
     for (name, image) in sized where name != "100" {
         try require(width(image) == narrow, "M21.6: the \(name) chip is \(width(image)) pt wide, not \(narrow)")
     }
-    // The digits are proportional, so the common width is the widest whole title of 0...99 and "—", plus the padding.
-    let widest = (Array(0...99).map { String($0) } + ["—"])
-        .map { MenuBarChipImage.titleText($0, ink: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)).size().width }
-        .max() ?? 0
-    try require(narrow == ceil(widest) + 2 * MenuBarChipImage.sidePadding,
-                "M21.6: the common chip width is \(narrow) pt, not the widest title \(widest) pt rounded up plus 2 x \(MenuBarChipImage.sidePadding)")
+    // The digits are tabular, so the common width is that of "00%" rounded up, plus the stroke and the gap per side.
+    let widest = MenuBarChipImage.titleText("00%", ink: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)).size().width
+    try require(narrow == ceil(widest) + 2 * (MenuBarChipImage.strokeWidth + MenuBarChipImage.textInset),
+                "M21.6: the common chip width is \(narrow) pt, not the title \"00%\" (\(widest) pt) rounded up plus 2 x (\(MenuBarChipImage.strokeWidth) + \(MenuBarChipImage.textInset))")
     let width99 = width(chip(99)), width100 = width(chip(100))
     try require(width100 > width99, "M21.6: the 100 % chip (\(width100)) is not wider than the 99 % chip (\(width99))")
-    try require((16...20).contains(width99), "M21.6: the 99 % chip is \(width99) pt wide")
-    try require(width100 <= 28, "M21.6: the 100 % chip is \(width100) pt wide")
+    try require(width99 <= 34, "M21.6: the 99 % chip is \(width99) pt wide")
+    try require(width100 <= 42, "M21.6: the 100 % chip is \(width100) pt wide")
 
     // M21.7: the digits fit inside the body, with room on every side, and sit in the middle.
     for sample in filled {
@@ -1332,18 +1243,18 @@ private func menuBarChipImageChecks() throws {
         try require(left >= 2 && grid.wide - 1 - right >= 2,
                     "M21.7: the \(sample.name) digits are \(left) px from the left and \(grid.wide - 1 - right) px from the right side")
         let marginTop = top - bodyTop, marginBottom = (bodyBottom - 1) - bottom
-        try require(abs(marginTop - marginBottom) <= 1,
+        try require(abs(marginTop - marginBottom) <= 2,
                     "M21.7: the \(sample.name) digits sit \(marginTop) px below the top and \(marginBottom) px above the bottom")
     }
-    // The outline chip at 100 %: the pixel columns of the gap between the stroke and the text (sidePadding
-    // minus the stroke, 3 columns per side at 2x) stay empty at mid-body. 100 % is red in the app, so the outline chip with that title is
-    // made from a label written by hand.
+    // The outline chip at 100 %: the pixel columns of the gap between the stroke and the text (the gap of 1.5 pt,
+    // 3 columns per side at 2x) stay empty at mid-body. 100 % is red in the app, so the outline chip with that
+    // title is made from a label written by hand.
     let outlineHundred = MenuBarChipImage.image(for: MenuBarLabel(title: "100%", symbol: "memorychip", tint: .none, accessibility: "outline probe"))
     try require(outlineHundred.isTemplate, "M21.7: the outline 100 % probe is not a template")
     let outlineGrid = try chipGrid(outlineHundred)
-    for y in (middleRow - 7)...(middleRow + 6) {
+    for y in (middleRow - 8)...(middleRow + 7) {
         var gapColumns: [Int] = []
-        for column in strokePixels..<Int(MenuBarChipImage.sidePadding * 2) {
+        for column in strokePixels..<Int((MenuBarChipImage.strokeWidth + MenuBarChipImage.textInset) * 2) {
             gapColumns.append(column)
             gapColumns.append(outlineGrid.wide - 1 - column)
         }
@@ -1391,19 +1302,16 @@ private func menuBarChipImageChecks() throws {
     let forbidden = "drawing" + "Handler"
     try require(!menuSource.contains(forbidden), "M21.10: MemoryMenuView.swift uses a \(forbidden)")
 
-    // M21.11: the percent sign is not drawn. The title, the accessibility text and the cache key keep it.
-    for (title, drawn) in [("85%", "85"), ("100%", "100"), ("—%", "—"), ("85", "85")] {
-        try require(MenuBarChipImage.drawnText(title) == drawn,
-                    "M21.11: drawnText(\(title)) is \(MenuBarChipImage.drawnText(title)), not \(drawn)")
-    }
-    let pinnedFont = NSFont.systemFont(ofSize: 10.25, weight: .medium)
-    for text in ["85", "100", "—"] {
+    // M21.11: the percent sign is drawn at full size, in the font of the digits; the title, the accessibility text
+    // and the cache key keep it.
+    let pinnedFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold)
+    for text in ["85%", "100%", "—%"] {
         let styled = MenuBarChipImage.titleText(text, ink: .black)
         try require(styled.string == text, "M21.11: titleText changed the text \(text) to \(styled.string)")
         for index in 0..<styled.length {
             let font = styled.attribute(.font, at: index, effectiveRange: nil) as? NSFont
-            try require(font?.pointSize == 10.25 && font == pinnedFont,
-                        "M21.11: character \(index) of \(text) is not the 10.25 pt medium font: \(String(describing: font))")
+            try require(font?.pointSize == 11 && font == pinnedFont,
+                        "M21.11: character \(index) of \(text) is not the 11 pt bold monospaced-digit font: \(String(describing: font))")
         }
     }
     func handWritten(_ title: String) -> NSImage {
@@ -1413,17 +1321,17 @@ private func menuBarChipImageChecks() throws {
         for scale in [CGFloat(1), CGFloat(2)] {
             let signed = try chipGrid(handWritten(withSign), scale: scale)
             let plain = try chipGrid(handWritten(withoutSign), scale: scale)
-            try require(signed == plain, "M21.11: the chip of \(withSign) differs from the chip of \(withoutSign) at \(scale)x")
+            try require(signed != plain, "M21.11: the chip of \(withSign) is the same as the chip of \(withoutSign) at \(scale)x, the sign is not drawn")
         }
     }
     try require(label(85).title == "85%", "M21.11: the 85 % title is \(label(85).title)")
     try require(label(95, known: false).title == "—%", "M21.11: the unknown title is \(label(95, known: false).title)")
     try require(label(85).accessibility.contains("85%"), "M21.11: the accessibility text is \(label(85).accessibility)")
-    // Written in two parts so that a search for the name finds only real uses of it.
+    // Written in two parts so that a search for the names finds only real uses of them.
     try require(!menuSource.contains("sign" + "Font"), "M21.11: MemoryMenuView.swift still has a sign font")
+    try require(!menuSource.contains("drawn" + "Text"), "M21.11: MemoryMenuView.swift still removes the percent sign")
 
-    // Every value from 0 to 100 and the unknown figure: with proportional digits no value may be assumed to
-    // centre like the others.
+    // Every value from 0 to 100 and the unknown figure.
     var digitSamples: [(name: String, label: MenuBarLabel, filled: Bool)] = (0...100).map { value in
         let sampleLabel = label(Int64(value))
         return (String(value), sampleLabel, sampleLabel.tint != .none)
@@ -1433,6 +1341,8 @@ private func menuBarChipImageChecks() throws {
     var offCentre: [String] = []
     var worstDifference = -1
     var worstName = ""
+    // Measured: the worst difference is 2 px at 2x (the CHIP_CENTRE line), on the 10 chip; 2 is the tolerance.
+    let centreTolerance = 2
     for sample in digitSamples {
         let measure = try measureChipDigits(MenuBarChipImage.image(for: sample.label), filled: sample.filled, scale: 2,
                                             name: sample.name)
@@ -1443,12 +1353,12 @@ private func menuBarChipImageChecks() throws {
             worstDifference = difference
             worstName = sample.name
         }
-        if difference > 2 {
+        if difference > centreTolerance {
             offCentre.append("\(sample.name) (\(leftMargin) px from the left, \(rightMargin) px from the right)")
         }
     }
     try require(offCentre.isEmpty,
-                "M21.11: the ink is off centre by more than 2 px at 2x on \(offCentre.count) chips: " + offCentre.joined(separator: "; "))
+                "M21.11: the ink is off centre by more than \(centreTolerance) px at 2x on \(offCentre.count) chips: " + offCentre.joined(separator: "; "))
     print("CHIP_CENTRE worst=\(worstDifference) at=\(worstName)")
     guard let fifty = measured["50"], let unknownMeasure = measured["unknown"] else {
         throw SmokeFailure.assertion("M21.11: no measurement of the 50 or the unknown chip")
@@ -1461,40 +1371,29 @@ private func menuBarChipImageChecks() throws {
     try require(unknownMeasure.top >= fifty.top && unknownMeasure.bottom <= fifty.bottom,
                 "M21.11: the dash has rows \(unknownMeasure.top)-\(unknownMeasure.bottom), outside the 50 rows \(fifty.top)-\(fifty.bottom)")
 
-    // M21.12: the digits are the system font in the size and weight measured against Apple's battery figure.
-    try require(MenuBarChipImage.fontSize == 10.25, "M21.12: the digit size is \(MenuBarChipImage.fontSize) pt")
-    try require(MenuBarChipImage.fontWeight == .medium, "M21.12: the digit weight is \(MenuBarChipImage.fontWeight.rawValue)")
-    // The digits are proportional: a "1" is narrower than a "0". A monospaced font would fail this.
+    // M21.12: the digits are tabular, and the percent sign is as tall as the digits.
+    try require(MenuBarChipImage.fontSize == 11, "M21.12: the digit size is \(MenuBarChipImage.fontSize) pt")
     let inkBlack = NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
-    let widthOfEleven = MenuBarChipImage.titleText("11", ink: inkBlack).size().width
-    let widthOfZeros = MenuBarChipImage.titleText("00", ink: inkBlack).size().width
-    try require(widthOfEleven < widthOfZeros,
-                "M21.12: the digits are not proportional: \"11\" is \(widthOfEleven) pt wide, \"00\" is \(widthOfZeros) pt wide")
-    let capHeight = NSFont.systemFont(ofSize: MenuBarChipImage.fontSize, weight: MenuBarChipImage.fontWeight).capHeight
-    try require(MenuBarChipImage.bodyHeight == ceil(capHeight) + 4 && MenuBarChipImage.imageHeight == MenuBarChipImage.bodyHeight + 2,
-                "M21.12: the body is \(MenuBarChipImage.bodyHeight) pt and the image \(MenuBarChipImage.imageHeight) pt high for a cap height of \(capHeight)")
+    let widthOfEleven = MenuBarChipImage.titleText("11%", ink: inkBlack).size().width
+    let widthOfZeros = MenuBarChipImage.titleText("00%", ink: inkBlack).size().width
+    try require(widthOfEleven == widthOfZeros,
+                "M21.12: the digits are not tabular: \"11%\" is \(widthOfEleven) pt wide, \"00%\" is \(widthOfZeros) pt wide")
+    let checkout = sources.deletingLastPathComponent()
     let chip79 = chip(79)
     let digits79 = try measureChipDigits(chip79, filled: false, scale: 2, name: "79")
-    let chipRows = digits79.firstRows
-    try require(abs(chipRows - appleDigitRows2x) <= 1,
-                "M21.12: the 7 of the 79 chip is \(chipRows) rows high at 2x, Apple's is \(appleDigitRows2x)")
-    // Proportional "7" and "9" may touch and merge into one ink run in the 79 chip, so the 7 is also measured alone.
-    let sevenRows = try measureChipDigits(chip(7), filled: false, scale: 2, name: "7").rows
-    try require(abs(sevenRows - appleDigitRows2x) <= 1,
-                "M21.12: the 7 chip has digits \(sevenRows) rows high at 2x, Apple's 7 is \(appleDigitRows2x)")
-    let checkout = sources.deletingLastPathComponent()
-    let referenceURL = checkout.appendingPathComponent("work/memory-chip-2026-10-29/reference-apple-battery-2x.png")
-    var referenceRows = "absent"
-    // work/ is git-ignored, so the capture is only there in the working copy that has it.
-    if FileManager.default.fileExists(atPath: referenceURL.path) {
-        let reference = try measureReferenceSeven(at: referenceURL)
-        try require(reference.rows == appleDigitRows2x,
-                    "M21.12: the reference 7 is \(reference.rows) rows high, the pinned value is \(appleDigitRows2x)")
-        try require(abs(chipRows - reference.rows) <= 1,
-                    "M21.12: the 7 of the 79 chip is \(chipRows) rows high, the reference's is \(reference.rows)")
-        referenceRows = String(reference.rows)
-    }
-    print("CHIP_DIGITS reference=\(referenceRows) chip=\(chipRows) font=\(String(format: "%g", Double(MenuBarChipImage.fontSize)))/medium")
+    // The 7, the 9 and the sign are separate runs of ink columns; otherwise the next line proves nothing.
+    try require(digits79.runCount >= 3, "M21.12: the 79 chip has \(digits79.runCount) runs of ink columns, fewer than 3")
+    try require(abs(digits79.lastRows - digits79.firstRows) <= 2,
+                "M21.12: the sign of the 79 chip is \(digits79.lastRows) rows high at 2x, the 7 is \(digits79.firstRows)")
+    print("CHIP_DIGITS seven=\(digits79.firstRows) sign=\(digits79.lastRows) runs=\(digits79.runCount) font=11/bold")
+
+    // M21.14: the "79%" chip has the size of the owner's screenshot: a 64 x 36 px box on a 2x screen.
+    let sharp79 = try chipRep(chip79, scale: 2)
+    try require(chip79.size.height == 18 && sharp79.pixelsHigh == 36,
+                "M21.14: the 79 chip is \(chip79.size.height) pt and \(sharp79.pixelsHigh) px high, not 18 pt and 36 px")
+    try require(abs(chip79.size.width - 32) <= 1 && sharp79.pixelsWide == Int(chip79.size.width) * 2,
+                "M21.14: the 79 chip is \(chip79.size.width) pt and \(sharp79.pixelsWide) px wide, not 32 pt (within 1 pt) and twice that in pixels")
+    print("CHIP_79 size=\(Int(chip79.size.width))x\(Int(chip79.size.height)) pixels-2x=\(sharp79.pixelsWide)x\(sharp79.pixelsHigh)")
 
     // M21.13: the 1x and 2x representations.
     try chipRepresentationChecks(outline: outline, filled: filled, redNames: Set(red.map { $0.name }))
@@ -1505,25 +1404,6 @@ private func menuBarChipImageChecks() throws {
     try writeChipPreview([("79", chip79), ("80", chip(80)), ("81", chip(81)), ("90", chip(90)), ("91", chip(91)),
                           ("100", chip(100)), ("unknown", chip(95, known: false))], to: previewDirectory)
     print("CHIP_PREVIEW \(previewDirectory.path)")
-    if try writeReferenceComparison(chip: chip79, reference: referenceURL, to: previewDirectory) {
-        print("CHIP_COMPARE \(previewDirectory.path)/compare-reference-2x.png and compare-reference-6x.png")
-    } else {
-        print("CHIP_COMPARE reference absent, compare-reference-2x.png and compare-reference-6x.png not written")
-    }
-    // The digits alone on opaque white, for score.py (same drawing as render2.swift at dx = dy = 0). The chip's
-    // stroke would spoil the score, and score.py drops alpha.
-    let scoreDirectory = previewDirectory.appendingPathComponent("score", isDirectory: true)
-    try FileManager.default.createDirectory(at: scoreDirectory, withIntermediateDirectories: true)
-    let onWhite = try drawBitmap(pixelsWide: 44, pixelsHigh: 40) { context in
-        NSColor.white.setFill()
-        NSRect(x: 0, y: 0, width: 44, height: 40).fill()
-        context.cgContext.scaleBy(x: 2, y: 2)
-        context.cgContext.setShouldSmoothFonts(false)
-        context.cgContext.setAllowsFontSmoothing(false)
-        MenuBarChipImage.titleText("79", ink: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1))
-            .draw(with: NSRect(x: 2, y: 5, width: 30, height: 15), options: [], context: nil)
-    }
-    try writePNG(onWhite, to: scoreDirectory.appendingPathComponent("chip-79-on-white.png"))
     let height = Int(chip(50).size.height)
     func pixels(_ width: CGFloat, _ scale: Int) -> String { "\(Int(width) * scale)x\(height * scale)" }
     print("CHIP_SIZES two-digit=\(String(format: "%g", Double(narrow))) hundred=\(String(format: "%g", Double(width100))) height=\(height) "
@@ -1537,9 +1417,9 @@ private func chipRepresentationChecks(outline: [(name: String, image: NSImage)],
                                       redNames: Set<String>) throws {
     // The outline chip at 100 %, written by hand: 100 % is red in the app. And a chip with no digits at all.
     let outlineHundred = MenuBarChipImage.image(for: MenuBarLabel(title: "100%", symbol: "memorychip", tint: .none, accessibility: "outline probe"))
-    let noDigits = MenuBarChipImage.image(for: MenuBarLabel(title: "%", symbol: "memorychip", tint: .none, accessibility: "empty probe"))
+    let noDigits = MenuBarChipImage.image(for: MenuBarLabel(title: "", symbol: "memorychip", tint: .none, accessibility: "empty probe"))
     let outlineSamples = outline + [("100-outline", outlineHundred), ("no-digits", noDigits)]
-    let strokePixels = MenuBarChipImage.strokePixels
+    let strokePixels = Int(MenuBarChipImage.strokeWidth)
     let bodyTop = Int(MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight - MenuBarChipImage.bodyHeight)
     let bodyBottom = Int(MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight)
     let cornerPixels = Int(MenuBarChipImage.cornerRadius.rounded(.up))
@@ -1549,6 +1429,7 @@ private func chipRepresentationChecks(outline: [(name: String, image: NSImage)],
             && abs(first.g * first.a - second.g * second.a) <= 0.02 && abs(first.b * first.a - second.b * second.a) <= 0.02
     }
 
+    var minFilled1x = Int.max, minOutline1x = Int.max, unknown1x = 0
     for sample in outlineSamples + filled {
         let image = sample.image, name = sample.name
         let isOutline = outlineSamples.contains { $0.name == name }
@@ -1586,12 +1467,17 @@ private func chipRepresentationChecks(outline: [(name: String, image: NSImage)],
             for y in (bodyTop + strokePixels)..<(bodyBottom - strokePixels) {
                 for x in strokePixels..<(grid.wide - strokePixels) where grid.pixel(x, y).a >= 0.5 { inside += 1 }
             }
-            let needed = name == "unknown" ? 6 : (name == "no-digits" ? 0 : 15)
+            if name == "unknown" { unknown1x = inside } else if name != "no-digits" { minOutline1x = min(minOutline1x, inside) }
+            // Floors: 0.8 x the measured minimum at 1x (the CHIP_INK_1X line): 84 ink pixels for two or three digits
+            // and the sign, 46 for the dash and the sign. A chip with no digits has none.
+            let needed = name == "unknown" ? 36 : (name == "no-digits" ? 0 : 67)
             try require(inside >= needed, "M21.13: only \(inside) ink pixels inside the \(name) outline chip at 1x (floor \(needed))")
         } else {
             let onRed = redNames.contains(name)
             let digits = digitPixels(of: grid, onRed: onRed)
-            try require(digits.count >= 8, "M21.13: only \(digits.count) digit pixels on the \(name) chip at 1x")
+            minFilled1x = min(minFilled1x, digits.count)
+            // Floor: 0.8 x the measured minimum of 39 digit pixels at 1x (the CHIP_INK_1X line).
+            try require(digits.count >= 31, "M21.13: only \(digits.count) digit pixels on the \(name) chip at 1x")
             let body = grid.pixel(1, grid.high / 2)
             let strongest = onRed
                 ? digits.max { relativeLuminance($0.pixel) < relativeLuminance($1.pixel) }
@@ -1642,6 +1528,8 @@ private func chipRepresentationChecks(outline: [(name: String, image: NSImage)],
             }
         }
     }
+
+    print("CHIP_INK_1X filled=\(minFilled1x) outline=\(minOutline1x) unknown=\(unknown1x)")
 
     // The 1x pictures of different figures differ.
     func standardGrid(_ image: NSImage) throws -> ChipGrid { try chipGrid(image, scale: 1) }

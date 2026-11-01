@@ -18,46 +18,36 @@ final class MenuBarLabelModel: ObservableObject, MenuBarDisplay {
 /// 80 % it is the filled chip in yellow with dark digits, above 90 % in red with white digits (`mm_chip_band`).
 /// The colours are fixed sRGB values, never the dynamic system colours: a dynamic colour would be baked in
 /// with whichever appearance is current when the bitmap is drawn, and the bitmap is cached. The coloured chip
-/// is not a template, so the menu bar draws its colours as they are. The digits are proportional, not
-/// monospaced, so the width of the chip does not come from one digit: it comes from the widest title of
-/// "0" to "99" and the unknown figure "—", measured as whole titles. Every width from 0 % to 99 % and the
-/// unknown figure share that one width, with the digits centred in it, so the item does not jump; only "100%"
-/// is wider. The digits are drawn in the system font, in the size and weight that match the digits of the
-/// battery figure of macOS (the sizes are measured, see `Tests/Smoke/MemoryMonitorSmoke.swift`, M21.12), and
-/// the percent sign is not drawn
-/// (`drawnText`). The image has two bitmap representations, 1x and 2x, each drawn on its own so that both
-/// are sharp: at 1x every edge lies on a whole pixel. The bitmap is drawn
-/// without a drawing closure: such a closure may run on any thread. The only other image is the ladybug of the
-/// automation switch (DEBUG builds), which is a plain symbol and keeps its title as a separate text.
+/// is not a template, so the menu bar draws its colours as they are. The digits are tabular, so every width from
+/// 0 % to 99 % and the unknown figure share one width and the item does not jump; only "100%" is wider. The
+/// percent sign is drawn at full size, in the font of the digits. The image has two bitmap representations, 1x
+/// and 2x, each drawn on its own so that both are sharp. The bitmap is drawn without a drawing closure: such a
+/// closure may run on any thread. The only other image is the ladybug of the automation switch (DEBUG builds),
+/// which is a plain symbol and keeps its title as a separate text.
 @MainActor
 enum MenuBarChipImage {
     /// Sizes in points. They are internal so that the smoke test can read them.
-    static let fontSize: CGFloat = 10.25
-    static let fontWeight: NSFont.Weight = .medium
-    /// The cap height of the digits, rounded up, plus 4 points (M21.12 checks the rule).
-    static let bodyHeight: CGFloat = 12
-    static let pinHeight: CGFloat = 1
-    /// The body height plus a pin above and a pin below.
-    static let imageHeight: CGFloat = 14
+    static let fontSize: CGFloat = 11
+    static let bodyHeight: CGFloat = 14
+    static let pinHeight: CGFloat = 2
+    static let imageHeight: CGFloat = 18
     static let pinWidth: CGFloat = 2
     static let pinCount = 4
-    /// The stroke of the outline chip is one pixel wide at every scale.
-    static let strokePixels = 1
-    /// Per side: the stroke plus the gap between the stroke and the text. A whole point, so it is whole pixels
-    /// at 1x and at 2x (1 pixel of gap at 1x, 3 pixels at 2x).
-    static let sidePadding: CGFloat = 2
-    static let cornerRadius: CGFloat = 2
+    /// One point: one pixel at 1x, two at 2x.
+    static let strokeWidth: CGFloat = 1
+    /// The gap between the stroke and the text.
+    static let textInset: CGFloat = 1.5
+    static let cornerRadius: CGFloat = 2.5
     /// How many images the cache keeps; when it is full it is emptied before the next one is stored.
     static let cacheLimit = 16
 
     private static let configuration = NSImage.SymbolConfiguration(
         pointSize: NSFont.systemFontSize, weight: .regular, scale: .medium)
-    private static let font = NSFont.systemFont(ofSize: fontSize, weight: fontWeight)
+    private static let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .bold)
     private static var cache: [String: NSImage] = [:]
-    /// The widest title among "0"..."99" and the unknown "—": all of them share one chip width.
-    private static let widestCommonTitle: CGFloat = (Array(0...99).map { String($0) } + ["—"])
-        .map { titleText($0, ink: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)).size().width }
-        .max() ?? 0
+    /// The width every title from "0%" to "99%" and "—%" shares: digits are tabular.
+    private static let widestTwoDigits: CGFloat =
+        titleText("00%", ink: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)).size().width
 
     static var cacheCount: Int { cache.count }
 
@@ -100,12 +90,6 @@ enum MenuBarChipImage {
         (value * scale).rounded() / scale
     }
 
-    /// The text the chip draws for a label's title: the title without one trailing "%". The sign is not drawn;
-    /// the title itself (with its sign) stays the text of the label, its cache key and its log line.
-    static func drawnText(_ title: String) -> String {
-        title.hasSuffix("%") ? String(title.dropLast()) : title
-    }
-
     /// The text of the chip: the whole string in one font and one ink.
     static func titleText(_ text: String, ink: NSColor) -> NSAttributedString {
         NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: ink])
@@ -113,10 +97,10 @@ enum MenuBarChipImage {
 
     private static func chip(for label: MenuBarLabel) -> NSImage? {
         let colors = palette(for: label.tint)
-        let title = titleText(drawnText(label.title), ink: colors.ink)
+        let title = titleText(label.title, ink: colors.ink)
         let titleWidth = title.size().width
-        let textWidth = ceil(max(titleWidth, widestCommonTitle))
-        let bodyWidth = textWidth + 2 * sidePadding
+        let textWidth = ceil(max(titleWidth, widestTwoDigits))
+        let bodyWidth = textWidth + 2 * (strokeWidth + textInset)
         let size = NSSize(width: bodyWidth, height: imageHeight)
         // Each scale is drawn on its own, so that the 1x bitmap is not a 2x bitmap scaled down.
         guard let standard = renderRep(scale: 1, title: title, titleWidth: titleWidth, bodyWidth: bodyWidth, colors: colors),
@@ -173,19 +157,18 @@ enum MenuBarChipImage {
                                       width: pinWidth, height: pinHeight + overlap)).fill()
         }
 
-        // The body: filled in yellow or red, or an outline in the ink of the template. The outline is one pixel
-        // wide and its path runs through the middle of the pixel row or column, so it is not smeared over two.
+        // The body: filled in yellow or red, or an outline in the ink of the template. The path runs through the
+        // middle of the stroke, so it lies on whole pixels at 1x and at 2x.
         let bodyRect = NSRect(x: 0, y: pinHeight, width: bodyWidth, height: bodyHeight)
         if let body = colors.body {
             body.setFill()
             NSBezierPath(roundedRect: bodyRect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
         } else {
-            let stroke = CGFloat(strokePixels) / factor
             colors.ink.setStroke()
             let outline = NSBezierPath(
-                roundedRect: bodyRect.insetBy(dx: stroke / 2, dy: stroke / 2),
-                xRadius: cornerRadius - stroke / 2, yRadius: cornerRadius - stroke / 2)
-            outline.lineWidth = stroke
+                roundedRect: bodyRect.insetBy(dx: strokeWidth / 2, dy: strokeWidth / 2),
+                xRadius: cornerRadius - strokeWidth / 2, yRadius: cornerRadius - strokeWidth / 2)
+            outline.lineWidth = strokeWidth
             outline.stroke()
         }
 
