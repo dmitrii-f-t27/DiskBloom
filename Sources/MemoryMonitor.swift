@@ -673,9 +673,8 @@ enum MenuBarTint: Equatable, Sendable {
 }
 
 /// What the menu bar item shows: the percentage, a chip symbol with its colour, and the spoken text. The chip
-/// follows the percent shown (`mm_chip_band`), not the pressure level. The chip draws the title without its
-/// percent sign (`MenuBarChipImage.drawnText`); the title keeps the sign. The image itself is built in
-/// `MenuBarChipImage`, so this struct stays `Sendable`.
+/// follows the percent shown (`mm_chip_band`), not the pressure level. The title is drawn inside the chip. The
+/// image itself is built in `MenuBarChipImage`, so this struct stays `Sendable`.
 struct MenuBarLabel: Equatable, Sendable {
     var title: String
     var symbol: String
