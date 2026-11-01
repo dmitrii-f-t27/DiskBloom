@@ -1072,7 +1072,7 @@ private func menuBarChipImageChecks() throws {
     let strokePixels = Int(MenuBarChipImage.strokeWidth * 2)
     let bodyTop = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight - MenuBarChipImage.bodyHeight) * 2)
     let bodyBottom = Int((MenuBarChipImage.imageHeight - MenuBarChipImage.pinHeight) * 2)
-    try require(imageHeightPixels == 24 && bodyTop == 2 && bodyBottom == 22,
+    try require(imageHeightPixels == 28 && bodyTop == 2 && bodyBottom == 26,
                 "M21: the test's pixel rows do not match the chip constants: \(imageHeightPixels) \(bodyTop) \(bodyBottom)")
     let middleRow = imageHeightPixels / 2
 
@@ -1104,7 +1104,7 @@ private func menuBarChipImageChecks() throws {
         for sample in samples {
             let grid = try chipGrid(sample.image)
             let digits = digitPixels(of: grid, onRed: band == "red")
-            try require(digits.count >= 30, "M21.3: only \(digits.count) digit pixels on the \(sample.name) chip")
+            try require(digits.count >= 43, "M21.3: only \(digits.count) digit pixels on the \(sample.name) chip")
             let outside = digits.filter {
                 $0.x < strokePixels || $0.x >= grid.wide - strokePixels
                     || $0.y < bodyTop + strokePixels || $0.y >= bodyBottom - strokePixels
@@ -1136,8 +1136,8 @@ private func menuBarChipImageChecks() throws {
                 if alpha >= 0.5 { inside += 1 } else if alpha < 0.05 { empty += 1 }
             }
         }
-        try require(inside >= 30, "M21.4: only \(inside) ink pixels inside the \(sample.name) outline chip")
-        try require(empty >= 30, "M21.4: only \(empty) empty pixels inside the \(sample.name) outline chip")
+        try require(inside >= 43, "M21.4: only \(inside) ink pixels inside the \(sample.name) outline chip")
+        try require(empty >= 43, "M21.4: only \(empty) empty pixels inside the \(sample.name) outline chip")
     }
     let grid79 = try chipGrid(chip(79)), grid80 = try chipGrid(chip(80)), gridUnknown = try chipGrid(chip(95, known: false))
     try require(grid79 != grid80, "M21.4: the 79 % and 80 % chips look the same")
@@ -1150,6 +1150,8 @@ private func menuBarChipImageChecks() throws {
         for row in [1, grid.high - 2] {
             let runs = grid.runs(row: row)
             try require(runs.count == 4, "M21.5: the \(sample.name) chip has \(runs.count) pins in row \(row): \(runs)")
+            try require(runs[0].lowerBound == grid.wide - runs[3].upperBound,
+                        "M21.5: the \(sample.name) pins are off centre in row \(row): \(runs)")
         }
     }
 
@@ -1160,7 +1162,7 @@ private func menuBarChipImageChecks() throws {
         ("91", chip(91)), ("99", chip(99)), ("unknown", chip(95, known: false)), ("100", chip(100)),
     ]
     for (name, image) in sized {
-        try require(image.size.height == MenuBarChipImage.imageHeight && MenuBarChipImage.imageHeight == 12,
+        try require(image.size.height == MenuBarChipImage.imageHeight && MenuBarChipImage.imageHeight == 14,
                     "M21.6: the \(name) chip is \(image.size.height) pt high")
     }
     let narrow = width(chip(50))
@@ -1169,8 +1171,8 @@ private func menuBarChipImageChecks() throws {
     }
     let width99 = width(chip(99)), width100 = width(chip(100))
     try require(width100 > width99, "M21.6: the 100 % chip (\(width100)) is not wider than the 99 % chip (\(width99))")
-    try require(width99 <= 19, "M21.6: the 99 % chip is \(width99) pt wide")
-    try require(width100 <= 24, "M21.6: the 100 % chip is \(width100) pt wide")
+    try require((20...22).contains(width99), "M21.6: the 99 % chip is \(width99) pt wide")
+    try require(width100 <= 28, "M21.6: the 100 % chip is \(width100) pt wide")
 
     // M21.7: the digits fit inside the body, with room on every side, and sit in the middle.
     for sample in filled {
@@ -1193,7 +1195,7 @@ private func menuBarChipImageChecks() throws {
     try require(outlineHundred.isTemplate, "M21.7: the outline 100 % probe is not a template")
     let outlineGrid = try chipGrid(outlineHundred)
     let insetPixels = Int(MenuBarChipImage.textInset * 2)
-    for y in (middleRow - 6)...(middleRow + 5) {
+    for y in (middleRow - 7)...(middleRow + 6) {
         var gapColumns: [Int] = []
         for offset in 0..<insetPixels {
             gapColumns.append(strokePixels + offset)
@@ -1244,22 +1246,22 @@ private func menuBarChipImageChecks() throws {
     try require(!menuSource.contains(forbidden), "M21.10: MemoryMenuView.swift uses a \(forbidden)")
 
     // M21.11: the percent sign is half the size of the digits, still a sign, and centred on the digits.
-    try require(MenuBarChipImage.fontSize == 7.5, "M21.11: the digit size is \(MenuBarChipImage.fontSize) pt")
-    try require(MenuBarChipImage.signFontSize == 3.75, "M21.11: the sign size is \(MenuBarChipImage.signFontSize) pt")
-    let heavyDigits = NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .heavy)
-    let heavySign = NSFont.monospacedDigitSystemFont(ofSize: 3.75, weight: .heavy)
+    try require(MenuBarChipImage.fontSize == 9, "M21.11: the digit size is \(MenuBarChipImage.fontSize) pt")
+    try require(MenuBarChipImage.signFontSize == 4.5, "M21.11: the sign size is \(MenuBarChipImage.signFontSize) pt")
+    let heavyDigits = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .heavy)
+    let heavySign = NSFont.monospacedDigitSystemFont(ofSize: 4.5, weight: .heavy)
     for text in ["85%", "—%"] {
         let styled = MenuBarChipImage.titleText(text, ink: .black)
         try require(styled.string == text, "M21.11: titleText changed the text \(text) to \(styled.string)")
         let last = styled.length - 1
         for index in 0..<last {
             let font = styled.attribute(.font, at: index, effectiveRange: nil) as? NSFont
-            try require(font?.pointSize == 7.5 && font == heavyDigits,
-                        "M21.11: character \(index) of \(text) is not the 7.5 pt heavy font: \(String(describing: font))")
+            try require(font?.pointSize == 9 && font == heavyDigits,
+                        "M21.11: character \(index) of \(text) is not the 9 pt heavy font: \(String(describing: font))")
         }
         let signFont = styled.attribute(.font, at: last, effectiveRange: nil) as? NSFont
-        try require(signFont?.pointSize == 3.75 && signFont == heavySign,
-                    "M21.11: the sign of \(text) is not the 3.75 pt heavy font: \(String(describing: signFont))")
+        try require(signFont?.pointSize == 4.5 && signFont == heavySign,
+                    "M21.11: the sign of \(text) is not the 4.5 pt heavy font: \(String(describing: signFont))")
     }
     try require(label(85).title == "85%", "M21.11: the 85 % title is \(label(85).title)")
     try require(label(95, known: false).title == "—%", "M21.11: the unknown title is \(label(95, known: false).title)")
@@ -1276,7 +1278,7 @@ private func menuBarChipImageChecks() throws {
         if sample.name == "unknown" { continue }
         try require(Double(measure.signRows) <= 0.65 * Double(measure.digitRows),
                     "M21.11: the \(sample.name) sign is \(measure.signRows) rows high, the digits \(measure.digitRows)")
-        try require(measure.signRows >= 3 && measure.signColumns >= 4,
+        try require(measure.signRows >= 4 && measure.signColumns >= 5,
                     "M21.11: the \(sample.name) sign is only \(measure.signColumns) x \(measure.signRows) px")
         try require(measure.signInkShare <= 0.85,
                     "M21.11: the \(sample.name) sign is a block: \(measure.signInkShare) of its box is ink")
