@@ -1,3 +1,36 @@
+# DiskBloom 1.7.3
+
+The menu bar chip is larger again and its percent sign is full size. Everything else works as in 1.7.2. App version: 1.7.3, build 16.
+
+## Download
+
+- **DiskBloom-1.7.3-macOS-arm64.dmg** — open the image and drag DiskBloom to Applications.
+- **DiskBloom-1.7.3-macOS-arm64.zip** — the same app as a ZIP archive.
+- **SHA256SUMS** — SHA-256 of both files to verify your download.
+
+Requirements: a Mac with Apple silicon (M1 or later) and macOS 14 Sonoma or later. The prebuilt app does not need Xcode. Intel Macs are not supported by this download.
+
+## What's new
+
+- **A larger chip**: the chip is 32 by 18 points, or 39 points wide with `100%`. In 1.7.2 it was 18 by 12 points.
+- **Easier to read**: the digits are 11 point bold, and the percent sign is the same height as the digits. In 1.7.2 the sign was half size.
+- **Non-Retina displays**: the chip now has its own image for these displays, drawn separately from the Retina image.
+- The colour rule has not changed: up to 80% an outline, from 81% to 90% yellow, above 90% red.
+
+## Known limits
+
+- The outline chip at this size was seen on a real menu bar on a Retina display. The yellow and red chips and the non-Retina image were checked on rendered images only.
+- In the rendered non-Retina image, the gap before the percent sign is wider and the digits are softer than on a Retina display.
+- The known limits of 1.7 still apply. See the 1.7.0 notes.
+
+## Signature and first launch
+
+**This release is ad-hoc signed, without a Developer ID and without Apple notarization.** macOS may block the first launch. If you trust this release, try to open the app once, then check the permission for DiskBloom in System Settings → Privacy & Security. Do not turn off protection for the whole system. [Apple's instructions](https://support.apple.com/102445).
+
+## Verification before release
+
+The strict Swift 6 build, the signature integrity check, all eight smoke suites, the eleven differential tests and the 81 spec tests passed on Apple silicon. The Mac App Store edition is prepared but not yet published. Its project was built as a Release binary without code signing and was not run. Its Intel (x86_64) slice was not tested, and the x86_64 smoke and spec tests were not run for this release. The ZIP and DMG were checked again after packaging.
+
 # DiskBloom 1.7.2
 
 The memory figure now sits inside a smaller menu bar chip, and the chip's colour follows the percent. Everything else works as in 1.7.1. App version: 1.7.2, build 13.

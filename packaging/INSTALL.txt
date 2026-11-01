@@ -1,4 +1,4 @@
-DiskBloom 1.7.2 — macOS 14 or later, Apple silicon (M1 or newer)
+DiskBloom 1.7.3 — macOS 14 or later, Apple silicon (M1 or newer)
 
 INSTALLATION
 Drag DiskBloom.app to Applications, then open it from Applications.
